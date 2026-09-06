@@ -4,3 +4,7 @@ __pycache__/
 .ruff_cache/
 submission.zip
 *.pgn
+data/*.pgn
+data/pgn/
+*.egg-info/
+.pytest_cache/
