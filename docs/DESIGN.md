@@ -12,7 +12,7 @@ The engine is called **Mikhail LeTal** (a pun on Mikhail Tal). Its Python packag
 ## Layout
 
 ```
-agent.py                 SHIPS   entrypoint: safety wrapper + driver (imports ferz only)
+agent.py                 SHIPS   entrypoint: safety wrapper + driver (imports mikhail_letal only)
 mikhail_letal/__init__.py         SHIPS   package marker, version string
 mikhail_letal/evaluation.py       SHIPS   tapered material + PST evaluation, mop-up term
 mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searcher
