@@ -1,23 +1,24 @@
-# Design — Stage 0 engine (`ferz`)
+# Design — Stage 0 engine (Mikhail LeTal, package `mikhail_letal`)
 
 This is the module contract for the Stage 0 build. Every module below is implemented against these
 signatures so the pieces fit together without renegotiation. The brief (`claude code brief.md`) and
 the repo's `CLAUDE.md` govern; this file records how they are applied.
 
-`ferz` is the engine package name. A ferz is the medieval precursor of the chess queen; the name
-shadows nothing (`python -c "import ferz"` fails on the bare interpreter, and it is not in
+The engine is called **Mikhail LeTal** (a pun on Mikhail Tal). Its Python package is
+`mikhail_letal`, because package names must be lowercase identifiers. The name shadows nothing
+(`python -c "import mikhail_letal"` fails on the bare interpreter, and it is not in
 `sys.stdlib_module_names`).
 
 ## Layout
 
 ```
 agent.py                 SHIPS   entrypoint: safety wrapper + driver (imports ferz only)
-ferz/__init__.py         SHIPS   package marker, version string
-ferz/evaluation.py       SHIPS   tapered material + PST evaluation, mop-up term
-ferz/search.py           SHIPS   iterative deepening alpha-beta searcher
-ferz/timing.py           SHIPS   time budget formula (all constants in one dataclass)
-ferz/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
-ferz/fallback.py         SHIPS   fast always-legal fallback move
+mikhail_letal/__init__.py         SHIPS   package marker, version string
+mikhail_letal/evaluation.py       SHIPS   tapered material + PST evaluation, mop-up term
+mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searcher
+mikhail_letal/timing.py           SHIPS   time budget formula (all constants in one dataclass)
+mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
+mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
 weights/pst.json         SHIPS   generated tables with a provenance header
 weights/PROVENANCE.json  SHIPS   machine-readable provenance for every shipped number
 tools/gen_pst.py                 generates weights/pst.json from a parametric prior
@@ -29,7 +30,7 @@ docs/                            DESIGN, DECISIONS, RESULTS, PROVENANCE, CALIBRA
 data/                            openings.txt and other collected data
 ```
 
-Rules: `agent.py` and `ferz/` import only the standard library and `chess`. Nothing under `ferz/`
+Rules: `agent.py` and `mikhail_letal/` import only the standard library and `chess`. Nothing under `mikhail_letal/`
 imports `tools/`, `tests/`, `harness/` or `numpy`/`numba` (Stage 1 adds numba). No file in the zip
 is named after a stdlib or stack module. No randomness anywhere in the shipped code path.
 
@@ -47,7 +48,7 @@ is named after a stdlib or stack module. No randomness anywhere in the shipped c
   (`chess.square_mirror`).
 - Wall time is `time.perf_counter()` everywhere. Deadlines are absolute `perf_counter()` values.
 
-## `ferz/evaluation.py`
+## `mikhail_letal/evaluation.py`
 
 ```python
 MATE_SCORE: int
@@ -107,7 +108,7 @@ The script is deterministic, writes `weights/pst.json` and `weights/PROVENANCE.j
 the tables as 8x8 grids for a human to read. The generated numbers are ours by construction; they
 match no published engine's tables.
 
-## `ferz/search.py`
+## `mikhail_letal/search.py`
 
 ```python
 @dataclass
@@ -172,7 +173,7 @@ Behaviour:
 - The searcher never calls `evaluate` on a position with no legal moves; mates and stalemates are
   scored explicitly.
 
-## `ferz/timing.py`
+## `mikhail_letal/timing.py`
 
 ```python
 @dataclass(frozen=True)
@@ -209,7 +210,7 @@ soft = min(soft, hard)
 both clamped to >= 0
 ```
 
-## `ferz/gamestate.py`
+## `mikhail_letal/gamestate.py`
 
 ```python
 class GameState:
@@ -234,7 +235,7 @@ Reconstructing the opponent's move is done by pushing each legal move on a copy 
 board and comparing `_transposition_key()`; `board.fen()` equality is not used because the
 halfmove clock and move number are not part of repetition identity.
 
-## `ferz/fallback.py`
+## `mikhail_letal/fallback.py`
 
 ```python
 def fallback_move(board: chess.Board, legal: Sequence[chess.Move]) -> chess.Move
@@ -250,7 +251,7 @@ the referee ends the game first) it raises `ValueError`, and `agent.py` guards f
 
 ```
 os.environ.setdefault("OMP_NUM_THREADS", "1"); os.environ.setdefault("NUMBA_NUM_THREADS", "1")
-import chess; from ferz import ...
+import chess; from mikhail_letal import ...
 STATE = GameState(); SEARCHER = Searcher(); PARAMS = DEFAULT_PARAMS
 
 def get_move(fen, time_left_ms) -> str:
@@ -288,7 +289,7 @@ at import so module-level state is exercised before the first real move.
 
 ## Testing hooks
 
-- `tests/conftest.py` inserts the repo root into `sys.path` so `import agent` and `import ferz`
+- `tests/conftest.py` inserts the repo root into `sys.path` so `import agent` and `import mikhail_letal`
   work from pytest.
 - Property tests call `agent.get_move` directly on the FENs listed in the brief's Stage 0 DoD and
   assert legality and elapsed time within the hard budget.

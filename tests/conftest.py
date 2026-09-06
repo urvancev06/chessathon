@@ -1,4 +1,4 @@
-"""Make the repo root importable so tests can ``import agent`` and ``import ferz``."""
+"""Make the repo root importable so tests can ``import agent`` and ``import mikhail_letal``."""
 
 import sys
 from pathlib import Path
