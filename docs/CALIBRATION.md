@@ -13,7 +13,7 @@ platform's measurements. Updated after every upload from the validation log the 
 | `increment_fraction` | 0.8 | brief |
 | `hard_multiplier` / `hard_fraction` | 3.0 / 0.25 | brief |
 | `floor_ms` / `floor_fraction` | 1500 / 0.05 | brief |
-| `panic_ms` | 1500 | brief |
+| `panic_ms` | 1650 | overhead_ms + floor_ms: below it the formula has no time to plan with (brief suggested ~1500) |
 | `next_iteration_fraction` | 0.45 | brief; to be replaced by the measured iteration-cost ratio |
 
 ## Speed factor

@@ -187,7 +187,7 @@ class TimeParams:
     hard_fraction: float = 0.25
     floor_ms: int = 1500
     floor_fraction: float = 0.05
-    panic_ms: int = 1500            # below this, skip the engine and play the fallback
+    panic_ms: int = 1650            # below this, skip the engine and play the fallback (= overhead + floor)
     next_iteration_fraction: float = 0.45
 
 @dataclass(frozen=True)

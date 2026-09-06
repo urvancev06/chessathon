@@ -39,7 +39,9 @@ class TimeParams:
     hard_fraction: float = 0.25  # but never spend more than this share of the clock on one move
     floor_ms: int = 1500  # the reserve we never plan to dip into, in ms ...
     floor_fraction: float = 0.05  # ... or this share of the clock, whichever is larger
-    panic_ms: int = 1500  # below this the agent skips the engine and plays the fallback
+    # Below this the agent skips the engine and plays the fallback. It equals overhead_ms +
+    # floor_ms: under that the budget formula has no time left to plan with (hard would be 0).
+    panic_ms: int = 1650
     next_iteration_fraction: float = 0.45  # start another depth only before this share of soft
 
 

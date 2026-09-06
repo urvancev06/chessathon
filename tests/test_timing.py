@@ -105,5 +105,5 @@ def test_default_params_match_design() -> None:
     assert (p.increment_ms, p.overhead_ms) == (500, 150)
     assert (p.moves_to_go_max, p.moves_to_go_min) == (40, 12)
     assert (p.increment_fraction, p.hard_multiplier, p.hard_fraction) == (0.8, 3.0, 0.25)
-    assert (p.floor_ms, p.floor_fraction, p.panic_ms) == (1500, 0.05, 1500)
+    assert (p.floor_ms, p.floor_fraction, p.panic_ms) == (1500, 0.05, 1650)
     assert p.next_iteration_fraction == 0.45
