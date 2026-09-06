@@ -1,7 +1,7 @@
 {
   "_provenance": {
     "generator": "tools/gen_pst.py",
-    "git_commit": "56a554ac8df104c551d5455d171dce3bc7a42d09",
+    "git_commit": "4109710724256fe1a2d596ecfbefc9e789b1f14b",
     "date": "2026-09-06",
     "note": "textbook piece values 100/320/330/500/900, PST from parametric geometric prior, untuned",
     "tables_sha256": "64ac30d5cc9f84f6e697d1006bd0653b1c91feecfb2410657eb16cf42139e6c4",
