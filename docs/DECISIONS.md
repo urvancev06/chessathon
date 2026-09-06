@@ -97,3 +97,31 @@ User-Agent, stop on the first error, only paths `robots.txt` allows, every page 
 Stage 0's five modules were written concurrently by separate agents from `docs/DESIGN.md`, then
 integrated and reviewed. The contract is the reason the pieces fit; any later change to a
 signature is made in DESIGN.md first.
+
+## 2026-09-07 — A local web app (`tools/webapp/`) for playing, spectating and reading the docs
+
+The operator asked for a site to try the engine and read everything about it. A hosted static
+page cannot run a Python engine, so the app is a local server (standard library `http.server`,
+python-chess, and `harness.sandbox`/`harness.rules` used as a library) with a vanilla HTML/CSS/JS
+front end that works offline. It lives under `tools/`, so it never ships. Decisions inside it:
+
+- **The engine is played through the platform's own runner.** Each game starts the agent with
+  `harness.sandbox.local`, times moves on wall time, adds the increment after the move, suspends
+  the process while the human thinks, and applies the referee's termination order. What the
+  operator sees in the app is what the ladder sees. Rejected: importing `agent` in-process
+  (module state would leak between games and timing would not match).
+- **Engine calls never run inside an HTTP request.** Init and moves run on background threads
+  and the browser polls the game state every 500 ms, so a 120 s think cannot block the server.
+- **Stopping a game mid-move kills the agent's process group directly**, then runs the sandbox's
+  `stop()`; calling `stop()` from another thread races with the in-flight `move()`.
+- **Log capture reads the sandbox's kept-stderr view** after each move (the same 4 KB head + 4 KB
+  tail the platform keeps), so the thinking panel shows exactly the lines the validation log
+  would show.
+- **The human clock is informational.** It is counted in the browser and written to the PGN but
+  never enforced; the app is a playground, not a referee for the human.
+- **Visual direction (operator's instruction):** near-monochrome, hairlines instead of cards, one
+  muted brick accent, flat grey board, solid Unicode glyphs for both colours styled with CSS, no
+  external fonts or libraries. A Claude Design brief with an identity/logo section was written for
+  the operator to refine the look further.
+- The web app was built in a separate git worktree on branch `webapp` while the engine was being
+  built, then merged; the only conflict was two appended `.gitignore` lines.
