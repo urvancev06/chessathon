@@ -7,8 +7,9 @@ time.
 
 The brief assumes a fork. Claude cannot create a fork under the operator's GitHub account (never
 touches the operator's accounts), so the repo is a clone of `advitrocks9/aichessathon-starter`
-with upstream as `origin`. The operator can fork on GitHub and run
-`git remote set-url origin <fork-url>` at any time; nothing else changes.
+with the starter as the `upstream` remote. At the operator's request (6 Sep, evening) a private
+GitHub repository `urvancev06/chessathon` was created with the `gh` CLI and is `origin`; commits
+carry the operator's identity and no co-author trailer.
 
 ## 2026-09-06 — Engine name "Mikhail LeTal", package `mikhail_letal`
 
