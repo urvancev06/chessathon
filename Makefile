@@ -19,7 +19,10 @@ gate:
 	uv run mypy
 	uv run python -m harness.arena --opponent baselines/random --games 2 --base-ms 5000
 
-.PHONY: report test fuzz
+.PHONY: report test fuzz web
+web:
+	uv run python -m tools.webapp.server
+
 report:
 	@if command -v tectonic >/dev/null 2>&1; then tectonic docs/report.tex; \
 	elif command -v latexmk >/dev/null 2>&1; then latexmk -pdf -outdir=docs docs/report.tex; \
