@@ -62,12 +62,24 @@ the zip, it never influences a move our engine plays, and nobody reads its sourc
 is found, the analysis page says why, the "Analyse" buttons are disabled, and the Stockfish seats
 are simply absent from the seat lists.
 
+Setup: download an official Stockfish build for this machine, put the executable at
+`~/.local/opt/stockfish/stockfish` (or anywhere else and `export YARDSTICK_ENGINE=/path/to/it`),
+and start the server; the line after the URL says either `analysis and Stockfish seats:
+Stockfish 19 at ...` or `analysis off: <reason>`. `GET /api/analysis/engine` answers the same
+question at run time, and a binary fixed while the server runs is picked up within ten seconds.
+
 - Seats: `stockfish:<elo>` for 1400 .. 2600 and `stockfish:full` run `tools/yardstick` with
   `YARDSTICK_ELO=<elo>` (omitted for full strength) and, when the form's "Stockfish move time"
   is filled, `YARDSTICK_MOVETIME_MS`; otherwise the yardstick plays on the clock it is handed.
+  The variables travel with the seat (that agent's environment), never through the server's own.
+  The same agent serves the arena: `tools/arena_openings.py --opponent tools/yardstick --env
+  YARDSTICK_ELO=1600`; see `tools/yardstick/README.md`.
 - Analysis: every position is searched once at the requested depth with `multipv` lines, on one
-  thread. The evaluation after a move is the evaluation of the next position, so a game costs one
-  search per position.
+  thread (`Threads=1`, `Hash=64`, a fresh engine per job). The evaluation after a move is the
+  evaluation of the next position, so a game costs one search per position; a game that ended on
+  the board is not searched at the end, the outcome decides (checkmate ±1000 cp, shown as `#`,
+  draw 0). Cancelling stops the running search within a fraction of a second. For scale: a
+  20-ply game takes about 2 s at depth 12 and 17 s at depth 18 with three lines on one core.
 
 The analysis uses lichess's published formulas because they are the de-facto standard for this
 kind of report: win% `= 50 + 50 * (2 / (1 + exp(-0.00368208 * cp)) - 1)`, mates counted as
@@ -89,6 +101,15 @@ tools/webapp/static/        index.html, app.js, style.css (vanilla, no build ste
 tools/webapp/static/pieces/ the cburnett piece set (SVG) and its licence
 tools/yardstick/            the harness-compatible agent that plays a UCI engine's moves
 tests/test_webapp.py        end-to-end tests over HTTP against the baselines
+tests/test_analysis.py      the formulas and the analysis API (engine-backed tests skip without Stockfish)
+tests/test_yardstick.py     the yardstick agent's environment handling and fallback
+```
+
+Checks, from the repository root with the main virtualenv:
+
+```
+.venv/bin/ruff format --check . && .venv/bin/ruff check . && .venv/bin/mypy
+.venv/bin/python -m pytest tests/test_webapp.py tests/test_analysis.py tests/test_yardstick.py -q
 ```
 
 Python side: standard library, `chess`, and the harness used as a library (never modified).
@@ -101,7 +122,8 @@ the seat rather than through the server's own environment.
 ## API
 
 ```
-GET  /api/info                    engine identity, git state, RESULTS.md tail, contract, engines
+GET  /api/info                    engine identity, git state, RESULTS.md tail, contract, engines,
+                                  analysis {available, name}, time controls, ply cap, engine slots
 GET  /api/engines | /api/docs | /api/weights | /api/openings | /api/games
 POST /api/games                   {kind: play, engine, human, base_ms, increment_ms, fen, ply_cap, opening,
                                    stockfish_movetime_ms?}
@@ -113,13 +135,21 @@ POST /api/games/<id>/takeback | /resign | /stop
 DELETE /api/games/<id>
 
 GET  /api/analysis/engine         {available, path, name, reason}
-GET  /api/analysis/sources        {games: [...this session...], files: [...data/webapp_games, data/pgn...]}
-POST /api/analysis                {source: {game_id} | {file} | {pgn}, depth (8..30), multipv (1..5)}
-                                  -> 202 {job_id, cached}
-GET  /api/analysis/jobs           {jobs: [{job_id, status, progress, label}]}
+GET  /api/analysis/sources        {games: [...this session's games with moves, finished first...],
+                                   files: [...*.pgn under data/webapp_games and data/pgn, newest first...]}
+POST /api/analysis                {source: {game_id} | {file} | {pgn}, depth (8..30, default 18),
+                                   multipv (1..5, default 3)} -> 202 {job_id, cached}
+                                  (the same game and settings answer at once with cached: true)
+GET  /api/analysis/jobs           {jobs: [{job_id, status, progress: {done, total}, label}]}
 GET  /api/analysis/<job_id>       {status: queued|running|done|failed|cancelled, progress, error, result}
-DELETE /api/analysis/<job_id>     cancel
+DELETE /api/analysis/<job_id>     cancel -> 204
 ```
+
+A result carries `engine {name, depth, multipv}`, the PGN headers, `start_fen`, one entry per ply
+(`san`, `uci`, the FENs before and after, `eval_before` / `eval_after`, the engine's `best` line,
+the `top` candidates, `rank`, `cp_loss`, `win_before` / `win_after`, `accuracy`, `judgement`,
+`clock_after`) and a `summary` per side (`moves`, `best_moves`, `best_move_pct`, `top3_moves`,
+`top3_pct`, `acpl`, `accuracy`, `inaccuracies`, `mistakes`, `blunders`).
 
 Seats are named by id: `.` (working tree), `versions/<name>`, `baselines/<name>`,
 `stockfish:<elo>`, `stockfish:full`; `/api/info` lists them with `{id, label, kind, path}` and
