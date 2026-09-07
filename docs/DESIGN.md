@@ -21,13 +21,14 @@ mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition 
 mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
 weights/pst.json         SHIPS   generated tables with a provenance header
 weights/PROVENANCE.json  SHIPS   machine-readable provenance for every shipped number
-tools/gen_pst.py                 generates weights/pst.json from a parametric prior
+tools/gen_pst.py                 the parametric prior: tables, piece values, structural weights (--out weights/pst.json ships it)
+tools/tune_texel.py              Texel-style ridge fit of every weight toward that prior (v0.3 experiment, rejected; not shipped)
 tools/collect_openings.py        collects curated opening FENs from public game pages
 tools/arena_openings.py          arena over data/openings.txt, parallel workers, same statistics
 tests/                           pytest suite (unit, property, fuzz helpers)
 versions/                        frozen copies of uploaded builds
 docs/                            DESIGN, DECISIONS, RESULTS, PROVENANCE, CALIBRATION, report.tex
-data/                            openings.txt and other collected data
+data/                            openings.txt, tuning positions and labels (data/tuning/), other collected data
 ```
 
 Rules: `agent.py` and `mikhail_letal/` import only the standard library and `chess`. Nothing under `mikhail_letal/`
@@ -73,6 +74,13 @@ Behaviour:
   (`N B R Q`), and a `_provenance` object (generator script, git commit, parameters, date). The
   file is located as `Path(__file__).resolve().parent.parent / "weights" / "pst.json"` so it works
   from the repo, from `versions/vX.Y/`, and from the extracted zip.
+- Where the numbers come from: `tools/gen_pst.py` is the prior (geometric PST formulas, textbook
+  piece values, `STRUCTURE_PRIOR`); `tools/tune_texel.py` can refit every weight by closed-form
+  ridge regression toward that prior on Stockfish-labelled quiet self-play positions (its
+  `features(board) @ weights` reproduces `evaluate()`, which the tests check). The file's
+  `_provenance.generator` names whichever produced it and the tests reproduce it from that
+  generator. The 2026-09-07 fits lost to v0.2 in the arena (DECISIONS.md), so the shipped tables
+  are the prior.
 - At load, build combined tables `mg[piece_type][square] = value + pst` and likewise `eg`, so the
   hot loop does one lookup per piece.
 - `evaluate` iterates `board.pieces_mask(piece_type, colour)` bitboards with `chess.scan_forward`
@@ -123,11 +131,32 @@ listed in the script's `PARAMETERS` dict and copied into the JSON's `_provenance
   two ranks with the full board (encourages development of minors first).
 - King middlegame: `king_shelter` bonus on b1/c1/g1 (castled squares), `king_centre_penalty` for
   the d/e files and for advancement beyond rank 1; king endgame: `king_centre_eg * centrality`.
-- Piece values start at the textbook 100/320/330/500/900 (recorded as textbook, tuned later).
+- Piece values start at the textbook 100/320/330/500/900 (recorded as textbook; the 2026-09-07
+  Texel fit of them was rejected in the arena, DECISIONS.md), and `STRUCTURE_PRIOR` holds the
+  hand-chosen structural weights with one line of reason each.
 
-The script is deterministic, writes `weights/pst.json` and `weights/PROVENANCE.json`, and prints
+The script is deterministic, writes `data/tuning/prior_pst.json` by default (`--out weights/pst.json` writes the shipped
+file together with `weights/PROVENANCE.json`), and prints
 the tables as 8x8 grids for a human to read. The generated numbers are ours by construction; they
 match no published engine's tables.
+
+
+## `tools/tune_texel.py` (Texel-style fit toward the prior; experiment of 2026-09-07)
+
+Subcommands `positions`, `label`, `fit`, `all`, `check`. The evaluation is linear in its weights,
+so the fit is closed-form ridge regression: `features(board)` is one row of counts per weight
+(piece values, 64 squares × 6 pieces × 2 phases from the owner's view, the eight structural
+counts), each scaled by the phase share so that `features(board) @ weights` equals `evaluate()`
+from White's view up to the blend's truncation (asserted on every position). The penalty is
+λ·‖w − w_prior‖² toward `gen_pst.py`, the pawn's middlegame value is fixed at 100, λ comes from
+5-fold cross-validation on the label MSE, the result is rounded to integers and written to
+`weights/pst.json` (`_provenance`: generator, commit, data paths and sha256, labeller, λ, MSE, run
+id), `weights/PROVENANCE.json` and the `STRUCTURE_WEIGHTS` values in `evaluation.py` (the
+`# tuned-by:` line above the dict). Positions: seeded self-play of `search.Engine` at 2 000
+nodes/move from `data/openings.txt`, quiet positions only (quiescence value = static evaluation);
+labels: Stockfish at depth 10, White-POV centipawns clipped to ±1500 (local install, never
+shipped). `check` refits at the recorded λ and compares with the shipped file; the tests do the
+same when `_provenance.generator` is the tuner, and regenerate the prior when it is `gen_pst.py`.
 
 ## `mikhail_letal/search.py`
 

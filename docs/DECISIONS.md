@@ -303,3 +303,82 @@ depth 5). The arena rows are in RESULTS.md.
   hand-chosen constants above; check extensions limited by depth; a `SearchBoard` replacing
   python-chess in the hot loop (push/pop is a quarter of the node time); freezing the build
   under `versions/v0.2` once the platform upload is confirmed.
+
+## 2026-09-07 — v0.3 candidate: Texel-style ridge fit of the evaluation weights (negative result, weights unchanged)
+
+**Question.** Can the hand-set evaluation weights (piece values, piece-square tables, structural
+terms) be improved by fitting them to an existing engine's evaluations of quiet positions, with the
+rules' permission to tune on engine-labelled data and nothing of that engine shipped?
+
+**Method** (`tools/tune_texel.py`, deterministic, seed 2026; the three steps are subcommands).
+Our evaluation is linear in its weights once the position is known, so the fit is a closed-form
+ridge regression: features are, per (piece, square from the owner's view, phase), the White-minus-
+Black count scaled by the phase share, plus the eight structural counts; `features(board) @ weights`
+reproduces `evaluate()` to within the phase blend's truncation, and `build_dataset` asserts this on
+every position (the loop-based counts in the tuner and the bitboard code in `evaluation.py` check
+each other). The penalty λ·‖w − w_prior‖² pulls toward the `tools/gen_pst.py` prior (now also home of
+the structural prior `STRUCTURE_PRIOR`), not toward zero; the pawn's middlegame value is held at 100
+as the scale anchor; λ is chosen by 5-fold cross-validation on the label MSE over
+{1, 3, 10, …, 100 000}; the fit is rounded to integers and written to `weights/pst.json`,
+`weights/PROVENANCE.json` and the `STRUCTURE_WEIGHTS` values in `evaluation.py`, each with the data
+hashes and run id. `tune_texel.py check` (and `tests/test_evaluation.py`) refit with the recorded λ
+and compare.
+
+**Data.**
+- Positions: 219 openings × 4 self-play games of `mikhail_letal.search.Engine` at 2 000 nodes per
+  move, a move drawn among the near-best (within 30 cp at one ply) with probability 0.2 (seeded
+  randomness in the generator only; the shipped engine has none); quiet positions only (side to
+  move not in check, the engine's quiescence value equals the static evaluation, pawns on the
+  board), at most 30 per game: 26 028, plus 1 065 quiet positions from the 40 archived games under
+  `data/pgn/` → **25 994 unique FENs**, `data/tuning/positions.epd`, sha256
+  `facd402a03ea7665623cac2b9e09d8a360eddcd468a0087dd4bf2fa80289a9d2` (876 games, 12 workers, 10 min).
+- Labels: Stockfish 19 (`~/.local/opt/stockfish`, local only), depth 10, Threads 1, eight
+  processes, 48 s; White-point-of-view centipawns clipped to ±1500: `data/tuning/labels.csv`,
+  sha256 `947648c20c8950e7a01365af63e1c1caf352a59bddd8d29eaf95ba4a03f1554f`. Mean +52 cp, standard
+  deviation 531, 390 clipped, 39 % of positions beyond ±500 — the 2 000-node games are lopsided.
+
+**Fit.** 786 weights (10 piece values less the anchor, 768 table entries, 8 structural).
+Validation MSE (cp²), 5-fold: prior 72 177 (rmse 269) → λ = 10: **53 509** (rmse 231), the minimum;
+λ = 100: 55 518; λ = 1 000: 60 926; λ = 100 000: 71 025. Training MSE after the λ = 10 fit 50 418
+(rmse 224.5), rounding costs 1 cp². The labels are on our scale (least-squares scale of the prior's
+prediction 1.04), so this is not a units mismatch. What the fit says: piece values mg
+P 100 / N 491 / B 489 / R 675 / Q 1417, eg P 122 / N 227 / B 250 / R 418 / Q 699 — pieces worth
+about five pawns in the middlegame and about two in the endgame (a values-only fit with the tables
+frozen gives the same picture: mg N 545, Q 1601; eg N 229, Q 642); structural weights
+12/13/27/11/56/73/57/42 (prior 10/20/12/15/30/20/10/10); and large single-square entries where the
+data is thin or confounded with a won position (rook on f7 mg 20 → 275, queen on h6 mg −14 → 233,
+pawn on d7 eg 50 → 258, bishop on a1 mg 3 → −162). With ~20 occurrences of a rare square and label
+noise of ~230 cp, a square's standard error is ~50 cp and λ = 10 shrinks it by only half.
+
+**Arena** (`RESULTS.md`, 300 games each, 10 s + 0.1 s, 12 workers, `data/openings.txt`):
+- λ = 10 (`v0.3-vs-v0.2-10s`): **+95 =26 −179, 36.0 % ± 5.2 %, Elo −100 (−140 to −62)**.
+- λ ×4 = 40, the one fallback the plan allowed (`v0.3-lambda40-vs-v0.2-10s`; validation MSE 54 224,
+  mg N 476 / B 478 / R 641 / Q 1310, eg Q 753, structure 12/16/24/12/54/76/59/41, largest table
+  entries ~150–190): **+126 =28 −146, 46.7 % ± 5.4 %, Elo −23 (−61 to +14)**; the interval includes zero.
+
+**Decision.** **Not promoted.** Both fits fail the promotion rule (the 95 % interval must lie above zero), so
+`weights/pst.json` and `weights/PROVENANCE.json` are reverted byte-for-byte to `versions/v0.2`'s
+(pst.json sha256 `b1e2f654…`), `STRUCTURE_WEIGHTS` is back at the prior, `__version__` stays 0.2.0
+and the shipped evaluation is unchanged. Kept: the tuner; the position set and labels
+(`data/tuning/`, 3 MB, hashes above; not in the zip, which only ever carries `weights/`); both
+fit reports (`data/tuning/fit_report_lambda10.json`, `fit_report_lambda40.json`); the arena rows;
+and `tools/gen_pst.py` as the documented prior, which now also holds the structural prior
+`STRUCTURE_PRIOR` and writes the shipped file only with `--out weights/pst.json` (its default
+output is `data/tuning/prior_pst.json`, for inspection). `tests/test_evaluation.py` accepts either
+state of `pst.json` — the prior from `gen_pst.py` or a recorded `tune_texel.py` fit — and checks
+that the file is reproducible from the generator its `_provenance` names; the tuner's feature
+counts are tested against `evaluate()` on random positions.
+
+**Why a better fit of the labels plays worse** (the reading, not a measurement): the objective is
+the squared error in centipawns, which the lopsided positions dominate, so the fit spends its
+freedom on reproducing Stockfish's scale for decided material imbalances rather than on ranking
+the balanced positions a search actually chooses between; the phase-split material values make
+every exchange swing the evaluation of the remaining pieces; the pruning margins (futility 150/300,
+delta 200, aspiration 40, draw tie-break 300) were set for the prior's scale; and the noisy
+single-square entries are actively harmful (a rook is pulled to f7 whatever stands there).
+Alternatives rejected for this round and worth trying next: the sigmoid (win-probability)
+objective of the original Texel method, which caps the influence of decided positions; a quieter
+and more balanced position set (a higher node limit, discard labels beyond ±600); one material
+value per piece shared by both phases; fewer table parameters (mirror-symmetric files); and
+re-tuning the search margins together with the tables. Each would be a new experiment measured
+the same way.

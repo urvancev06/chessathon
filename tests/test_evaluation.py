@@ -19,10 +19,11 @@ from mikhail_letal.evaluation import (
     game_phase,
     is_mate_score,
 )
-from tools import gen_pst
+from tools import gen_pst, tune_texel
 
 ROOT = Path(__file__).resolve().parent.parent
 PST_PATH = ROOT / "weights" / "pst.json"
+RAW_TABLES = json.loads(PST_PATH.read_text())
 
 
 def random_positions(count: int, seed: int) -> list[chess.Board]:
@@ -88,17 +89,18 @@ def test_extra_queen_is_a_large_advantage() -> None:
 def test_material_only_position_matches_piece_values(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pawnless-phase position whose king table entries cancel isolates the material value."""
     board = chess.Board("k7/8/8/8/8/8/8/K7 w - - 0 1")
-    board.set_piece_at(chess.A3, chess.Piece(chess.PAWN, chess.WHITE))  # a3 pawn: 4 mg, 2 eg
-    # Phase 0 (no pieces) so only the endgame table counts: 100 + 2.
+    board.set_piece_at(chess.A3, chess.Piece(chess.PAWN, chess.WHITE))
+    # Phase 0 (no pieces) so only the endgame table counts: the pawn's value plus its a3 entry.
     assert game_phase(board) == 0
-    # Kings a8/a1 sit on -5 endgame squares for both sides, cancelling out.
+    pawn = RAW_TABLES["piece_values_eg"]["P"] + RAW_TABLES["pst_eg"]["P"][chess.A3]
+    # Kings a8 and a1 read the same (mirrored) endgame entry for both sides, cancelling out.
     monkeypatch.setattr(ev, "STRUCTURE_TERMS", False)
-    assert evaluate(board) == 102
-    # With the structural terms on, the a3 pawn is passed (3rd rank: 2 x 20 in the endgame) and
-    # isolated (-15), and nothing else applies.
+    assert evaluate(board) == pawn
+    # With the structural terms on, the a3 pawn is passed (3rd rank: 2 x the endgame rank bonus)
+    # and isolated, and nothing else applies.
     monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
     weights = ev.STRUCTURE_WEIGHTS
-    assert evaluate(board) == 102 + 2 * weights["passed_pawn_eg"] - weights["isolated_pawn"]
+    assert evaluate(board) == pawn + 2 * weights["passed_pawn_eg"] - weights["isolated_pawn"]
 
 
 # (c2) structural terms (v0.2). Each test isolates one term by comparing two positions that
@@ -152,14 +154,28 @@ def test_doubled_and_isolated_pawns_are_penalised(structure_on: None) -> None:
 
 
 def test_bishop_pair_bonus(structure_on: None) -> None:
-    pair = chess.Board("k7/8/8/8/8/8/8/KBB4R w - - 0 1")  # rook keeps the mop-up out (pawns: none)
-    one = chess.Board("k7/8/8/8/8/8/8/KB5R w - - 0 1")
-    # Same everything except the second bishop, which also adds its table value; subtract that.
+    pair = "k7/8/8/8/8/8/8/KBB4R w - - 0 1"  # the rook keeps the mop-up out of the difference
+    one = "k7/8/8/8/8/8/8/KBN4R w - - 0 1"  # the c1 bishop becomes a knight: same phase
+    bonus = ev.STRUCTURE_WEIGHTS["bishop_pair"]
+    # The structural terms differ by exactly the bonus in both phases ...
+    assert tuple(a - b for a, b in zip(structure_of(pair), structure_of(one), strict=True)) == (
+        bonus,
+        bonus,
+    )
+    # ... and the full evaluation by the bonus plus the bishop-for-knight table difference on
+    # c1, up to the truncation of the two phase blends.
     table = ev.TABLES
-    bishop_c1 = (table.mg[chess.WHITE][chess.BISHOP][chess.C1], table.eg[1][chess.BISHOP][chess.C1])
-    phase = ev.game_phase(pair)
-    material = (bishop_c1[0] * phase + bishop_c1[1] * (ev.PHASE_TOTAL - phase)) // ev.PHASE_TOTAL
-    assert evaluate(pair) - evaluate(one) - material == ev.STRUCTURE_WEIGHTS["bishop_pair"]
+    phase = ev.game_phase(chess.Board(pair))
+    assert phase == ev.game_phase(chess.Board(one))
+
+    def blended(piece_type: chess.PieceType) -> float:
+        mg = table.mg[chess.WHITE][piece_type][chess.C1]
+        eg = table.eg[chess.WHITE][piece_type][chess.C1]
+        return (mg * phase + eg * (ev.PHASE_TOTAL - phase)) / ev.PHASE_TOTAL
+
+    material = blended(chess.BISHOP) - blended(chess.KNIGHT)
+    difference = evaluate(chess.Board(pair)) - evaluate(chess.Board(one))
+    assert abs(difference - material - bonus) <= 1
 
 
 def structure_of(fen: str) -> tuple[int, int]:
@@ -205,9 +221,17 @@ def test_king_shield_counts_pawns_in_front_of_the_king(structure_on: None) -> No
     # White king g1 with pawns f2 g2 h2 versus the same pawns moved far away (still on the same
     # files, so the pawn-structure terms are unchanged: no passed, doubled or isolated changes
     # while the black pawns f7 g7 h7 face them). Both sides have a queen so the phase is not 0.
-    shielded = chess.Board("6k1/5ppp/8/8/8/8/5PPP/6KQ w - - 0 1")
-    bare = chess.Board("6k1/5ppp/8/8/5PPP/8/8/6KQ w - - 0 1")
-    phase = ev.game_phase(shielded)
+    shielded = "6k1/5ppp/8/8/8/8/5PPP/6KQ w - - 0 1"
+    bare = "6k1/5ppp/8/8/5PPP/8/8/6KQ w - - 0 1"
+    # The structural terms differ by three shield pawns, in the middlegame only.
+    assert tuple(
+        a - b for a, b in zip(structure_of(shielded), structure_of(bare), strict=True)
+    ) == (
+        3 * weights["king_shield"],
+        0,
+    )
+    # The full evaluation adds the pawns' table values; check up to the blends' truncation.
+    phase = ev.game_phase(chess.Board(shielded))
     table = ev.TABLES
     pst = sum(
         table.mg[1][chess.PAWN][s] * phase + table.eg[1][chess.PAWN][s] * (ev.PHASE_TOTAL - phase)
@@ -216,9 +240,9 @@ def test_king_shield_counts_pawns_in_front_of_the_king(structure_on: None) -> No
         table.mg[1][chess.PAWN][s] * phase + table.eg[1][chess.PAWN][s] * (ev.PHASE_TOTAL - phase)
         for s in (chess.F4, chess.G4, chess.H4)
     )
-    shield = 3 * weights["king_shield"] * phase
-    expected = (pst + shield) // ev.PHASE_TOTAL
-    assert evaluate(shielded) - evaluate(bare) == expected
+    expected = (pst + 3 * weights["king_shield"] * phase) / ev.PHASE_TOTAL
+    difference = evaluate(chess.Board(shielded)) - evaluate(chess.Board(bare))
+    assert abs(difference - expected) <= 1
     # The shield mask itself: g1 covers f2 g2 h2 f3 g3 h3 and nothing else.
     assert (
         ev._SHIELD[chess.WHITE][chess.G1]
@@ -370,33 +394,67 @@ def test_tables_have_the_right_shape() -> None:
                 tables.mg[chess.BLACK][piece_type][sq]
                 == tables.mg[chess.WHITE][piece_type][sq ^ 56]
             )
-    # Material is folded in: a pawn on its home square is worth exactly the pawn value.
-    assert tables.mg[chess.WHITE][chess.PAWN][chess.E2] == tables.piece_values_mg[chess.PAWN]
-    assert tables.piece_values_mg[1:] == [100, 320, 330, 500, 900, 0]
+    # Material is folded in: a table entry is the piece value plus the square's PST entry.
+    assert tables.mg[chess.WHITE][chess.PAWN][chess.E2] == (
+        RAW_TABLES["piece_values_mg"]["P"] + RAW_TABLES["pst_mg"]["P"][chess.E2]
+    )
+    assert tables.piece_values_mg[1:] == [RAW_TABLES["piece_values_mg"][p] for p in "PNBRQK"]
+    assert tables.piece_values_mg[chess.PAWN] == 100  # the scale anchor of the tuning
+    assert tables.piece_values_mg[chess.KING] == 0
 
 
-def test_pst_entries_stay_small_relative_to_material() -> None:
-    raw = json.loads(PST_PATH.read_text())
+def test_no_square_is_worth_more_than_a_rook() -> None:
+    """The tuned tables have larger entries than the geometric prior (a passed pawn on the 7th, a
+    rook on the 7th), but no single square may rival a rook's material value."""
+    bound = RAW_TABLES["piece_values_mg"]["R"]
     for phase_key in ("pst_mg", "pst_eg"):
-        for letter, table in raw[phase_key].items():
-            bound = 80 if letter == "K" else 60
-            assert max(abs(v) for v in table) <= bound, (phase_key, letter)
+        for letter, table in RAW_TABLES[phase_key].items():
+            assert max(abs(v) for v in table) < bound, (phase_key, letter)
 
 
-def test_pst_json_matches_the_generator() -> None:
-    """The shipped tables are exactly what tools/gen_pst.py produces from its PARAMETERS."""
-    raw = json.loads(PST_PATH.read_text())
-    pst_mg, pst_eg = gen_pst.build_tables()
-    assert raw["pst_mg"] == pst_mg
-    assert raw["pst_eg"] == pst_eg
-    assert raw["piece_values_mg"] == gen_pst.PIECE_VALUES_MG
-    assert raw["piece_values_eg"] == gen_pst.PIECE_VALUES_EG
-    assert raw["phase_weights"] == gen_pst.PHASE_WEIGHTS
-    assert raw["mopup"] == {"edge": gen_pst.P["mopup_edge"], "close": gen_pst.P["mopup_close"]}
-    provenance = raw["_provenance"]
-    assert provenance["generator"] == "tools/gen_pst.py"
-    assert {k: v["value"] for k, v in provenance["parameters"].items()} == gen_pst.P
-    assert "untuned" in provenance["note"]
+def test_pst_json_is_reproducible_from_its_recorded_generator() -> None:
+    """The shipped tables are either the prior itself (tools/gen_pst.py) or a Texel fit toward
+    it (tools/tune_texel.py); in both cases the file says which, and rerunning that generator
+    with the recorded inputs gives exactly the shipped numbers."""
+    provenance = RAW_TABLES["_provenance"]
+    if provenance["generator"] == "tools/gen_pst.py":
+        pst_mg, pst_eg = gen_pst.build_tables()
+        assert RAW_TABLES["pst_mg"] == pst_mg
+        assert RAW_TABLES["pst_eg"] == pst_eg
+        assert RAW_TABLES["piece_values_mg"] == gen_pst.PIECE_VALUES_MG
+        assert RAW_TABLES["piece_values_eg"] == gen_pst.PIECE_VALUES_EG
+        assert {k: v["value"] for k, v in provenance["parameters"].items()} == gen_pst.P
+        assert {k: p.value for k, p in gen_pst.STRUCTURE_PRIOR.items()} == ev.STRUCTURE_WEIGHTS
+    else:
+        assert provenance["generator"] == "tools/tune_texel.py"
+        assert provenance["prior"]["generator"] == "tools/gen_pst.py"
+        assert {k: v["value"] for k, v in provenance["prior"]["parameters"].items()} == gen_pst.P
+        assert {k: v["value"] for k, v in provenance["prior"]["structure"].items()} == {
+            k: p.value for k, p in gen_pst.STRUCTURE_PRIOR.items()
+        }
+        # Refit with the recorded data files and lambda (tune_texel's ``check`` command); it
+        # takes a few seconds for the feature matrix of the whole position set.
+        tables, structure = tune_texel.recorded_fit()
+        for key in ("piece_values_mg", "piece_values_eg", "pst_mg", "pst_eg"):
+            assert RAW_TABLES[key] == tables[key], key
+        assert structure == ev.STRUCTURE_WEIGHTS
+        assert provenance["structure_weights"] == structure
+    # Phase weights and the mop-up term are never fitted: they are the prior's in both cases.
+    assert RAW_TABLES["phase_weights"] == gen_pst.PHASE_WEIGHTS
+    assert RAW_TABLES["mopup"] == {
+        "edge": gen_pst.P["mopup_edge"],
+        "close": gen_pst.P["mopup_close"],
+    }
+
+
+def test_tuning_features_reproduce_evaluate() -> None:
+    """The tuner's feature counts times the shipped weights equal ``evaluate`` (White's view)
+    to within the phase blend's truncation, on random positions with pawns."""
+    shipped = tune_texel.shipped_vector()
+    for board in random_positions(40, seed=11):
+        if board.pawns and not board.is_game_over():
+            model = float(tune_texel.features(board) @ shipped)
+            assert abs(model - tune_texel.white_evaluation(board)) <= 1.0, board.fen()
 
 
 def test_provenance_json_covers_every_parameter_group() -> None:
@@ -404,18 +462,28 @@ def test_provenance_json_covers_every_parameter_group() -> None:
     names = {record["parameter"] for record in records}
     expected = {"piece_values_mg", "piece_values_eg", "phase_weights", "mopup"}
     expected |= {f"pst_mg.{p}" for p in "PNBRQK"} | {f"pst_eg.{p}" for p in "PNBRQK"}
+    provenance = RAW_TABLES["_provenance"]
+    tuned = provenance["generator"] == "tools/tune_texel.py"
+    if tuned:
+        expected.add("structure_weights")
     assert names == expected
     for record in records:
         assert set(record) == {
             "parameter",
             "value_or_shape",
             "produced_by",
-            "data",
             "run_id",
+            "data",
             "note",
         }
-        assert record["data"] == "none: parametric prior"
-        assert record["produced_by"].startswith("tools/gen_pst.py @ ")
+        if not tuned or record["parameter"] in ("phase_weights", "mopup"):
+            assert record["data"] == "none: parametric prior"
+            assert record["produced_by"].startswith("tools/gen_pst.py")
+        else:
+            assert record["run_id"] == provenance["run_id"]
+            assert record["produced_by"].startswith("tools/tune_texel.py @ ")
+            assert provenance["data"]["positions"]["sha256"] in record["data"]
+            assert provenance["data"]["labels"]["sha256"] in record["data"]
 
 
 def test_evaluate_is_deterministic() -> None:

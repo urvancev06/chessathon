@@ -1,0 +1,173 @@
+{
+  "run_id": "texel-2026-09-07-lambda40",
+  "git_commit": "d28a755be40cb6fc1ffbea38ea51b8459fd8e83d",
+  "date": "2026-09-07",
+  "positions": {
+    "count": 25994,
+    "used": 25994,
+    "sha256": "facd402a03ea7665623cac2b9e09d8a360eddcd468a0087dd4bf2fa80289a9d2"
+  },
+  "labels": {
+    "sha256": "947648c20c8950e7a01365af63e1c1caf352a59bddd8d29eaf95ba4a03f1554f",
+    "labeller": "Stockfish 19, depth 10, Threads 1, White-point-of-view centipawns clipped to +-1500"
+  },
+  "lambda": 40.0,
+  "lambda_scale": 4.0,
+  "cv_curve": {
+    "1": 53754.74132438701,
+    "3": 53558.943769153186,
+    "10": 53508.45723535701,
+    "30": 53968.624545336075,
+    "100": 55517.61147041169,
+    "300": 57906.592378344125,
+    "1000": 60926.06845945695,
+    "3000": 63697.35697224449,
+    "10000": 66806.44610441953,
+    "30000": 69327.90904828056,
+    "100000": 71025.33847699608
+  },
+  "mse": {
+    "prior_train": 72176.71039610905,
+    "shipped_train": 50418.722041357825,
+    "fitted_train": 51814.21682662229,
+    "rounded_train": 51815.232389231904,
+    "fitted_validation_cv": 54224.221309190216
+  },
+  "biggest_changes": [
+    {
+      "parameter": "piece_values_mg.Q",
+      "prior": 900,
+      "fitted": 1310
+    },
+    {
+      "parameter": "pst_mg.Q.h6",
+      "prior": -14,
+      "fitted": 147
+    },
+    {
+      "parameter": "piece_values_mg.N",
+      "prior": 320,
+      "fitted": 476
+    },
+    {
+      "parameter": "piece_values_mg.B",
+      "prior": 330,
+      "fitted": 478
+    },
+    {
+      "parameter": "piece_values_eg.Q",
+      "prior": 900,
+      "fitted": 753
+    },
+    {
+      "parameter": "piece_values_mg.R",
+      "prior": 500,
+      "fitted": 641
+    },
+    {
+      "parameter": "pst_eg.P.a7",
+      "prior": 50,
+      "fitted": 191
+    },
+    {
+      "parameter": "pst_mg.R.f7",
+      "prior": 20,
+      "fitted": 158
+    },
+    {
+      "parameter": "pst_eg.P.d7",
+      "prior": 50,
+      "fitted": 183
+    },
+    {
+      "parameter": "pst_eg.P.b7",
+      "prior": 50,
+      "fitted": 177
+    },
+    {
+      "parameter": "pst_mg.Q.h5",
+      "prior": -14,
+      "fitted": 108
+    },
+    {
+      "parameter": "pst_mg.N.e6",
+      "prior": 18,
+      "fitted": 132
+    },
+    {
+      "parameter": "pst_mg.B.f6",
+      "prior": 15,
+      "fitted": 128
+    },
+    {
+      "parameter": "pst_mg.R.g3",
+      "prior": 0,
+      "fitted": 113
+    },
+    {
+      "parameter": "pst_mg.B.a6",
+      "prior": -3,
+      "fitted": 109
+    },
+    {
+      "parameter": "pst_mg.B.a1",
+      "prior": 3,
+      "fitted": -108
+    },
+    {
+      "parameter": "pst_mg.Q.a2",
+      "prior": -2,
+      "fitted": -110
+    },
+    {
+      "parameter": "pst_mg.B.e6",
+      "prior": 9,
+      "fitted": 114
+    },
+    {
+      "parameter": "pst_eg.K.h1",
+      "prior": -5,
+      "fitted": -109
+    },
+    {
+      "parameter": "pst_mg.Q.f6",
+      "prior": -6,
+      "fitted": 97
+    },
+    {
+      "parameter": "pst_mg.K.e1",
+      "prior": -10,
+      "fitted": 91
+    },
+    {
+      "parameter": "pst_eg.P.b6",
+      "prior": 32,
+      "fitted": 131
+    },
+    {
+      "parameter": "pst_eg.P.h7",
+      "prior": 50,
+      "fitted": 146
+    },
+    {
+      "parameter": "pst_mg.Q.e6",
+      "prior": -6,
+      "fitted": 88
+    },
+    {
+      "parameter": "pst_eg.N.c4",
+      "prior": 18,
+      "fitted": 111
+    }
+  ],
+  "structure_weights": {
+    "passed_pawn_mg": 12,
+    "passed_pawn_eg": 16,
+    "doubled_pawn": 24,
+    "isolated_pawn": 12,
+    "bishop_pair": 54,
+    "rook_open_file": 76,
+    "rook_semi_open_file": 59,
+    "king_shield": 41
+  }
+}

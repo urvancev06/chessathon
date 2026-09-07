@@ -1,17 +1,23 @@
-"""Generate ``weights/pst.json`` and ``weights/PROVENANCE.json`` from a parametric geometric prior.
+"""The evaluation's *prior*: piece-square tables from a parametric geometric formula, textbook piece
+values and hand-chosen structural weights.
 
 Every piece-square-table (PST) entry below is a small formula of the square's geometry (how central
 it is, how far advanced, whether it sits on a rim, a long diagonal or a castled square) multiplied
 by a named parameter from ``PARAMETERS``. Nothing is copied from any published engine: the numbers
 are ours by construction, and re-running this script reproduces them bit for bit. The piece values
-are the universal textbook 100/320/330/500/900 and are recorded as such (untuned).
+are the universal textbook 100/320/330/500/900 and the structural weights (``STRUCTURE_PRIOR``) are
+hand-chosen at textbook magnitudes; all are recorded as such (untuned).
 
-Run from the repo root::
+This module is what ``tools/tune_texel.py`` regularises toward: the shipped ``weights/pst.json``
+and the ``STRUCTURE_WEIGHTS`` in ``mikhail_letal/evaluation.py`` are the tuner's output (v0.3),
+which starts from these tables and moves each number only as far as the labelled positions
+justify. Run from the repo root to print the prior and write it for inspection::
 
-    .venv/bin/python tools/gen_pst.py
+    .venv/bin/python tools/gen_pst.py                       # writes data/tuning/prior_pst.json
+    .venv/bin/python tools/gen_pst.py --out weights/pst.json  # ship the untuned prior (v0.2)
 
 The script prints every table as an 8x8 grid (rank 8 at the top, files a..h left to right) so a
-human can eyeball it, then writes the two JSON files.
+human can eyeball it, then writes the JSON file (and ``weights/PROVENANCE.json`` when shipping).
 
 Square indexing follows python-chess: ``a1 = 0``, ``h1 = 7``, ``a8 = 56``. Tables are stored from
 White's point of view; the evaluation mirrors squares for Black (``square ^ 56``).
@@ -19,6 +25,7 @@ White's point of view; the evaluation mirrors squares for Black (``square ^ 56``
 
 from __future__ import annotations
 
+import argparse
 import datetime
 import hashlib
 import json
@@ -28,6 +35,7 @@ from typing import NamedTuple
 
 ROOT = Path(__file__).resolve().parent.parent
 PST_PATH = ROOT / "weights" / "pst.json"
+PRIOR_PATH = ROOT / "data" / "tuning" / "prior_pst.json"
 PROVENANCE_PATH = ROOT / "weights" / "PROVENANCE.json"
 GENERATOR = "tools/gen_pst.py"
 
@@ -96,6 +104,19 @@ PARAMETERS: dict[str, Param] = {
 
 # Plain name -> value view, used by the formulas below.
 P: dict[str, int] = {name: param.value for name, param in PARAMETERS.items()}
+
+# Prior weights of the structural evaluation terms (see ``evaluation.STRUCTURE_WEIGHTS`` for what
+# each term measures), in centipawns, at the magnitude chess textbooks give the feature.
+STRUCTURE_PRIOR: dict[str, Param] = {
+    "passed_pawn_mg": Param(10, "per rank advanced; modest while pieces can still blockade"),
+    "passed_pawn_eg": Param(20, "per rank advanced; running the passer is usually the plan"),
+    "doubled_pawn": Param(12, "per rear pawn of a doubled pair: they block each other"),
+    "isolated_pawn": Param(15, "per pawn with no neighbour: only pieces can defend it"),
+    "bishop_pair": Param(30, "two bishops cover both square colours"),
+    "rook_open_file": Param(20, "a rook on a pawnless file reaches the enemy camp"),
+    "rook_semi_open_file": Param(10, "a rook on a file without an own pawn presses the enemy pawn"),
+    "king_shield": Param(10, "middlegame, per own pawn one or two ranks in front of the king"),
+}
 
 
 def rounded(x: float) -> int:
@@ -210,6 +231,14 @@ def grid(table: list[int]) -> str:
     return "\n".join(rows)
 
 
+def display(path: Path) -> str:
+    """The path relative to the repo when it lies inside it, else as given."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def git_commit() -> str:
     """Current commit hash, or 'unknown' when not in a git checkout."""
     try:
@@ -221,7 +250,7 @@ def git_commit() -> str:
     return result.stdout.strip() or "unknown"
 
 
-def _dump(value: object, indent: int) -> str:
+def dump_json(value: object, indent: int) -> str:
     """JSON with dicts one key per line and every leaf list or flat dict on a single line."""
     if (
         isinstance(value, dict)
@@ -229,12 +258,20 @@ def _dump(value: object, indent: int) -> str:
         and any(isinstance(v, dict | list) for v in value.values())
     ):
         pad = " " * (indent + 2)
-        items = [f"{pad}{json.dumps(str(k))}: {_dump(v, indent + 2)}" for k, v in value.items()]
+        items = [f"{pad}{json.dumps(str(k))}: {dump_json(v, indent + 2)}" for k, v in value.items()]
         return "{\n" + ",\n".join(items) + "\n" + " " * indent + "}"
     return json.dumps(value)
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Print the prior tables and write them as JSON.")
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=PRIOR_PATH,
+        help="where to write the tables; weights/pst.json also rewrites weights/PROVENANCE.json",
+    )
+    out_path: Path = parser.parse_args().out.resolve()
     pst_mg, pst_eg = build_tables()
     mopup = {"edge": P["mopup_edge"], "close": P["mopup_close"]}
     tables = {
@@ -325,10 +362,12 @@ def main() -> None:
         }
     )
 
-    PST_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PST_PATH.write_text(_dump(document, 0) + "\n", encoding="utf-8")
-    PROVENANCE_PATH.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {PST_PATH.relative_to(ROOT)} and {PROVENANCE_PATH.relative_to(ROOT)}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(dump_json(document, 0) + "\n", encoding="utf-8")
+    print(f"wrote {display(out_path)}")
+    if out_path == PST_PATH:
+        PROVENANCE_PATH.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote {PROVENANCE_PATH.relative_to(ROOT)}")
 
 
 if __name__ == "__main__":

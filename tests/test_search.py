@@ -354,7 +354,9 @@ def test_path_repetition_draws_are_not_stored_as_position_values() -> None:
     engine.search(root, {}, far_future(), far_future(), max_depth=7)
     key = chess.Board("8/8/8/8/4k3/8/8/R3K3 b - - 0 1")._transposition_key()
     entry = engine._tt.get(key)
-    assert entry is None or entry[0] < 0, entry  # absent, or an ordering hint without a score
+    # Absent, an ordering hint without a score, or a genuine (clearly losing) score: anything but
+    # the path-only draw. Which of the three depends on the evaluation tables in use.
+    assert entry is None or entry[0] < 0 or entry[1] < -100, entry
     fresh = run_search("8/8/8/8/4k3/8/8/R3K3 b - - 0 1", max_depth=4)
     assert fresh.score < -300
     # A repetition seen inside the tree with the root in the history taints the same way: the

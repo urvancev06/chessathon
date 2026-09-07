@@ -44,8 +44,12 @@ PHASE_TOTAL = 24  # sum of the phase weights over the full board: 4*N + 4*B + 4*
 # Switch for the structural terms below: a plain constant (no environment variables are read).
 STRUCTURE_TERMS = True  # switch for bisection in development; the shipped value is True
 
-# Weights of the structural terms, in centipawns. Every value is hand-chosen at the magnitude
-# chess textbooks give the feature (a pawn is 100); none is tuned or copied.
+# Weights of the structural terms, in centipawns. What each term measures is in its comment. The
+# values are the hand-chosen textbook-magnitude prior (a pawn is 100), also recorded in
+# tools/gen_pst.py STRUCTURE_PRIOR. tools/tune_texel.py can refit them toward that prior, and then
+# rewrites the numbers and the provenance line below; its fits of 2026-09-07 lost to v0.2 in the
+# arena (DECISIONS.md), so the prior ships.
+# tuned-by: tools/gen_pst.py prior, untuned (tune_texel.py fits of 2026-09-07 rejected in the arena)
 STRUCTURE_WEIGHTS: dict[str, int] = {
     # Per rank a passed pawn has advanced (2nd rank = 1 ... 7th rank = 6). Modest in the
     # middlegame, where pieces can still blockade it ...
