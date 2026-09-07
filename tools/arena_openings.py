@@ -30,7 +30,7 @@ import random
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -97,6 +97,10 @@ class Settings:
     label: str
     results: Path | None
     json_path: Path | None
+    # ``--env KEY=VALUE`` pairs, applied to this process before any agent starts. The sandbox
+    # copies the process environment into every agent, which is how a yardstick seat
+    # (tools/yardstick, driven by YARDSTICK_ELO and friends) is configured from the command line.
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,7 @@ class RunRecord:
     statistics: Statistics | None
     low_clock_ms: float | None
     low_clock_game: int | None  # 1-based game number, as printed in the per-game lines
+    env: dict[str, str] = field(default_factory=dict)  # the --env pairs the agents ran with
 
 
 # --- statistics: the same formulas as harness/arena.py ---
@@ -389,6 +394,7 @@ def run(settings: Settings) -> RunRecord:
         print(f"Playing {played} games so both colours get the same number", flush=True)
     if settings.pgn_dir is not None:
         settings.pgn_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.update(settings.env)  # before the first agent starts; the sandbox copies it
 
     started_at = now_iso()
     load_start = load_average()
@@ -396,7 +402,8 @@ def run(settings: Settings) -> RunRecord:
         f"{settings.agent} vs {settings.opponent}: {played} games at "
         f"{settings.base_ms}+{settings.increment_ms} ms, ply cap {settings.ply_cap}, "
         f"{settings.workers} worker(s), openings from {source} ({len(openings)}), "
-        f"seed offset {settings.seed_offset}, load {format_load(load_start)}",
+        f"seed offset {settings.seed_offset}, load {format_load(load_start)}"
+        + (f", env {format_env(settings.env)}" if settings.env else ""),
         flush=True,
     )
 
@@ -479,6 +486,7 @@ def summarise(
         statistics=statistics(wins, draws, losses) if scored else None,
         low_clock_ms=low_clock_ms,
         low_clock_game=low_clock_game,
+        env=dict(settings.env),
     )
 
 
@@ -510,6 +518,10 @@ def print_summary(settings: Settings, record: RunRecord) -> None:
 # --- outputs ---
 
 
+def format_env(env: dict[str, str]) -> str:
+    return " ".join(f"{key}={value}" for key, value in env.items())
+
+
 def markdown_cell(text: str) -> str:
     return text.replace("|", "\\|") or "-"
 
@@ -527,10 +539,15 @@ def results_row(record: RunRecord) -> str:
         if stats.elo is not None and stats.elo_low is not None and stats.elo_high is not None:
             elo = f"{stats.elo:+.0f} ({stats.elo_low:+.0f} to {stats.elo_high:+.0f})"
         draw_rate = f"{stats.draw_rate:.1%}"
+    # The opponent cell carries the environment it ran with: "tools/yardstick" alone says
+    # nothing about the level, and the row has to stand on its own in the results table.
+    opponent = record.opponent
+    if record.env:
+        opponent = f"{opponent} ({format_env(record.env)})"
     cells = (
         record.label,
         record.agent,
-        record.opponent,
+        opponent,
         f"{record.base_ms / 1000:g}+{record.increment_ms / 1000:g} s",
         str(record.games),
         wdl,
@@ -577,6 +594,13 @@ def non_negative_int(text: str) -> int:
     if value < 0:
         raise argparse.ArgumentTypeError(f"expected a non-negative integer, got {text}")
     return value
+
+
+def env_pair(text: str) -> tuple[str, str]:
+    key, separator, value = text.partition("=")
+    if not separator or not key.strip():
+        raise argparse.ArgumentTypeError(f"expected KEY=VALUE, got {text!r}")
+    return key.strip(), value
 
 
 def even_non_negative_int(text: str) -> int:
@@ -629,6 +653,15 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         default=0,
         help="added to every game index before choosing the opening and the baseline seed",
     )
+    parser.add_argument(
+        "--env",
+        type=env_pair,
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="set an environment variable for every agent (repeatable), e.g. YARDSTICK_ELO=1600 "
+        "for --opponent tools/yardstick; recorded in the JSON record and the results row",
+    )
     parser.add_argument("--label", default="", help="free text copied into the results row")
     parser.add_argument("--results", type=Path, help="append one Markdown table row to this file")
     parser.add_argument("--json", dest="json_path", type=Path, help="write the full run record")
@@ -650,6 +683,7 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         label=arguments.label,
         results=arguments.results,
         json_path=arguments.json_path,
+        env=dict(arguments.env),
     )
 
 
