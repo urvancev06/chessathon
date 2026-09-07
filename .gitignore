@@ -8,5 +8,6 @@ data/*.pgn
 data/pgn/
 *.egg-info/
 .pytest_cache/
+.claude/
 data/cache/
 data/webapp_games/
