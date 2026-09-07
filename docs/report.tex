@@ -652,6 +652,39 @@ null-move pruning, late-move reductions, aspiration windows, mate-distance pruni
 transposition table, each measured. Stage 2 then adds evaluation terms, Texel tuning, the tablebase
 experiment and time-management refinements, one arena run each.
 
+
+\section*{Addendum: build v0.2}
+\addcontentsline{toc}{section}{Addendum: build v0.2}
+After the Stage 0 build was frozen, the search and evaluation were extended within the same
+python-chess architecture (the compiled Stage 1 engine was deferred). v0.2 adds, each behind a
+plain constant so it can be bisected: null-move pruning (minimum depth 3, $R = 2 + d/6$, never in
+check, only with non-pawn material, with a static-evaluation guard), late-move reductions (quiet
+moves after the first three at depth $\geq 3$, reduced by one ply and re-searched on a fail-high),
+aspiration windows at the root from depth 4 ($\pm 40$ centipawns, widened fourfold on failure),
+futility pruning of quiet moves at depths 1--2 (margins 150/300), delta pruning in quiescence
+(margin 200), staged move generation, and evaluation terms for passed, doubled and isolated pawns,
+the bishop pair, rooks on open and semi-open files and the middlegame king pawn shield. Every new
+constant is a hand-chosen textbook-magnitude value recorded in \code{docs/PROVENANCE.md}. Nodes to
+depth 6 from the standard start fell from 238\,000 to 17\,000; in three seconds the engine now
+reaches depth 9 where v0.1 reached depth 6 \src{DECISIONS.md, 2026-09-07 v0.2 entries}.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{llrlrl}
+\toprule
+match & clock & games & $+W\ =D\ -L$ & score & Elo (95\%) \\
+\midrule
+v0.2 vs v0.1 & 10 s + 0.1 s (12 workers) & 300 & +225 =27 $-$48 & 79.5\% $\pm$ 4.2\% & +235 (+193 to +285) \\
+v0.2 vs v0.1 & 120 s + 0.5 s (4 workers) & 60 & +48 =6 $-$6 & 85.0\% $\pm$ 8.2\% & +301 (+208 to +454) \\
+v0.2 vs random & 3 s + 0.05 s (12 workers) & 100 & +100 =0 $-$0 & 100\% & --- \\
+\bottomrule
+\end{tabular}
+\caption{v0.2 against the frozen v0.1 and the random baseline \src{RESULTS.md, rows \code{v0.2-vs-v0.1-10s}, \code{v0.2-vs-v0.1-real}, \code{v0.2-fuzz-random-3s}}. Both promotion intervals lie above zero.}
+\end{table}
+
+Zero failed terminations in all 460 games; the zip (nine files, 105\,680 bytes unzipped) passes
+the packaging smoke games. The lowest clock reached at the real clock was 3.6~s, in a 242-ply
+fifty-move draw; the time constants are unchanged until the first validation log arrives.
+
 \appendix
 \section{Provenance of every constant}\label{app:provenance}
 Copied from two files: \code{docs/PROVENANCE.md}, which lists the search and timing constants that
