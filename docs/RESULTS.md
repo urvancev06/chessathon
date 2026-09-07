@@ -69,3 +69,7 @@ Probed with the reviewer's driver (`endgame_probe.py`, 5 000 ms per move, so the
 
 The 40-game run above (4 workers, load ≈ 3 on 16 cores) is the strength number; this solo pass is
 the time-management check the brief's §7.4 asks for. Both are on the dev box, not the platform core.
+| v0.1-vs-sf1400-10s | . | tools/yardstick (YARDSTICK_ELO=1400) | 10+0.1 s | 16 | +15 =1 -0 | 96.9% | ±6.1% | - | 6.2% | checkmate 15, threefold_repetition 1 | 4 | 0.22 0.24 0.95 / 2.67 1.44 1.31 | data/openings.txt |
+| v0.1-vs-sf1600-10s | . | tools/yardstick (YARDSTICK_ELO=1600) | 10+0.1 s | 16 | +5 =2 -9 | 37.5% | ±22.8% | -89 (-306 to +73) | 12.5% | checkmate 14, threefold_repetition 2 | 4 | 2.67 1.44 1.31 / 3.31 2.12 1.58 | data/openings.txt |
+| v0.1-vs-sf1800-10s | . | tools/yardstick (YARDSTICK_ELO=1800) | 10+0.1 s | 16 | +3 =4 -9 | 31.2% | ±19.8% | -137 (-355 to +7) | 25.0% | checkmate 12, threefold_repetition 4 | 4 | 3.31 2.12 1.58 / 4.21 2.76 1.87 | data/openings.txt |
+| v0.1-vs-sf2000-10s | . | tools/yardstick (YARDSTICK_ELO=2000) | 10+0.1 s | 16 | +2 =4 -10 | 25.0% | ±17.9% | -191 (-446 to -50) | 25.0% | checkmate 12, threefold_repetition 4 | 4 | 4.21 2.76 1.87 / 4.08 3.17 2.12 | data/openings.txt |
