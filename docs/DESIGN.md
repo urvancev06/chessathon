@@ -13,9 +13,9 @@ The engine is called **Mikhail LeTal** (a pun on Mikhail Tal). Its Python packag
 
 ```
 agent.py                 SHIPS   entrypoint: safety wrapper + driver (imports mikhail_letal only)
-mikhail_letal/__init__.py         SHIPS   package marker, version string
-mikhail_letal/evaluation.py       SHIPS   tapered material + PST evaluation, mop-up term
-mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searcher
+mikhail_letal/__init__.py         SHIPS   package marker, version string, `feature_flag` (env-overridable switches)
+mikhail_letal/evaluation.py       SHIPS   tapered material + PST evaluation, structural terms (v0.2), mop-up term
+mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searcher (v0.2: NMP, LMR, aspiration, futility, delta)
 mikhail_letal/timing.py           SHIPS   time budget formula (all constants in one dataclass)
 mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
 mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
@@ -60,6 +60,10 @@ def load_tables(path: Path | None = None) -> Tables   # reads weights/pst.json; 
 def game_phase(board: chess.Board) -> int             # 0 (bare endgame) .. PHASE_TOTAL (full board)
 def evaluate(board: chess.Board) -> int               # static evaluation, side-to-move perspective
 def is_mate_score(score: int) -> bool
+def pawn_structure(white_pawns: int, black_pawns: int) -> tuple[int, int]  # (mg, eg), White's view
+
+STRUCTURE_TERMS: bool                 # feature_flag("LETAL_EVAL_TERMS", True)
+STRUCTURE_WEIGHTS: dict[str, int]     # every structural weight, one line of rationale each
 ```
 
 Behaviour:
@@ -81,7 +85,24 @@ Behaviour:
   `mopup_edge * centre_manhattan_distance(weak_king) + mopup_close * (14 - manhattan(king, king))`
   where the two weights come from `pst.json` (`mopup`). Derived from the geometric idea (drive the
   king to the edge, bring ours close), not from any engine's constants.
-- No randomness, no caching keyed on the board (the TT does that).
+- Structural terms (v0.2, behind `STRUCTURE_TERMS`), all from bitboards, added to `mg`/`eg`
+  before the blend so the tapering and the truncation rule apply to them too:
+  - passed pawns: a pawn with no enemy pawn ahead on its own or an adjacent file (enemy front
+    spans computed with a file fill and two lateral shifts, then complemented) scores
+    `passed_pawn_mg`/`passed_pawn_eg` per rank of advancement (2nd rank = 1 ... 7th = 6);
+  - doubled pawns: `doubled_pawn` per pawn with an own pawn ahead on its file (a south fill
+    counts each extra pawn on a file exactly once);
+  - isolated pawns: `isolated_pawn` per pawn on a file whose neighbouring files hold no own pawn
+    (files squashed onto rank 1, neighbours by shift, spread back with `* 0x0101...01`);
+  - bishop pair: `bishop_pair` when a side has two or more bishops;
+  - rooks: `rook_open_file` on a file without pawns, else `rook_semi_open_file` on a file without
+    own pawns;
+  - king shield (middlegame only): `king_shield` per own pawn on the three files around the king,
+    one or two ranks ahead of it (precomputed 64-square masks per colour).
+  The pawn-only part is a pure function of the two pawn bitboards and is cached in
+  `_PAWN_CACHE` (cap `PAWN_CACHE_MAX_ENTRIES = 50 000`, emptied when full).
+- No randomness. `evaluate` itself is a pure function of the board; the searcher caches its
+  results by piece placement and side to move (`Engine._evaluate`, below).
 
 ## `tools/gen_pst.py` and the parametric prior
 
@@ -123,7 +144,7 @@ class SearchResult:
 
 class Engine:
     def __init__(self, tt_max_entries: int = 250_000) -> None: ...
-    def new_game(self) -> None: ...          # clear TT, killers, history heuristic
+    def new_game(self) -> None: ...          # clear TT, evaluation cache, killers, history heuristic
     def search(
         self,
         board: chess.Board,
@@ -133,9 +154,13 @@ class Engine:
         max_depth: int = 64,
         node_limit: int | None = None,
     ) -> SearchResult: ...
+
+# v0.2 feature switches, each feature_flag("LETAL_...", True); the arena's --env turns one off.
+NULL_MOVE_PRUNING, LATE_MOVE_REDUCTIONS, ASPIRATION_WINDOWS, FUTILITY_PRUNING, DELTA_PRUNING: bool
 ```
 
-Behaviour:
+Behaviour (v0.2; the v0.1 searcher is this without the staged generation, the caches and the five
+switched features, all of which were added under measurement, see DECISIONS.md):
 
 - Iterative deepening from depth 1. After each completed iteration, stop if
   `perf_counter() >= soft_deadline`, if the score is a mate score with the shortest mate already
@@ -151,23 +176,62 @@ Behaviour:
   best score is exactly `DRAW_SCORE`, at least two root moves tie at it and the root static
   evaluation is ≥ `DRAW_TIEBREAK_MARGIN` (300), the tied move whose child evaluates best (from
   our side, stalemates excluded) is chosen: a rule draw inside the horizon must not stall a
-  mop-up. Aspiration windows are Stage 1.
+  mop-up (only when the score is exact, i.e. inside the window).
+- Aspiration windows (`ASPIRATION_WINDOWS`): from `ASPIRATION_MIN_DEPTH = 4`, once an iteration
+  has completed and its score is not a mate score, the root is searched inside
+  `previous ± ASPIRATION_WINDOW (40)`. A score on or outside an edge is a bound: the failing edge
+  is moved to `bound ∓ window * ASPIRATION_WIDEN (4)` and the iteration repeated (a fail-high move
+  is searched first in the repeat); after `ASPIRATION_MAX_FAILS = 2` failures the full window is
+  used. `_partial` (the abort salvage) is only set by a root move whose score beat the window's
+  alpha, because a score at or below alpha is an upper bound and cannot rank moves.
 - Node: terminal checks in this order: (1) `board.ply() >= 600` → draw; (2) repetition: key in
   `history` or in the search path → `DRAW_SCORE`; (3) halfmove clock ≥ 100 → checkmate or draw;
   (4) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
   probe and store see the same depth; (5) TT probe (depth-sufficient, mate scores adjusted by
-  ply); (6) depth ≤ 0 → quiescence; (7) generate legal moves; none → mated or stalemate.
-- Move ordering: TT move, then captures and promotions by MVV-LVA (victim value × 10 − attacker
-  value; promotions count the promoted piece as the victim), then the two killers of this ply,
-  then quiet moves by the history heuristic `history[colour][from][to]` (bonus `depth * depth` on
-  beta cutoffs).
+  ply); (6) depth ≤ 0 → quiescence; (7) register the position on the path; (8) null-move
+  pruning; (9) the futility decision; then the staged move loop with (10) late-move reductions.
+  No legal move and nothing pruned → mated or stalemate.
+- Null-move pruning (`NULL_MOVE_PRUNING`): when not in check, `depth >= NULL_MOVE_MIN_DEPTH (3)`,
+  the previous ply was not a null move, neither window bound is a mate score, the side to move
+  has a piece other than king and pawns, and the static evaluation is ≥ beta, the side passes
+  (`chess.Move.null()`) and the reply is searched at `depth - 1 - R`, `R = 2 + depth // 6`, with
+  the window `(beta - 1, beta)`. A result ≥ beta that is not a mate score cuts the node: the
+  node returns `beta` and stores a LOWER bound at `depth` (with the table move as the hint).
+  Never in quiescence.
+- Futility pruning (`FUTILITY_PRUNING`): at `depth` 1 and 2, not in check and with no mate bound
+  in the window, if `static + FUTILITY_MARGINS[depth] (150 / 300) <= alpha`, the quiet moves of
+  the node (killer and history stages; never the table move, never captures or promotions) are
+  skipped. The node's fail-soft value is then `max(best searched, static + margin)`, an upper
+  bound ≤ alpha, and a node that pruned something is never mistaken for mate or stalemate.
+- Late-move reductions (`LATE_MOVE_REDUCTIONS`): at `depth >= LMR_MIN_DEPTH (3)`, not in check,
+  moves from the quiet (history) stage after the first `LMR_FULL_DEPTH_MOVES (3)` searched moves
+  are searched at `depth - 1 - LMR_REDUCTION (1)`; a reduced result above alpha is re-searched at
+  full depth before it is believed. Table move, captures, promotions and killers are never
+  reduced.
+- Staged move generation (`_staged_moves`, exact: the order equals the sorted full list, verified
+  move-for-move on 30 openings at a fixed node limit): (1) the table move, without generating
+  anything; (2) captures and promotions from `_capture_moves`, three bitboard-masked generator
+  calls (moves onto enemy pieces, pushes by pawns on the promotion rank, en passant), sorted by
+  MVV-LVA (victim rank × 10 − attacker rank, a promotion counting the promoted piece as victim);
+  (3) the two killers of this ply if `board.is_legal` says they are legal quiet moves here;
+  (4) quiet moves from two masked calls (non-pawns to non-enemy squares, castling included;
+  non-promoting pawns to empty non-en-passant squares) sorted by the history heuristic
+  `history[colour][from << 6 | to]` (bonus `depth * depth` on beta cutoffs). Each stage is
+  generated only if the search asks for more moves, and every move is tagged with its stage so
+  the cutoff code knows quiet moves without `is_capture`. The root still sorts its full list.
 - Quiescence: stand pat with `evaluate`, tested against beta *before* any move generation (a
   stand-pat cutoff ends most quiescence nodes; a position with no legal move is still scored as
   mate or stalemate, never evaluated); then captures via `board.generate_legal_captures()` plus
   queen promotions, MVV-LVA ordered. In check, every evasion is searched for the first
   `QS_EVASION_PLIES = 4` quiescence plies; deeper checks are handled like any other node so dense
-  positions cannot explode. Delta pruning skipped in Stage 0 (correctness first); `seldepth`
-  tracked; quiescence depth capped at `MAX_PLY`.
+  positions cannot explode. Delta pruning (`DELTA_PRUNING`): where the side could stand pat (not
+  in check, alpha not a mate score), a capture is skipped if `stand_pat + gain + DELTA_MARGIN
+  (200) < alpha`, with `gain` the middlegame value of the captured piece (a pawn for en passant)
+  plus queen − pawn for a promotion. `seldepth` tracked; quiescence depth capped at `MAX_PLY`.
+- Evaluation cache (`Engine._evaluate`): stand-pat, futility and null-move static evaluations go
+  through a dict keyed on `(pawns, knights, bishops, rooks, queens, kings, white occupancy,
+  turn)`, which is exactly what `evaluate` depends on. Cap `EVAL_CACHE_MAX_ENTRIES = 100 000`,
+  emptied when full and by `new_game`. About a third of the evaluations of a search hit it.
 - Transposition table: `dict[Key, TTEntry]` where `TTEntry = (depth, score, flag, move_code)`,
   every field an int (`move_code = from | to << 6 | promotion << 12`, `-1` for none; the
   `chess.Move` is rebuilt at the probe), and `flag ∈ {EXACT, LOWER, UPPER}`. Int-only entries keep
@@ -189,7 +253,8 @@ Behaviour:
   are permanent within the game and are stored normally. Implemented as one instance flag saved
   and restored around the child loop (measured cost 0.15 % of the node rate).
 - Killers: two per ply, updated on quiet beta cutoffs. Never store captures as killers.
-- No null-move pruning, no LMR, no futility in Stage 0 (Stage 1 adds them under measurement).
+- Every pruning or reduction decision is off when a mate bound is in the window or the side is in
+  check; the mate tests (mate in one, mate in two at the same depths) run with every feature on.
 - The searcher never calls `evaluate` on a position with no legal moves; mates and stalemates are
   scored explicitly.
 

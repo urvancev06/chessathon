@@ -423,3 +423,153 @@ def test_dense_position_keeps_the_first_iteration_small() -> None:
     result = run_search(board.fen(), max_depth=1)
     assert result.depth == 1 and result.move is not None
     assert result.nodes < 100_000
+
+
+# ----------------------------------------------------------------------------- v0.2 features
+# One group per feature. Node counts are compared with the feature on and off on the same
+# position; every search here is deterministic (no clock), so the comparisons are exact.
+
+OPENING_MIDDLEGAME = "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2NP1/PP2PPBP/R2Q1RK1 w - - 4 10"
+ROOK_ENDGAME = "8/5pk1/6p1/1p2P2p/1P1r1P1P/6P1/3R2K1/8 w - - 0 1"
+PAWN_ENDGAME = "8/8/4k3/2p2p2/2P2P2/4K3/8/8 w - - 0 1"  # zugzwang territory: no pieces at all
+
+
+class NullMoveWatch(chess.Board):
+    """A board that records the state every null move is played from (copy() keeps the class,
+    so the engine's private copy records as well)."""
+
+    null_moves_in_check = 0
+    null_moves_without_a_piece = 0
+    null_moves = 0
+
+    def push(self, move: chess.Move) -> None:
+        if not move:
+            NullMoveWatch.null_moves += 1
+            if self.is_check():
+                NullMoveWatch.null_moves_in_check += 1
+            if not self.occupied_co[self.turn] & ~(self.pawns | self.kings):
+                NullMoveWatch.null_moves_without_a_piece += 1
+        super().push(move)
+
+
+def nodes_with(flag: str, value: bool, fen: str, depth: int) -> int:
+    saved = getattr(search_module, flag)
+    setattr(search_module, flag, value)
+    try:
+        return run_search(fen, max_depth=depth).nodes
+    finally:
+        setattr(search_module, flag, saved)
+
+
+def test_null_move_is_never_played_in_check_or_without_a_piece() -> None:
+    NullMoveWatch.null_moves = 0
+    NullMoveWatch.null_moves_in_check = 0
+    NullMoveWatch.null_moves_without_a_piece = 0
+    for fen, depth in ((OPENING_MIDDLEGAME, 6), (ROOK_ENDGAME, 7), (MATE_IN_TWO, 5)):
+        board = NullMoveWatch(fen)
+        Engine().search(board, {board._transposition_key(): 1}, far_future(), far_future(), depth)
+    assert NullMoveWatch.null_moves > 0  # the feature is on and used
+    assert NullMoveWatch.null_moves_in_check == 0
+    assert NullMoveWatch.null_moves_without_a_piece == 0
+    # A pawn ending never sees a null move at all: zugzwang is the rule there, not the exception.
+    NullMoveWatch.null_moves = 0
+    board = NullMoveWatch(PAWN_ENDGAME)
+    engine = Engine()
+    engine.search(board, {board._transposition_key(): 1}, far_future(), far_future(), 8)
+    assert NullMoveWatch.null_moves == 0 and engine._null_moves == 0
+
+
+def test_null_move_pruning_saves_nodes_and_can_be_switched_off() -> None:
+    on = nodes_with("NULL_MOVE_PRUNING", True, OPENING_MIDDLEGAME, 6)
+    off = nodes_with("NULL_MOVE_PRUNING", False, OPENING_MIDDLEGAME, 6)
+    assert on < off
+    assert run_search(PAWN_ENDGAME, max_depth=8).nodes == nodes_with(
+        "NULL_MOVE_PRUNING", False, PAWN_ENDGAME, 8
+    )  # without pieces the feature never engages, so the tree is identical
+
+
+def test_late_move_reductions_save_nodes() -> None:
+    assert nodes_with("LATE_MOVE_REDUCTIONS", True, ROOK_ENDGAME, 7) < nodes_with(
+        "LATE_MOVE_REDUCTIONS", False, ROOK_ENDGAME, 7
+    )
+    # Below LMR_MIN_DEPTH nothing is reduced: a depth-2 search is the same tree either way.
+    assert search_module.LMR_MIN_DEPTH == 3
+    assert nodes_with("LATE_MOVE_REDUCTIONS", True, ROOK_ENDGAME, 2) == nodes_with(
+        "LATE_MOVE_REDUCTIONS", False, ROOK_ENDGAME, 2
+    )
+
+
+def test_aspiration_windows_start_at_depth_four_and_keep_the_score_exact() -> None:
+    # Depths 1-3 are always searched with the full window, so the trees are identical.
+    assert nodes_with("ASPIRATION_WINDOWS", True, OPENING_MIDDLEGAME, 3) == nodes_with(
+        "ASPIRATION_WINDOWS", False, OPENING_MIDDLEGAME, 3
+    )
+    # From depth 4 the window narrows the tree, and the final score is still exact: a fail-high
+    # or fail-low is re-searched, so the answer matches the full-window search.
+    saved = search_module.ASPIRATION_WINDOWS
+    try:
+        search_module.ASPIRATION_WINDOWS = True
+        aspirated = run_search(OPENING_MIDDLEGAME, max_depth=6)
+        search_module.ASPIRATION_WINDOWS = False
+        full = run_search(OPENING_MIDDLEGAME, max_depth=6)
+    finally:
+        search_module.ASPIRATION_WINDOWS = saved
+    assert aspirated.nodes < full.nodes
+    assert (aspirated.move, aspirated.score) == (full.move, full.score)
+
+
+def test_aspiration_re_search_after_a_failure() -> None:
+    # Force the first window to fail by making it absurdly narrow, and check the search still
+    # returns the same exact result (widened, then full-window) rather than a bound.
+    saved = search_module.ASPIRATION_WINDOW
+    try:
+        search_module.ASPIRATION_WINDOW = 1
+        narrow = run_search(ROOK_ENDGAME, max_depth=7)
+        search_module.ASPIRATION_WINDOW = 10_000
+        wide = run_search(ROOK_ENDGAME, max_depth=7)
+    finally:
+        search_module.ASPIRATION_WINDOW = saved
+    assert (narrow.move, narrow.score) == (wide.move, wide.score)
+
+
+def test_futility_pruning_saves_nodes_but_not_in_mating_positions() -> None:
+    assert nodes_with("FUTILITY_PRUNING", True, OPENING_MIDDLEGAME, 6) < nodes_with(
+        "FUTILITY_PRUNING", False, OPENING_MIDDLEGAME, 6
+    )
+    # The mates are still found with every feature on (the default), at the same depths.
+    mate_one = run_search(MATE_IN_ONE_WHITE, max_depth=2)
+    mate_two = run_search(MATE_IN_TWO, max_depth=4)
+    assert mate_one.move is not None and mate_one.move.uci() == "a1a8"
+    assert mate_one.score == MATE_SCORE - 1
+    assert mate_two.move is not None and mate_two.move.uci() == "h4h7"
+    assert mate_two.score == MATE_SCORE - 3
+
+
+def test_delta_pruning_saves_quiescence_nodes_and_keeps_the_hanging_queen() -> None:
+    assert nodes_with("DELTA_PRUNING", True, BUSY_MIDDLEGAME, 4) < nodes_with(
+        "DELTA_PRUNING", False, BUSY_MIDDLEGAME, 4
+    )
+    result = run_search(HANGING_QUEEN, max_depth=3)
+    assert result.move is not None and result.move.uci() == "f3h4"
+
+
+def test_feature_flags_default_on_and_read_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mikhail_letal import feature_flag
+
+    for flag in (
+        "NULL_MOVE_PRUNING",
+        "LATE_MOVE_REDUCTIONS",
+        "ASPIRATION_WINDOWS",
+        "FUTILITY_PRUNING",
+        "DELTA_PRUNING",
+    ):
+        assert getattr(search_module, flag) is True
+    monkeypatch.delenv("LETAL_TEST_FLAG", raising=False)
+    assert feature_flag("LETAL_TEST_FLAG", True) is True
+    assert feature_flag("LETAL_TEST_FLAG", False) is False
+    monkeypatch.setenv("LETAL_TEST_FLAG", "0")
+    assert feature_flag("LETAL_TEST_FLAG", True) is False
+    monkeypatch.setenv("LETAL_TEST_FLAG", "1")
+    assert feature_flag("LETAL_TEST_FLAG", False) is True

@@ -198,3 +198,108 @@ Deferred to Stage 1 (larger performance refactors, not attempted here): staged m
 (captures before quiet moves without building the full list), a custom `SearchBoard` replacing
 python-chess in the hot loop, and quiescence delta pruning (a behaviour change that needs an
 arena result).
+
+## 2026-09-07 — v0.2: exact speedups first (staged move generation, evaluation cache)
+
+Before any behaviour change, two speedups that leave the search tree identical, checked by
+searching 30 positions from `data/openings.txt` (every 7th line) at `node_limit=60000` before and
+after: move, score, depth, node count and seldepth were identical on all 30.
+
+- **Staged move generation at interior nodes.** `_staged_moves` yields the table move, then the
+  captures and promotions from a dedicated bitboard-masked generator (`_capture_moves`, shared with
+  quiescence, which also computes the MVV-LVA key), then the two killers if `board.is_legal` says
+  they are legal quiet moves here, then the quiet moves from two masked generator calls sorted by
+  history. Each stage is generated only if the search asks for more moves, so a node that cuts off
+  on the table move or a capture never builds or sorts its quiet moves. Every move carries a stage
+  tag, which replaces the `is_capture` call at every cutoff. The exactness argument (the
+  concatenated stages are a stable sort of python-chess's own generation order, and the killer,
+  table and en passant duplicates are removed by integer move code) is in the docstring.
+  Measured: 65.8k → 68.3k nps from the start position, 64.5k → 67.6k in the busy middlegame
+  (3 s searches). Smaller than hoped: a profile shows python-chess's `push`/`pop` (~25 %), its
+  generators (~30 %) and `evaluate` (~22 %) dominate, and the sorting that staging removes was a
+  few per cent.
+- **Evaluation cache in the searcher.** 27 % (start) to 34 % (middlegame) of the evaluations in a
+  3 s search are of a piece placement already evaluated, mostly transpositions inside capture
+  sequences. `Engine._evaluate` caches `evaluate` by `(six piece bitboards, white occupancy,
+  turn)`, which is exactly what the function depends on, so hits are exact. `evaluate` itself
+  stays a pure function (its tests and the flag toggles are unaffected). Cap 100 000 entries,
+  emptied when full and by `new_game`: a 20 s search held 70k entries at 82 MB RSS. Measured with
+  staging: 68k nps (start), 71k (middlegame), i.e. +3 % and +11 % over v0.1.
+- Rejected: reaching into python-chess internals to avoid the second `checkers_mask` computation
+  (`is_check` then the generator's own): about 5 % of node time, and it would tie the engine to
+  private API.
+
+## 2026-09-07 — v0.2: strength features, one switch each
+
+Every feature is a module-level boolean (`feature_flag`, overridable through the environment so the
+arena's `--env LETAL_...=0` can bisect a regression). Node counts below are to a fixed depth with
+every other feature on, from `tools`-free scratch runs (opening = a Catalan middlegame, depth 6;
+endgame = a rook ending, depth 7; middlegame = the capture-rich `BUSY_MIDDLEGAME` test position,
+depth 5). The arena rows are in RESULTS.md.
+
+- **Null-move pruning** (`NULL_MOVE_PRUNING`, R = 2 + depth // 6). Guards: not in check, not two in
+  a row, a piece other than king and pawns on the side to move, no mate bound in the window, and
+  the static evaluation at or above beta. A fail-high that is a mate score is not trusted. Nodes:
+  opening 42.2k → 16.8k, endgame 8.1k → 5.4k. The plan said `depth >= 2`; measured, the depth-2
+  null searches (a full quiescence search at nearly every node of the tree's widest layer)
+  *tripled* the middlegame's nodes (45k → 127k) while saving nothing elsewhere; from depth 3 the
+  middlegame costs 51k and the other savings are unchanged, so `NULL_MOVE_MIN_DEPTH = 3`. Two
+  hypotheses were tested and rejected on the way: the static-eval-≥-beta guard (no node change on
+  its own, kept as harmless) and path-repetition taint from null subtrees (zero tainted stores).
+  A test pins the invariants: no null move is ever played from check or by a side without a piece,
+  and a pawn ending searches an identical tree with the feature on or off.
+- **Late-move reductions** (`LATE_MOVE_REDUCTIONS`): quiet history-stage moves after the first
+  three searched moves, at depth ≥ 3, not in check, searched one ply shallower and re-searched at
+  full depth if they beat alpha. Nodes: opening 21.7k → 17.0k, endgame 10.7k → 5.6k, middlegame
+  156k → 130k.
+- **Aspiration windows** (`ASPIRATION_WINDOWS`): ±40 cp from depth 4, ×4 on a failure, full window
+  after two. Nodes: opening 73.5k → 17.0k, endgame 13.6k → 5.6k; in the middlegame the window
+  costs (92k → 130k, several re-searches). The abort salvage (`_partial`) is set only by root
+  moves that beat the window's alpha, because a fail-low score is an upper bound and cannot rank
+  moves; the draw tie-break and the EXACT flag apply only to scores strictly inside the window.
+  Tests: depths 1–3 search identical trees with the feature on or off; at depth 6 the aspirated
+  search returns the same move and score as the full-window one with fewer nodes; a window of ±1
+  (forcing failures) still returns the full-window result.
+- **Futility pruning** (`FUTILITY_PRUNING`, margins 150/300 at depth 1/2): quiet moves of the
+  killer and history stages are skipped when `static + margin <= alpha`; the table move,
+  captures and promotions are always searched; off in check and with a mate bound in the window.
+  A node that pruned returns `max(best searched, static + margin)` (a correct fail-soft upper
+  bound) and is never mistaken for mate or stalemate. Nodes: opening 20.1k → 17.0k, endgame
+  8.1k → 5.6k, middlegame 139k → 130k.
+- **Delta pruning** (`DELTA_PRUNING`, margin 200): in quiescence, where the side could stand pat,
+  a capture whose captured value (plus queen − pawn for a promotion) plus the margin cannot lift
+  the stand-pat score to alpha is skipped. Nodes: middlegame 205k → 130k (this is where the
+  quiescence tree is deep, seldepth 27), opening 19.8k → 17.0k, endgame no change.
+- **Structural evaluation terms** (`STRUCTURE_TERMS`, weights in `STRUCTURE_WEIGHTS`): passed
+  pawns by rank (10 mg / 20 eg per rank), doubled (12) and isolated (15) pawns, bishop pair (30),
+  rook on an open (20) or semi-open (10) file, king pawn shield (10 per pawn, middlegame only).
+  All bitboard arithmetic: enemy front spans by file fill and lateral shifts for passers, a south
+  fill for doubled pawns, files squashed onto rank 1 and spread back with `* 0x0101…01` for
+  isolated pawns, precomputed shield masks. The pawn-only part is cached by the two pawn
+  bitboards. Cost 3.7 → 4.8 µs per `evaluate` (uncached), symmetric under `board.mirror()` on 300
+  random positions. Each term has a test isolating it on a pair of positions.
+- **All together**: depth 6 in the opening position costs 17.0k nodes against 238k with every
+  feature off (14×); the endgame 5.4k against 34.9k (6×); the capture-rich middlegame 127k
+  against 196k (1.5×). From the start position a 3 s search now reaches depth 9 (v0.1: depth 6).
+  The node rate with the features on is lower (51k–56k nps in the 3 s benchmarks): the
+  evaluation terms cost about a microsecond per evaluation, and the tree has a larger share of
+  quiescence and null-move nodes; what matters is the depth per second, which rose by three plies.
+- **Sanity match before the validation run**: 48 games at 3 s + 0.05 s against `versions/v0.1`,
+  12 workers: +29 =8 −11, 68.8 % ± 11.9 %, Elo +137 (+48 to +248).
+- **Validation** (RESULTS.md rows `v0.2-vs-v0.1-10s`, `v0.2-vs-v0.1-real`):
+  - 10 s + 0.1 s, 300 games, 12 workers: **+225 =27 −48, 79.5 % ± 4.2 %, Elo +235 (95 % interval
+    +193 to +285)**. The interval is entirely above zero, so nothing was bisected and every
+    feature ships on.
+  - Real clock 120 s + 0.5 s, 60 games, 4 workers: **+48 =6 −6, 85.0 % ± 8.2 %, Elo +301 (95 %
+    interval +208 to +454)**, also entirely above zero, so the promotion rule is met at both
+    clocks. The first games overlapped the tail of the 10 s run's load (load average 8.75 at
+    the start, 1.80 at the end); both sides shared it equally. Lowest own clock after a move:
+    3 618 ms, in a 242-ply fifty-move draw (game 24), i.e. the v0.1 time management still
+    holds at the real clock.
+  - Fuzz: 100 games against `baselines/random` at 3 s + 0.05 s, 12 workers: 100 checkmates,
+    no other termination, so no crash, illegal move or timeout in either colour.
+  - `harness.package`: passes (smoke game as Black at the real clock, depth 6–9, ~50k nps).
+- Not done in v0.2 (candidates for v0.3, each to be measured the same way): tuning any of the
+  hand-chosen constants above; check extensions limited by depth; a `SearchBoard` replacing
+  python-chess in the hot loop (push/pop is a quarter of the node time); freezing the build
+  under `versions/v0.2` once the platform upload is confirmed.

@@ -85,14 +85,158 @@ def test_extra_queen_is_a_large_advantage() -> None:
     assert white_to_move == -black_to_move
 
 
-def test_material_only_position_matches_piece_values() -> None:
+def test_material_only_position_matches_piece_values(monkeypatch: pytest.MonkeyPatch) -> None:
     """A pawnless-phase position whose king table entries cancel isolates the material value."""
     board = chess.Board("k7/8/8/8/8/8/8/K7 w - - 0 1")
     board.set_piece_at(chess.A3, chess.Piece(chess.PAWN, chess.WHITE))  # a3 pawn: 4 mg, 2 eg
     # Phase 0 (no pieces) so only the endgame table counts: 100 + 2.
     assert game_phase(board) == 0
     # Kings a8/a1 sit on -5 endgame squares for both sides, cancelling out.
+    monkeypatch.setattr(ev, "STRUCTURE_TERMS", False)
     assert evaluate(board) == 102
+    # With the structural terms on, the a3 pawn is passed (3rd rank: 2 x 20 in the endgame) and
+    # isolated (-15), and nothing else applies.
+    monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
+    weights = ev.STRUCTURE_WEIGHTS
+    assert evaluate(board) == 102 + 2 * weights["passed_pawn_eg"] - weights["isolated_pawn"]
+
+
+# (c2) structural terms (v0.2). Each test isolates one term by comparing two positions that
+# differ only in that feature, with the flag forced on.
+
+
+@pytest.fixture
+def structure_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
+
+
+def test_passed_pawn_bonus_grows_with_rank(structure_on: None) -> None:
+    weights = ev.STRUCTURE_WEIGHTS
+    # White pawn e4 against a black pawn on the a-file: passed, four ranks up (index 3).
+    mg, eg = ev.pawn_structure(chess.BB_E4, chess.BB_A7)
+    # Both pawns are isolated and the a7 pawn is passed too (2nd rank from Black's side, x1).
+    assert eg == 3 * weights["passed_pawn_eg"] - 1 * weights["passed_pawn_eg"]
+    assert mg == 3 * weights["passed_pawn_mg"] - 1 * weights["passed_pawn_mg"]
+    # A black pawn on d5, f5 or e5 (ahead on an adjacent file or blocking) means not passed.
+    for blocker in (chess.BB_D5, chess.BB_F5, chess.BB_E5, chess.BB_D7):
+        mg_b, eg_b = ev.pawn_structure(chess.BB_E4, blocker)
+        assert eg_b < eg and mg_b < mg, chess.SquareSet(blocker)
+    # A black pawn behind the white pawn does not stop it: White's share (the total minus what
+    # the black pawn scores on its own) is still the passed bonus less the isolated penalty.
+    with_d3 = ev.pawn_structure(chess.BB_E4, chess.BB_D3)
+    alone_d3 = ev.pawn_structure(0, chess.BB_D3)
+    assert with_d3[1] - alone_d3[1] == 3 * weights["passed_pawn_eg"] - weights["isolated_pawn"]
+
+
+def test_doubled_and_isolated_pawns_are_penalised(structure_on: None) -> None:
+    weights = ev.STRUCTURE_WEIGHTS
+    # Neither side has passed pawns here: every pawn faces an enemy pawn on its file.
+    healthy = ev.pawn_structure(chess.BB_C2 | chess.BB_D2, chess.BB_C7 | chess.BB_D7)
+    assert healthy == (0, 0)
+    doubled = ev.pawn_structure(chess.BB_C2 | chess.BB_C3, chess.BB_C7 | chess.BB_D7)
+    # White's c-pawns: one doubled, both isolated (no b- or d-pawn). Black's are untouched.
+    assert doubled == (
+        -weights["doubled_pawn"] - 2 * weights["isolated_pawn"],
+        -weights["doubled_pawn"] - 2 * weights["isolated_pawn"],
+    )
+    # Tripled pawns cost two doubled penalties.
+    tripled = ev.pawn_structure(chess.BB_C2 | chess.BB_C3 | chess.BB_C4, chess.BB_C7 | chess.BB_D7)
+    assert tripled == (
+        -2 * weights["doubled_pawn"] - 3 * weights["isolated_pawn"],
+        -2 * weights["doubled_pawn"] - 3 * weights["isolated_pawn"],
+    )
+    # A pawn on an adjacent file rescues an isolated pawn even from a distance along the file.
+    assert ev._isolated_count(chess.BB_A2 | chess.BB_B7) == 0
+    assert ev._isolated_count(chess.BB_A2 | chess.BB_C2) == 2
+    assert ev._isolated_count(chess.BB_H2 | chess.BB_G4) == 0
+
+
+def test_bishop_pair_bonus(structure_on: None) -> None:
+    pair = chess.Board("k7/8/8/8/8/8/8/KBB4R w - - 0 1")  # rook keeps the mop-up out (pawns: none)
+    one = chess.Board("k7/8/8/8/8/8/8/KB5R w - - 0 1")
+    # Same everything except the second bishop, which also adds its table value; subtract that.
+    table = ev.TABLES
+    bishop_c1 = (table.mg[chess.WHITE][chess.BISHOP][chess.C1], table.eg[1][chess.BISHOP][chess.C1])
+    phase = ev.game_phase(pair)
+    material = (bishop_c1[0] * phase + bishop_c1[1] * (ev.PHASE_TOTAL - phase)) // ev.PHASE_TOTAL
+    assert evaluate(pair) - evaluate(one) - material == ev.STRUCTURE_WEIGHTS["bishop_pair"]
+
+
+def structure_of(fen: str) -> tuple[int, int]:
+    """The (middlegame, endgame) structural terms of a position, from White's view."""
+    board = chess.Board(fen)
+    return ev._structure(
+        board.occupied_co[chess.WHITE],
+        board.occupied_co[chess.BLACK],
+        board.pawns,
+        board.bishops,
+        board.rooks,
+        board.kings,
+    )
+
+
+def test_rook_on_open_and_semi_open_file(structure_on: None) -> None:
+    weights = ev.STRUCTURE_WEIGHTS
+    isolated = weights["isolated_pawn"]
+    # White rook a1; the kings stand on e1/e8 with no pawn in their shield zones. The a-file is
+    # open, then semi-open (black a7 added), then closed (white a2 added too). Adding a pawn also
+    # changes the isolated-pawn terms of its neighbour, which the expectations account for.
+    open_file = structure_of("4k3/1p6/8/8/8/8/1P6/R3K3 w - - 0 1")  # b2 and b7 both isolated
+    semi_open = structure_of("4k3/pp6/8/8/8/8/1P6/R3K3 w - - 0 1")  # a7 un-isolates b7
+    closed = structure_of("4k3/pp6/8/8/8/8/PP6/R3K3 w - - 0 1")  # a2 un-isolates b2
+    open_vs_semi = weights["rook_open_file"] - weights["rook_semi_open_file"] + isolated
+    assert tuple(a - b for a, b in zip(open_file, semi_open, strict=True)) == (
+        open_vs_semi,
+        open_vs_semi,
+    )
+    # Closed: the rook term is gone and neither white pawn is isolated any more (b2 was).
+    semi_vs_closed = weights["rook_semi_open_file"] - isolated
+    assert tuple(a - b for a, b in zip(semi_open, closed, strict=True)) == (
+        semi_vs_closed,
+        semi_vs_closed,
+    )
+    # No pawn is passed in any of the three: every pawn faces an enemy pawn on its own or an
+    # adjacent file, so the passed-pawn term contributed nothing above.
+    assert ev.pawn_structure(chess.BB_B2, chess.BB_B7) == (0, 0)
+
+
+def test_king_shield_counts_pawns_in_front_of_the_king(structure_on: None) -> None:
+    weights = ev.STRUCTURE_WEIGHTS
+    # White king g1 with pawns f2 g2 h2 versus the same pawns moved far away (still on the same
+    # files, so the pawn-structure terms are unchanged: no passed, doubled or isolated changes
+    # while the black pawns f7 g7 h7 face them). Both sides have a queen so the phase is not 0.
+    shielded = chess.Board("6k1/5ppp/8/8/8/8/5PPP/6KQ w - - 0 1")
+    bare = chess.Board("6k1/5ppp/8/8/5PPP/8/8/6KQ w - - 0 1")
+    phase = ev.game_phase(shielded)
+    table = ev.TABLES
+    pst = sum(
+        table.mg[1][chess.PAWN][s] * phase + table.eg[1][chess.PAWN][s] * (ev.PHASE_TOTAL - phase)
+        for s in (chess.F2, chess.G2, chess.H2)
+    ) - sum(
+        table.mg[1][chess.PAWN][s] * phase + table.eg[1][chess.PAWN][s] * (ev.PHASE_TOTAL - phase)
+        for s in (chess.F4, chess.G4, chess.H4)
+    )
+    shield = 3 * weights["king_shield"] * phase
+    expected = (pst + shield) // ev.PHASE_TOTAL
+    assert evaluate(shielded) - evaluate(bare) == expected
+    # The shield mask itself: g1 covers f2 g2 h2 f3 g3 h3 and nothing else.
+    assert (
+        ev._SHIELD[chess.WHITE][chess.G1]
+        == chess.SquareSet([chess.F2, chess.G2, chess.H2, chess.F3, chess.G3, chess.H3]).mask
+    )
+    assert (
+        ev._SHIELD[chess.BLACK][chess.G8]
+        == chess.SquareSet([chess.F7, chess.G7, chess.H7, chess.F6, chess.G6, chess.H6]).mask
+    )
+
+
+def test_structure_terms_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    board = chess.Board("r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N2NP1/PP2PPBP/R2Q1RK1 w - - 4 10")
+    monkeypatch.setattr(ev, "STRUCTURE_TERMS", False)
+    plain = evaluate(board)
+    monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
+    assert evaluate(board) != plain
+    assert evaluate(board.mirror()) == evaluate(board)  # the terms keep the colour symmetry
 
 
 # (d) mop-up
