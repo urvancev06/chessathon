@@ -116,10 +116,17 @@ def test_index_and_static(client: Client) -> None:
     assert status == 200 and content_type.startswith("text/html")
     assert b"<title>Mikhail LeTal</title>" in body
     assert b"cdn." not in body and b"https://" not in body  # offline: nothing external
-    status, body, content_type = client.raw("GET", "/static/app.js")
+    status, body, content_type = client.raw("GET", "/js/main.js")
     assert status == 200 and "javascript" in content_type
-    status, _, _ = client.raw("GET", "/static/../server.py")
-    assert status == 404
+    status, body, content_type = client.raw("GET", "/css/tokens.css")
+    assert status == 200 and content_type.startswith("text/css") and b"--paper" in body
+    status, _, content_type = client.raw("GET", "/favicon.svg")
+    assert status == 200 and content_type.startswith("image/svg+xml")
+    status, _, content_type = client.raw("GET", "/pieces/cburnett/wK.svg")
+    assert status == 200 and content_type.startswith("image/svg+xml")
+    for path in ("/../server.py", "/js/../../tools/webapp/server.py", "/static/app.js", "/nope"):
+        status, _, _ = client.raw("GET", path)
+        assert status == 404, path
 
 
 def test_info(client: Client) -> None:
@@ -127,7 +134,7 @@ def test_info(client: Client) -> None:
     assert status == 200
     assert info["name"] == "Mikhail LeTal"
     assert isinstance(info["version"], str)
-    assert isinstance(info["git"], dict) and "commit" in info["git"]
+    assert isinstance(info["git"], dict) and "commit" in info["git"] and "built" in info["git"]
     assert any(row["label"] == "Time control" for row in info["contract"])
     assert any(engine["path"] == "baselines/greedy" for engine in info["engines"])
     assert info["engine_slots"]["max"] == 4
@@ -331,6 +338,63 @@ def test_spectate_game(client: Client, registry: Registry) -> None:
     assert runner_children() == []
     status, summaries = client.get("/api/games")
     assert any(summary["id"] == game_id for summary in summaries)
+
+
+def test_pause_and_resume(client: Client, registry: Registry) -> None:
+    status, state = client.post(
+        "/api/games",
+        {
+            "kind": "spectate",
+            "white": "baselines/random",
+            "black": "baselines/random",
+            "base_ms": 5000,
+            "increment_ms": 50,
+            "ply_cap": 40,
+        },
+    )
+    assert status == 201, state
+    game_id = state["id"]
+    client.wait(game_id, "running")
+    status, state = client.post(f"/api/games/{game_id}/pause")
+    assert status == 200 and state["paused"] is True
+    time.sleep(0.3)  # the move in flight finishes; after that nothing moves
+    status, frozen = client.get(f"/api/games/{game_id}")
+    time.sleep(0.4)
+    status, later = client.get(f"/api/games/{game_id}")
+    assert later["status"] == "running" and later["paused"] is True
+    assert later["ply"] == frozen["ply"] and later["clocks"] == frozen["clocks"]
+    status, state = client.post(f"/api/games/{game_id}/resume")
+    assert status == 200 and state["paused"] is False
+    state = client.wait(game_id, "finished", timeout=30)
+    assert state["ply"] > frozen["ply"]
+    assert registry.live_engines == 0 and runner_children() == []
+    # Only spectate games pause; a play game says so.
+    status, play = client.post(
+        "/api/games", {"kind": "play", "engine": "baselines/random", "base_ms": 1000}
+    )
+    assert status == 201
+    status, _ = client.post(f"/api/games/{play['id']}/pause")
+    assert status == 409
+    client.post(f"/api/games/{play['id']}/stop")
+    client.wait(play["id"], "finished")
+
+
+def test_resign_by_flag(client: Client, registry: Registry) -> None:
+    status, state = client.post(
+        "/api/games", {"kind": "play", "engine": "baselines/random", "base_ms": 1000}
+    )
+    assert status == 201, state
+    game_id = state["id"]
+    client.wait(game_id, "idle")
+    status, _ = client.post(f"/api/games/{game_id}/resign", {"reason": "nonsense"})
+    assert status == 400
+    status, state = client.post(f"/api/games/{game_id}/resign", {"reason": "flag"})
+    assert status == 200 and state["status"] == "finished"
+    assert state["termination"] == "flag" and state["result"] == "black"
+    assert (
+        state["clocks"]["white"] == 0 and state["failed"] is True
+    )  # the referee counts a flag as a failure
+    assert registry.live_engines == 0 and runner_children() == []
 
 
 def test_stop_while_thinking(client: Client, registry: Registry) -> None:

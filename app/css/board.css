@@ -1,0 +1,108 @@
+/* Mikhail LeTal — the board. Two styles share one DOM: "studio" (the handoff: grey squares, glyph
+   pieces, token overlays) and "lichess" (brown squares, cburnett pieces, lichess highlights). */
+.board-box { container-type: inline-size; border: 1px solid var(--line); }
+.board-grid {
+  display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); aspect-ratio: 1; position: relative;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.sq {
+  position: relative; aspect-ratio: 1; border: 0; margin: 0; padding: 0; font: inherit; min-width: 0;
+  display: block; width: 100%; cursor: default; color: inherit; border-radius: 0;
+}
+.sq.movable, .sq.target { cursor: pointer; }
+.board-grid.dragging .sq { cursor: grabbing; }
+.sq:focus-visible { outline: var(--focus); outline-offset: -2px; z-index: 2; }
+.sq > * { pointer-events: none; }
+.sq .ov { position: absolute; inset: 0; background: transparent; }
+.sq .coord { position: absolute; line-height: 1; font-size: max(8px, 1.4cqw); color: var(--coord); }
+.sq .coord.rank { top: 2px; left: 3px; font-variant-numeric: tabular-nums; }
+.sq .coord.file { bottom: 2px; right: 3px; }
+.sq .dot { position: absolute; left: 39%; top: 39%; width: 22%; height: 22%; border-radius: 50%; background: var(--legal-dot); }
+.pc {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 9cqw; line-height: 1; animation: settle var(--settle); pointer-events: none;
+}
+.pc.w { color: var(--piece-white); -webkit-text-stroke: var(--piece-white-stroke); }
+.pc.b { color: var(--piece-black); -webkit-text-stroke: var(--piece-black-stroke); }
+.pc.faded { opacity: 0.3; }
+.pc.ghost { inset: auto; left: 0; top: 0; width: 12.5%; height: 12.5%; z-index: 5; animation: none; will-change: transform; }
+
+/* studio overlays: check > selected > last move */
+.lt-board--studio .sq.last .ov { background: var(--last-move); }
+.lt-board--studio .sq.selected .ov { background: var(--selected); }
+.lt-board--studio .sq.check .ov { background: var(--check); }
+.lt-board--studio .sq.light { background: var(--square-light); }
+.lt-board--studio .sq.dark { background: var(--square-dark); }
+
+/* promotion strip: 4 wide x 1 tall over the target square */
+.promo {
+  position: absolute; width: 50%; height: 12.5%; display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--paper); border: 1px solid var(--ink); z-index: 3; animation: settle var(--settle);
+}
+.promo button {
+  background: none; border: 0; padding: 0; cursor: pointer; font-size: 7cqw; line-height: 1; font-family: inherit;
+  position: relative; min-width: 0; color: inherit; border-radius: 0;
+}
+.promo button:focus-visible { outline: var(--focus); outline-offset: -2px; }
+.promo button.w { color: var(--piece-white); -webkit-text-stroke: var(--piece-white-stroke); }
+.promo button.b { color: var(--piece-black); -webkit-text-stroke: var(--piece-black-stroke); }
+.promo button .pc { font-size: inherit; }
+
+/* arrows (analysis): chessground geometry in an 8x8 viewBox */
+.board-arrows { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: visible; }
+
+/* -- lichess style ------------------------------------------------------------------------- */
+.lt-board--lichess .sq.light { background: #f0d9b5; }
+.lt-board--lichess .sq.dark { background: #b58863; }
+.lt-board--lichess .sq.last .ov { background: rgba(155, 199, 0, 0.41); }
+.lt-board--lichess .sq.selected .ov { background: rgba(20, 85, 30, 0.5); }
+.lt-board--lichess .sq.check .ov { background: radial-gradient(ellipse at center, rgba(255, 0, 0, 1) 0%, rgba(231, 0, 0, 1) 25%, rgba(169, 0, 0, 0) 89%, rgba(158, 0, 0, 0) 100%); }
+.lt-board--lichess .sq .dot { left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; background: radial-gradient(rgba(20, 85, 30, 0.5) 19%, rgba(0, 0, 0, 0) 20%); }
+.lt-board--lichess .sq .dot.cap { background: radial-gradient(transparent 0%, transparent 79%, rgba(20, 85, 30, 0.3) 80%); }
+.lt-board--lichess .sq.target:hover .dot, .lt-board--lichess .sq.over .dot { background: rgba(20, 85, 30, 0.3); }
+.lt-board--lichess .sq .coord { font-weight: 700; font-size: clamp(9px, 1.7cqw, 11px); color: #b58863; }
+.lt-board--lichess .sq.dark .coord { color: #f0d9b5; }
+.lt-board--lichess .sq .coord.rank { top: 3%; right: 5%; left: auto; }
+.lt-board--lichess .sq .coord.file { bottom: 2%; right: 5%; }
+.lt-board--lichess .pc, .lt-board--lichess .promo button {
+  font-size: 0; color: transparent; -webkit-text-stroke: 0; background-repeat: no-repeat; background-position: center; background-size: contain;
+}
+.lt-board--lichess .pc.ghost { filter: drop-shadow(0 0.4cqw 0.5cqw rgba(0, 0, 0, 0.4)); }
+.lt-board--lichess .promo { background: var(--paper); }
+.lt-board--lichess .promo button .pc { position: absolute; inset: 6%; }
+.lt-board--lichess .pc.w.k { background-image: url("/pieces/cburnett/wK.svg"); }
+.lt-board--lichess .pc.w.q { background-image: url("/pieces/cburnett/wQ.svg"); }
+.lt-board--lichess .pc.w.r { background-image: url("/pieces/cburnett/wR.svg"); }
+.lt-board--lichess .pc.w.b { background-image: url("/pieces/cburnett/wB.svg"); }
+.lt-board--lichess .pc.w.n { background-image: url("/pieces/cburnett/wN.svg"); }
+.lt-board--lichess .pc.w.p { background-image: url("/pieces/cburnett/wP.svg"); }
+.lt-board--lichess .pc.b.k { background-image: url("/pieces/cburnett/bK.svg"); }
+.lt-board--lichess .pc.b.q { background-image: url("/pieces/cburnett/bQ.svg"); }
+.lt-board--lichess .pc.b.r { background-image: url("/pieces/cburnett/bR.svg"); }
+.lt-board--lichess .pc.b.b { background-image: url("/pieces/cburnett/bB.svg"); }
+.lt-board--lichess .pc.b.n { background-image: url("/pieces/cburnett/bN.svg"); }
+.lt-board--lichess .pc.b.p { background-image: url("/pieces/cburnett/bP.svg"); }
+
+/* mini boards (Openings): 8 x 12px cells */
+.mini { display: grid; grid-template-columns: repeat(8, 12px); grid-auto-rows: 12px; width: 96px; height: 96px; border: 1px solid var(--line); flex: none; box-sizing: content-box; }
+.mini span { display: flex; align-items: center; justify-content: center; background: var(--square-light); min-width: 0; }
+.mini span.dark { background: var(--square-dark); }
+.mini .g { font-size: 10px; line-height: 12px; }
+.mini .g.w { color: var(--piece-white); -webkit-text-stroke: 0.4px #2a2a2a; }
+.mini .g.b { color: var(--piece-black); }
+[data-theme="dark"] .mini .g.b { -webkit-text-stroke: 0.3px #8c8c8c; }
+.mini.lichess span { background: #f0d9b5; }
+.mini.lichess span.dark { background: #b58863; }
+.mini.lichess .g { width: 12px; height: 12px; font-size: 0; color: transparent; -webkit-text-stroke: 0; background-repeat: no-repeat; background-position: center; background-size: contain; }
+.mini.lichess .g.w.k { background-image: url("/pieces/cburnett/wK.svg"); }
+.mini.lichess .g.w.q { background-image: url("/pieces/cburnett/wQ.svg"); }
+.mini.lichess .g.w.r { background-image: url("/pieces/cburnett/wR.svg"); }
+.mini.lichess .g.w.b { background-image: url("/pieces/cburnett/wB.svg"); }
+.mini.lichess .g.w.n { background-image: url("/pieces/cburnett/wN.svg"); }
+.mini.lichess .g.w.p { background-image: url("/pieces/cburnett/wP.svg"); }
+.mini.lichess .g.b.k { background-image: url("/pieces/cburnett/bK.svg"); }
+.mini.lichess .g.b.q { background-image: url("/pieces/cburnett/bQ.svg"); }
+.mini.lichess .g.b.r { background-image: url("/pieces/cburnett/bR.svg"); }
+.mini.lichess .g.b.b { background-image: url("/pieces/cburnett/bB.svg"); }
+.mini.lichess .g.b.n { background-image: url("/pieces/cburnett/bN.svg"); }
+.mini.lichess .g.b.p { background-image: url("/pieces/cburnett/bP.svg"); }
