@@ -1,0 +1,49 @@
+/* Mikhail LeTal — design tokens. Light is the default; add data-theme="dark" on <html> for dark. */
+:root {
+  --paper: #f7f6f3;
+  --ink: #1c1b19;
+  --grey: #6f6d68;
+  --line: rgba(28, 27, 25, 0.10);
+  --acc: #a3513b;
+  --square-light: #e8e6e1;
+  --square-dark: #a8a49b;
+  --piece-white: #f6f4f0;
+  --piece-white-stroke: 0.05em #38362f;
+  --piece-black: #1d1c1a;
+  --piece-black-stroke: 0;
+  --coord: rgba(28, 27, 25, 0.5);
+  --legal-dot: rgba(28, 27, 25, 0.35);
+  --selected: rgba(28, 27, 25, 0.16);
+  --last-move: rgba(163, 81, 59, 0.30);
+  --check: rgba(158, 66, 56, 0.40);
+  --error: #96473b;
+  --code-bg: #efeeea;
+  --psqt-negative: #8f8c86;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 2px;
+  --settle: 120ms ease-out;
+  --focus: 2px solid var(--acc);
+}
+[data-theme="dark"] {
+  --paper: #222221;
+  --ink: #ebe9e4;
+  --grey: #9a9893;
+  --line: rgba(235, 233, 228, 0.12);
+  --acc: #c8735c;
+  --square-light: #3a3a3a;
+  --square-dark: #262626;
+  --piece-white: #ecebe7;
+  --piece-white-stroke: 0.05em #141414;
+  --piece-black: #121212;
+  --piece-black-stroke: 0.04em #8c8c8c;
+  --coord: rgba(235, 233, 228, 0.4);
+  --legal-dot: rgba(235, 233, 228, 0.35);
+  --selected: rgba(235, 233, 228, 0.18);
+  --last-move: rgba(200, 115, 92, 0.30);
+  --check: rgba(205, 95, 85, 0.40);
+  --error: #d0847a;
+  --code-bg: #2b2b2a;
+  --psqt-negative: #6a6864;
+}
