@@ -1,5 +1,6 @@
 /* Mikhail LeTal — design tokens. Light is the default; add data-theme="dark" on <html> for dark. */
 :root {
+  color-scheme: light;
   --paper: #f7f6f3;
   --ink: #1c1b19;
   --grey: #6f6d68;
@@ -27,6 +28,7 @@
   --focus: 2px solid var(--acc);
 }
 [data-theme="dark"] {
+  color-scheme: dark;
   --paper: #222221;
   --ink: #ebe9e4;
   --grey: #9a9893;

@@ -69,8 +69,12 @@
 .spec-setup summary .quiet { padding: 0; font-size: 12px; }
 .spec-form { display: flex; flex-direction: column; gap: 20px; padding: 8px 0 16px; border-bottom: 1px solid var(--line); }
 .spec-form .label { margin-bottom: 8px; }
-.spec-form .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+.spec-form .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px; }
+.spec-form .two > * { min-width: 0; }
 .spec-form select.input { width: 100%; }
+.spec-form .index-row { display: flex; gap: 12px; margin-top: 12px; align-items: center; font-size: 13px; color: var(--ink); flex-wrap: wrap; }
+.spec-form .sub-row { margin-top: 12px; }
+.spec-footer { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 16px; }
 
 /* overview */
 .overview { max-width: 720px; padding-top: 40px; display: flex; flex-direction: column; gap: 40px; }

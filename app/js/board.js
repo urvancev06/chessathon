@@ -5,6 +5,7 @@
   'use strict';
   const LT = window.LT;
   const PROMOTION_ORDER = ['q', 'r', 'b', 'n'];
+  const COLOUR_CLASS = { w: 'pc-white', b: 'pc-black' };
   const BRUSHES = { green: '#15781B', red: '#882020', blue: '#003088', yellow: '#e68f00' };
   let uidCounter = 0;
 
@@ -188,7 +189,7 @@
     }
 
     pieceNode(piece, extra = '') {
-      return LT.el('span', { class: `pc ${piece.color} ${piece.type}${extra ? ` ${extra}` : ''}`, text: LT.GLYPH[piece.type], 'aria-hidden': 'true' });
+      return LT.el('span', { class: `pc ${COLOUR_CLASS[piece.color]} pt-${piece.type}${extra ? ` ${extra}` : ''}`, text: LT.GLYPH[piece.type], 'aria-hidden': 'true' });
     }
 
     /** Show a dropped move at once; the server's position replaces it within a round trip. */
@@ -302,7 +303,7 @@
       for (const type of PROMOTION_ORDER) {
         const entry = entries.find((candidate) => candidate.promo === type);
         if (!entry) continue;
-        const button = LT.el('button', { type: 'button', class: colour, 'aria-label': `Promote to ${LT.PIECE_NAME[type]}`, onClick: () => { this.closePromo(); this.play(entry.uci); } },
+        const button = LT.el('button', { type: 'button', class: COLOUR_CLASS[colour], 'aria-label': `Promote to ${LT.PIECE_NAME[type]}`, onClick: () => { this.closePromo(); this.play(entry.uci); } },
           this.style === 'lichess' ? this.pieceNode({ color: colour, type }) : LT.GLYPH[type]);
         strip.append(button);
       }

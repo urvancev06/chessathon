@@ -178,7 +178,7 @@ window.LT = window.LT || {};
       for (let col = 0; col < 8; col++) {
         const piece = squares[(7 - row) * 8 + col];
         node.append(LT.el('span', { class: (row + col) % 2 === 1 ? 'dark' : '' },
-          piece ? LT.el('span', { class: `g ${piece.color} ${piece.type}`, text: LT.GLYPH[piece.type] }) : null));
+          piece ? LT.el('span', { class: `g ${piece.color === 'w' ? 'pc-white' : 'pc-black'} pt-${piece.type}`, text: LT.GLYPH[piece.type] }) : null));
       }
     }
     return node;

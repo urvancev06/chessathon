@@ -61,11 +61,15 @@
         el('option', { value: 'curated', text: 'Curated opening by index' }),
         el('option', { value: 'harness', text: 'Harness opening' }));
       const indexInput = el('input', { class: 'input idx', inputmode: 'numeric', 'aria-label': 'Opening index' });
-      const indexName = el('span', { class: 'grey t13' });
+      const indexName = el('span', { class: 'grey' });
       const harnessSelect = el('select', { class: 'input', 'aria-label': 'Harness opening' }, (openings.harness || []).map((o, i) => el('option', { value: String(i), text: o.name })));
       const plyCap = el('input', { class: 'input num', inputmode: 'numeric', 'aria-label': 'Ply cap' });
       const movetime = el('input', { class: 'input num', inputmode: 'numeric', placeholder: 'clock', 'aria-label': 'Stockfish move time in milliseconds' });
-      const movetimeRow = el('label', { hidden: true }, 'Stockfish move time', movetime, 'ms');
+      const movetimeRow = el('div', { hidden: true },
+        el('div', { class: 'label', text: 'Stockfish move time' }),
+        el('div', { class: 'field-row' }, el('label', {}, 'fixed', movetime, 'ms'), el('span', { text: 'empty = it plays on the clock it is handed' })));
+      const indexRow = el('div', { class: 'index-row', hidden: true }, indexInput, indexName);
+      const harnessRow = el('div', { class: 'sub-row', hidden: true }, harnessSelect);
       const startButton = el('button', { type: 'button', class: 'primary', text: state ? 'Start another' : 'Start' });
       const notice = el('div', { class: 'notice', hidden: true });
       const summaryText = el('span');
@@ -74,10 +78,12 @@
         el('div', { class: 'spec-form' },
           el('div', { class: 'two' }, el('div', {}, el('div', { class: 'label', text: 'White' }), white), el('div', {}, el('div', { class: 'label', text: 'Black' }), black)),
           el('div', {}, el('div', { class: 'label', text: 'Time control' }), tcRow,
-            el('div', { class: 'field-row', style: { marginTop: '10px' } }, el('label', {}, 'base', base, 's'), el('label', {}, 'increment', inc, 's'), el('label', {}, 'ply cap', plyCap), movetimeRow)),
-          el('div', {}, el('div', { class: 'label', text: 'Starting position' }),
-            el('div', { class: 'field-row' }, startSelect, indexInput, indexName, harnessSelect)),
-          el('div', { style: { display: 'flex', gap: '20px', alignItems: 'center' } }, startButton, notice)));
+            el('div', { class: 'field-row', style: { marginTop: '10px' } }, el('label', {}, 'base', base, 's'), el('label', {}, 'increment', inc, 's'))),
+          el('div', {}, el('div', { class: 'label', text: 'Starting position' }), startSelect, indexRow, harnessRow),
+          el('div', {}, el('div', { class: 'label', text: 'Ply cap' }),
+            el('div', { class: 'field-row' }, el('label', {}, plyCap, 'plies'), el('span', { text: `draw when reached · at most ${info.ply_cap || 600}` }))),
+          movetimeRow,
+          el('div', { class: 'spec-footer' }, startButton, notice)));
       const isStockfish = (select) => select.selectedOptions[0] && select.selectedOptions[0].dataset.kind === 'stockfish';
       const openingAt = () => { const i = parseInt(form.index, 10); const list = openings.openings || []; return Number.isInteger(i) && i >= 0 && i < list.length ? list[i] : null; };
       function renderForm() {
@@ -88,9 +94,8 @@
         if (document.activeElement !== plyCap) plyCap.value = form.plyCap;
         if (document.activeElement !== movetime) movetime.value = form.movetime;
         startSelect.value = form.start;
-        indexInput.hidden = form.start !== 'curated';
-        indexName.hidden = form.start !== 'curated';
-        harnessSelect.hidden = form.start !== 'harness';
+        indexRow.hidden = form.start !== 'curated';
+        harnessRow.hidden = form.start !== 'harness';
         if (document.activeElement !== indexInput) indexInput.value = form.index;
         harnessSelect.value = form.harness;
         const opening = openingAt();
