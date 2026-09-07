@@ -551,25 +551,3 @@ def test_delta_pruning_saves_quiescence_nodes_and_keeps_the_hanging_queen() -> N
     )
     result = run_search(HANGING_QUEEN, max_depth=3)
     assert result.move is not None and result.move.uci() == "f3h4"
-
-
-def test_feature_flags_default_on_and_read_the_environment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from mikhail_letal import feature_flag
-
-    for flag in (
-        "NULL_MOVE_PRUNING",
-        "LATE_MOVE_REDUCTIONS",
-        "ASPIRATION_WINDOWS",
-        "FUTILITY_PRUNING",
-        "DELTA_PRUNING",
-    ):
-        assert getattr(search_module, flag) is True
-    monkeypatch.delenv("LETAL_TEST_FLAG", raising=False)
-    assert feature_flag("LETAL_TEST_FLAG", True) is True
-    assert feature_flag("LETAL_TEST_FLAG", False) is False
-    monkeypatch.setenv("LETAL_TEST_FLAG", "0")
-    assert feature_flag("LETAL_TEST_FLAG", True) is False
-    monkeypatch.setenv("LETAL_TEST_FLAG", "1")
-    assert feature_flag("LETAL_TEST_FLAG", False) is True

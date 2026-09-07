@@ -1,0 +1,88 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}The competition and what was built}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Format.}{1}{section*.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Clock and machine.}{1}{section*.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{What was built.}{2}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Our result.}{2}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Rules-compliance statement}{2}{section.2}\protected@file@percent }
+\newlabel{sec:rules}{{2}{2}{Rules-compliance statement}{section.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Architecture and why}{3}{section.3}\protected@file@percent }
+\newlabel{sec:arch}{{3}{3}{Architecture and why}{section.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Architectures and the measured numbers that decided the order. Stage 0 rows: RESULTS.md, rows ``node rate, middlegame'', ``depth at 120 s clock'', ``import time'', ``peak RSS after a 10 s search'', ``RSS at the TT cap''. Stage 1 limits are the brief's requirements, not measurements. ``nps'' is nodes per second; ``seldepth'' is the deepest ply reached including quiescence; RSS is resident memory.}}{3}{table.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Board representation and move generation}{4}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Perft.}{4}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Search}{4}{section.5}\protected@file@percent }
+\newlabel{sec:search}{{5}{4}{Search}{section.5}{}}
+\@writefile{toc}{\contentsline {paragraph}{The algorithm in one paragraph.}{4}{section*.6}\protected@file@percent }
+\gdef \LT@i {\LT@entry 
+    {1}{100.73918pt}\LT@entry 
+    {1}{155.95424pt}\LT@entry 
+    {1}{171.87108pt}}
+\@writefile{toc}{\contentsline {paragraph}{Why these techniques and not others here.}{5}{section*.7}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{Search techniques in build v0.1.0 and the local evidence for each. No per-feature arena ablation (feature on/off, games, interval) has been run yet; the effects listed are node-rate, latency and correctness measurements from the 2026-09-07 review. Elo ablations are Stage 1 work.}}{5}{table.2}\protected@file@percent }
+\newlabel{tab:search}{{2}{5}{Search techniques in build v0.1.0 and the local evidence for each. No per-feature arena ablation (feature on/off, games, interval) has been run yet; the effects listed are node-rate, latency and correctness measurements from the 2026-09-07 review. Elo ablations are Stage 1 work}{table.2}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {6}Evaluation}{7}{section.6}\protected@file@percent }
+\newlabel{sec:eval}{{6}{7}{Evaluation}{section.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Terms.}{7}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Piece values.}{7}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The parametric prior.}{7}{section*.10}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces All sixteen parameters of the prior (\texttt  {PARAMETERS} in \texttt  {tools/gen\_pst.py}, copied into \texttt  {weights/pst.json} under \texttt  {\_provenance.parameters}). Magnitudes were chosen so the largest table entry stays under a pawn: piece-square effects refine material, they do not rival it. Resulting table ranges (min, max): middlegame P 0..24, N $-20$..30, B $-3$..21, R 0..28, Q $-14$..2, K $-80$..25; endgame P 0..50, N $-20$..30, B $-3$..21, R 0..0, Q $-2$..10, K $-5$..25 {\small  (source: weights/PROVENANCE.json)}.}}{8}{table.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mop-up.}{8}{section*.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Cost.}{8}{section*.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{How the weights were obtained, and before/after.}{8}{section*.13}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {7}Time management}{8}{section.7}\protected@file@percent }
+\newlabel{sec:time}{{7}{8}{Time management}{section.7}{}}
+\@writefile{toc}{\contentsline {paragraph}{The budget formula.}{8}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{How the budget is used.}{9}{section*.15}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Time-management constants of build v0.1.0, all uncalibrated {\small  (source: docs/CALIBRATION.md)}.}}{9}{table.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{What the local games show.}{9}{section*.16}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Calibration procedure.}{10}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {8}Endgame handling}{10}{section.8}\protected@file@percent }
+\newlabel{sec:endgame}{{8}{10}{Endgame handling}{section.8}{}}
+\@writefile{toc}{\contentsline {paragraph}{Mop-up.}{10}{section*.18}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Tablebases.}{10}{section*.19}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Draw handling.}{10}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The 600-ply cap.}{10}{section*.21}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Endgame probes with the reviewer's driver at 5\,000 ms per move, where the hard limit ($0.25 \times $ clock) caps every move at 1\,250 ms; the opponent is a second copy of the engine {\small  (source: RESULTS.md, ``Known unconverted wins'')}. At the real 120 s clock the urgency clamps can add time; at 5 s they cannot.}}{11}{table.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Safety and failure handling}{11}{section.9}\protected@file@percent }
+\newlabel{sec:safety}{{9}{11}{Safety and failure handling}{section.9}{}}
+\@writefile{toc}{\contentsline {paragraph}{The wrapper.}{11}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The fallback.}{11}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{The panic band.}{11}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Desync reset.}{11}{section*.25}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Start-up.}{12}{section*.26}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Fuzz counts.}{12}{section*.27}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {10}Testing methodology and results}{12}{section.10}\protected@file@percent }
+\newlabel{sec:testing}{{10}{12}{Testing methodology and results}{section.10}{}}
+\@writefile{toc}{\contentsline {paragraph}{Machines and load.}{12}{section*.28}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Statistics.}{12}{section*.29}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Arena runs of build v0.1.0: rows \texttt  {fuzz-random-v0.1}, \texttt  {fuzz-greedy-v0.1} and \texttt  {v0.1-vs-minimax-real-clock} of RESULTS.md, in that order; opponents are the starter's \texttt  {baselines/random}, \texttt  {greedy} and \texttt  {minimax}. Openings: \texttt  {data/openings.txt}. The tool printed no Elo for these runs. Loads of 7--10 during the fuzz runs are expected with twelve workers and mean those games do not measure time management; the minimax run used four workers (load 1.5--3.9 on 16 cores), so its per-move times are indicative but it is not the solo pass of Stage 3. Its one draw is by threefold repetition; the PGNs are kept under \texttt  {data/pgn/}. \texttt  {baselines/greedy} searches one ply on material; \texttt  {baselines/minimax} two plies on material and mobility with no time management {\small  (source: README.md)}.}}{13}{table.6}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {7}{\ignorespaces Other measurements of build v0.1.0, development machine {\small  (source: RESULTS.md, ``Other measurements'')}.}}{13}{table.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Static checks and smoke games.}{13}{section*.30}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Perft.}{14}{section*.31}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Per-move log of the minimax run.}{14}{section*.32}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Final measurement pass.}{14}{section*.33}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {11}Rating estimate}{14}{section.11}\protected@file@percent }
+\newlabel{sec:rating}{{11}{14}{Rating estimate}{section.11}{}}
+\@writefile{toc}{\contentsline {paragraph}{Why the ladder's anchors cannot be mapped to CCRL directly.}{14}{section*.34}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {8}{\ignorespaces The five fixed-rating house engines {\small  (source: brief, \S  8.1)}.}}{14}{table.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Yardstick matches (local only).}{14}{section*.35}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Conversion to human scales, two independent routes.}{15}{section*.36}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Final statement (to be filled in).}{15}{section*.37}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {12}Known limitations and next stage}{15}{section.12}\protected@file@percent }
+\gdef \LT@ii {\LT@entry 
+    {1}{100.73918pt}\LT@entry 
+    {1}{90.51282pt}\LT@entry 
+    {1}{81.97733pt}\LT@entry 
+    {1}{44.98866pt}\LT@entry 
+    {1}{59.21504pt}\LT@entry 
+    {1}{69.44142pt}}
+\@writefile{toc}{\contentsline {paragraph}{Next stage.}{16}{section*.38}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {A}Provenance of every constant}{16}{appendix.A}\protected@file@percent }
+\newlabel{app:provenance}{{A}{16}{Provenance of every constant}{appendix.A}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {9}{Provenance table. Rules: every generating script is deterministic and re-runnable; a hand-adjusted value says so in its note with the reason; a weight file's header names its script and data hash.}}{16}{table.9}\protected@file@percent }
+\newlabel{tab:provenance}{{9}{16}{Provenance table. Rules: every generating script is deterministic and re-runnable; a hand-adjusted value says so in its note with the reason; a weight file's header names its script and data hash}{table.9}{}}
+\gdef \@abspage@last{17}

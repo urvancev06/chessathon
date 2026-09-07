@@ -36,15 +36,13 @@ from typing import Any
 
 import chess
 
-from mikhail_letal import feature_flag
-
 MATE_SCORE = 100_000
 MATE_THRESHOLD = MATE_SCORE - 1_000
 DRAW_SCORE = 0
 PHASE_TOTAL = 24  # sum of the phase weights over the full board: 4*N + 4*B + 4*R + 2*Q
 
-# Feature switch for the structural terms below (see ``feature_flag``).
-STRUCTURE_TERMS = feature_flag("LETAL_EVAL_TERMS", True)
+# Switch for the structural terms below: a plain constant (no environment variables are read).
+STRUCTURE_TERMS = True  # switch for bisection in development; the shipped value is True
 
 # Weights of the structural terms, in centipawns. Every value is hand-chosen at the magnitude
 # chess textbooks give the feature (a pawn is 100); none is tuned or copied.

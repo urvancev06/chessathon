@@ -50,7 +50,6 @@ from dataclasses import dataclass
 
 import chess
 
-from mikhail_letal import feature_flag
 from mikhail_letal.evaluation import (
     DRAW_SCORE,
     MATE_SCORE,
@@ -63,8 +62,9 @@ from mikhail_letal.evaluation import (
 Key = Hashable
 
 # ----------------------------------------------------------------------------- v0.2 features
-# Each strength feature added in v0.2 sits behind one of these switches (see ``feature_flag``) so
-# that a regression can be bisected feature by feature with arena runs. All default to on.
+# Each strength feature added in v0.2 sits behind one of these switches, plain constants (no
+# environment variables are read), so a regression can be bisected feature by feature with arena
+# runs. All default to on.
 
 # Null-move pruning: before searching the moves of a node, let the side to move pass and search
 # the reply at reduced depth with a zero window around beta. If even doing nothing keeps the score
@@ -75,7 +75,7 @@ Key = Hashable
 # is only tried where the static evaluation already stands at beta or above: below it, passing
 # rarely holds beta and the reduced search would be wasted (measured: in a capture-rich
 # middlegame the unguarded version tripled the nodes to depth 5).
-NULL_MOVE_PRUNING = feature_flag("LETAL_NULL_MOVE", True)
+NULL_MOVE_PRUNING = True  # switch for bisection in development; the shipped value is True
 # Below this remaining depth no null move is tried. At depth 2 the reduced null search is a whole
 # quiescence search at nearly every node of the tree's widest layer; in a capture-rich middlegame
 # that tripled the nodes to depth 5, while from depth 3 the saving is the same elsewhere (see
@@ -88,7 +88,7 @@ NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remainin
 # the quiet moves that sort late (after the table move, the captures and the killers) are searched
 # one ply shallower. A reduced search that still beats alpha is repeated at full depth, so a
 # surprise late move is never trusted on the shallow search alone.
-LATE_MOVE_REDUCTIONS = feature_flag("LETAL_LMR", True)
+LATE_MOVE_REDUCTIONS = True  # switch for bisection in development; the shipped value is True
 LMR_MIN_DEPTH = 3  # reduce only where a ply of depth is worth saving
 LMR_FULL_DEPTH_MOVES = 3  # this many moves of the node are searched at full depth first
 LMR_REDUCTION = 1  # plies taken off the late quiet moves
@@ -97,7 +97,7 @@ LMR_REDUCTION = 1  # plies taken off the late quiet moves
 # around the previous iteration's score rather than the full one, which prunes far more. A score
 # outside the window means the guess was wrong: the failing side is widened by the factor and the
 # iteration repeated, and after two failures the full window is used.
-ASPIRATION_WINDOWS = feature_flag("LETAL_ASPIRATION", True)
+ASPIRATION_WINDOWS = True  # switch for bisection in development; the shipped value is True
 ASPIRATION_MIN_DEPTH = 4  # earlier iterations are too cheap and their scores too volatile
 ASPIRATION_WINDOW = 40  # centipawns either side of the previous score
 ASPIRATION_WIDEN = 4  # window multiplier after a failure
@@ -108,12 +108,12 @@ ASPIRATION_MAX_FAILS = 2  # failures before the full window is used
 # (it wins no material, and the quiescence search that follows will not either), so it is
 # skipped. Margins are per remaining depth; the deeper ply gets twice the room. Off in check and
 # when a mate bound is in the window, where quiet moves decide everything.
-FUTILITY_PRUNING = feature_flag("LETAL_FUTILITY", True)
+FUTILITY_PRUNING = True  # switch for bisection in development; the shipped value is True
 FUTILITY_MARGINS = (0, 150, 300)  # indexed by remaining depth; depth 0 is quiescence
 
 # Delta pruning in quiescence: a capture whose gain, even if the captured piece is simply won
 # with nothing lost, plus this margin cannot lift the stand-pat score to alpha is not searched.
-DELTA_PRUNING = feature_flag("LETAL_DELTA", True)
+DELTA_PRUNING = True  # switch for bisection in development; the shipped value is True
 DELTA_MARGIN = 200
 
 # Middlegame piece values for the delta-pruning gain (index = python-chess piece type).
