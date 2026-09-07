@@ -1,90 +1,696 @@
 \documentclass[11pt,a4paper]{article}
 \usepackage[margin=2.5cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
 \usepackage{booktabs}
-\usepackage{siunitx}
-\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{float}
+\usepackage{array}
+\usepackage{xcolor}
 \usepackage{enumitem}
-\sisetup{separate-uncertainty=true, table-number-alignment=center}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue!40!black, urlcolor=blue!40!black}
+% Visible marker for every measurement that has not been made yet. Search the PDF for "PENDING".
+\newcommand{\pending}[1]{\textcolor{red}{\textbf{[PENDING: #1]}}}
+% Where a number comes from: a row or heading of docs/RESULTS.md, or a file.
+\newcommand{\src}[1]{{\small(source: #1)}}
+\newcommand{\code}[1]{\texttt{#1}}
+\setlength{\parskip}{0.4em}
+\setlength{\emergencystretch}{3em}
+\tolerance=1500
+\setlength{\tabcolsep}{4pt}
+\setlength{\LTleft}{0pt plus 1fill}
+\setlength{\LTright}{0pt plus 1fill}
 
 \title{Mikhail LeTal: a chess agent for AI Chessathon 2026\\
   \large Design, evidence and rating estimate}
 \author{Alexander Urvancev}
-\date{September 2026 (draft, updated with each build)}
+\date{September 2026 (draft for build v0.1.0; updated with each build)}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-% One paragraph: what was built, in what stack, what it scored locally, what its estimated
-% rating is (with intervals, tagged as estimates), and what the platform result was.
-TODO after Stage 0 measurement.
+Mikhail LeTal is a chess agent written for AI Chessathon 2026 by a one-person team. The shipped build
+(v0.1.0, ``Stage 0'') is plain Python 3.12 on top of the python-chess library, which supplies the board
+and the rules of chess; the search, the evaluation, the time management, the game-state tracking and the
+safety wrapper are our own and are described here so that every line can be explained. Locally the build
+won all 300 fuzz games against the starter kit's random mover and all 200 against its one-ply greedy
+agent, with no crash, illegal move, flag fall or start-up failure \src{RESULTS.md, rows
+\code{fuzz-random-v0.1} and \code{fuzz-greedy-v0.1}}, and scored 98.8\,\% ($\pm$2.4\,\%; +39 =1 $-$0) in 40
+games at the real clock against the starter's two-ply minimax baseline, again with no failure termination
+\src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}. Three measurements are still open and are marked
+in red throughout: \pending{inspection of the per-move log of the 40-game minimax run (slowest move,
+minimum clock, the one repetition draw)}; \pending{first platform validation log and the time calibration
+derived from it}; \pending{Stage 3 rating estimate on the CCRL, FIDE and chess.com scales}. Every other
+number in this
+document is a local measurement quoted from \code{docs/RESULTS.md} or a constant quoted from the code
+and its provenance files; nothing is estimated from memory.
 \end{abstract}
 
 \section{The competition and what was built}
-% Format: 120 s + 0.5 s per side, one core of an EPYC 9V74, 2 GB, Python 3.12 with a fixed stack,
-% 90 s init, curated near-level openings, 600-ply cap, Swiss qualification on locked builds.
-% Our result: TODO.
-TODO.
+\paragraph{Format.} AI Chessathon 2026 is a competition for chess agents written by student teams. A
+team uploads a zip whose root \code{agent.py} exposes one function, \code{get\_move(fen, time\_left\_ms)},
+returning a move in UCI notation (for example \code{e2e4}, or \code{e7e8q} for a promotion). The platform
+plays the latest build that passed validation on a rated ladder (hourly rounds, 08:00--22:00 London). The
+ladder only seeds a 13-round Swiss tournament over locked builds on the afternoon of Thursday
+11~September; the Swiss decides qualification for the London final on Saturday 12~September, where each
+finalist team walks a judge through how its agent was built. Uploads close at 11:00 London on
+11~September.
 
-\section{Rules-compliance statement}
+\paragraph{Clock and machine.} Each side has 120~s plus 0.5~s per move, measured in wall time by the
+runner from the moment it writes the request to the moment it reads the reply, so process wake-up, FEN
+parsing and board construction are on our clock. The agent runs as one process per game, suspended while
+the opponent thinks, on one core of an AMD EPYC 9V74 at 2.60~GHz with 2~GB of RAM, no network and no
+GPU; it gets 90~s at start-up before the clock runs. The Python environment is fixed: Python 3.12 with
+\code{python-chess 1.11.2}, \code{numpy 2.5.2}, \code{numba 0.67.0}, \code{torch 2.13.0} (CPU) and
+\code{onnxruntime 1.29.0}; nothing else can be installed and native binaries are rejected. A game is lost
+outright on an illegal move, a crash, running out of memory, missing the 90~s start-up budget, or a flag
+fall (unless the opponent cannot mate, which is a draw). Draws follow FIDE rules and the referee claims
+threefold repetition and fifty-move draws automatically; a game that reaches 600 plies (half-moves,
+counting the opening position) is a draw. Every game starts from a curated near-level opening position,
+not from the initial position, and the set of openings is not published \src{brief, \S 3; \code{AGENTS.md}}.
+
+\paragraph{What was built.} The build described here is Stage 0 of a staged plan (Section~\ref{sec:arch}).
+It ships \code{agent.py} (the wrapper), the package \code{mikhail\_letal} (evaluation, search, timing,
+game state, fallback), \code{weights/pst.json} (the evaluation tables) and \code{weights/PROVENANCE.json}:
+23\,333 bytes zipped, 66\,825 bytes unzipped \src{RESULTS.md, row ``zip''}. It reaches depth 5--6 with
+selective depth 18--32 at the real clock on the development machine, at 50--61 thousand nodes per second
+\src{RESULTS.md, rows ``depth at 120 s clock'' and ``node rate, middlegame''}.
+
+\paragraph{Our result.} Local: 300/300 against \code{baselines/random} and 200/200 against
+\code{baselines/greedy}, all by checkmate, zero failure terminations (Section~\ref{sec:testing}).
+Against \code{baselines/minimax} at the real clock (120~s + 0.5~s, four games at a time): 40 games,
++39 =1 $-$0, 98.8\,\% ($\pm$2.4\,\%), 39 by checkmate and one draw by threefold repetition, no flag
+\src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}; the brief's Stage 0 bar was a score of at least
+90\,\% with zero flags. The per-move log of that run (slowest move, minimum clock reached) is
+\pending{inspection of the 40-game minimax per-move log}. On the platform: \pending{first validation log
+(init time, per-move times, clock left)} and \pending{ladder rating of build v0.1.0}.
+
+\section{Rules-compliance statement}\label{sec:rules}
 \begin{itemize}[nosep]
-  \item No third-party engine, wrapper, port or translation is shipped or consulted at runtime.
-  \item No published network is shipped; Stage 0 ships no network at all.
-  \item No lookup database of another engine's moves or evaluations ships in the zip.
-  \item Memorised-code risk: every table is generated by \texttt{tools/gen\_pst.py} from a
-        parametric geometric prior with recorded parameters; search and evaluation were written
-        against a module contract (\texttt{docs/DESIGN.md}) from textbook descriptions, and every
-        constant is listed in Appendix~\ref{app:provenance}.
-  \item Everything shipped is plain, type-annotated Python that passes \texttt{ruff} and
-        \texttt{mypy --strict}.
+  \item No third-party engine, wrapper, port or translation is shipped or consulted at runtime. The only
+        library used at runtime is \code{python-chess 1.11.2}, which is part of the platform's fixed stack
+        and provides board representation, move generation and the rules, not chess knowledge.
+  \item No published network is shipped; Stage 0 ships no network at all. No positions labelled by any
+        engine were used: Stage 0 has no tuned parameters (Section~\ref{sec:eval}).
+  \item No lookup database of another engine's moves or evaluations ships in the zip. There is no opening
+        book and no tablebase in this build (Section~\ref{sec:endgame}).
+  \item Memorised-code risk. An engine written with a language model can reproduce code or tables it has
+        seen, and Sunfish, whose tables are famous, is a house bot on this ladder. Three measures were
+        taken. (1)~Every evaluation table is generated by \code{tools/gen\_pst.py} from a parametric
+        geometric prior (Section~\ref{sec:eval}): each entry is a formula of the square's geometry times a
+        named parameter, so the numbers are ours by construction and re-running the script reproduces
+        them bit for bit. (2)~Search and evaluation were written against a module contract
+        (\code{docs/DESIGN.md}) from textbook descriptions of the algorithms, and a review pass looked for
+        surface overlaps with known engines: the one found was the class-and-method pair
+        \code{Searcher.search}, which Sunfish also uses; our class was renamed \code{Engine} even though
+        everything behind it differs \src{DECISIONS.md, 2026-09-07 item F}. (3)~The generated tables were
+        compared mechanically against the published tables of \textbf{Sunfish}, the Chess Programming
+        Wiki's \textbf{``simplified evaluation function''}, \textbf{Rustic Alpha 3}, \textbf{TSCP} and
+        \textbf{VICE}: whole-table comparisons and affine comparisons (does any table of ours equal a
+        published one after multiplying by a constant and adding a constant?) were all clean, and a
+        row-by-row comparison found exactly \textbf{one coincidental row}: the endgame pawn table's
+        seventh rank is 50 in both ours and the CPW table, because our formula gives
+        $14 \times 5^2 / 7 = 50$ there \src{DECISIONS.md, 2026-09-07 item I}.
+  \item Local measuring instruments. A rating-limited Stockfish (path read from the environment variable
+        \code{YARDSTICK\_ENGINE}) and the real Sunfish are used only as local sparring partners for the
+        rating estimate (Section~\ref{sec:rating}); they live outside the repository, never enter the zip,
+        never influence a move, and their source was not read to inform the design.
+  \item Provenance. Every constant that ships has a row in Appendix~\ref{app:provenance}, copied from
+        \code{docs/PROVENANCE.md} and \code{weights/PROVENANCE.json}, which itself ships in the zip.
+  \item Everything shipped is plain, type-annotated Python that passes \code{ruff check} and
+        \code{mypy --strict} \src{INTEGRATION\_NOTES.md, ``Checks run''}. No generated table ships without
+        its generating script; nothing is minified or obfuscated.
 \end{itemize}
 
-\section{Architecture and why}
-% python-chess + own search/eval (Stage 0) vs fully jitted engine (Stage 1) vs NNUE (Stage 4):
-% measured node rates and compile times that decided it. Table: architecture, nps, import time.
-TODO.
+\section{Architecture and why}\label{sec:arch}
+The plan has stages, and each stage replaces the previous shipped build only after beating it under the
+real clock with a 95\,\% interval above zero. Three architectures were on the table.
+
+\begin{enumerate}[nosep]
+  \item \textbf{python-chess board + our own search and evaluation in pure Python} (Stage 0, this build).
+        python-chess is a proven implementation of the rules, so correctness risk is confined to our own
+        code: search, evaluation, time management. This is what the first priority of the brief (never
+        lose a game for free) demands from the first session.
+  \item \textbf{Own board representation, move generation, evaluation and search compiled with numba}
+        (Stage 1, planned), with python-chess kept in the wrapper as the legality oracle and fallback.
+        numba compiles at every game start, so its compile time must be measured from the zip and kept
+        under 40~s locally against the 90~s start-up budget.
+  \item \textbf{A small self-trained NNUE-style network} evaluated inside the jitted search (Stage 4,
+        expected to be skipped): \code{onnxruntime} cannot be called once per node from a jitted search,
+        training data would have to be produced first, and the operator would rather explain a tuned
+        hand-written evaluation than a rushed network.
+\end{enumerate}
+
+A fourth option, jitting only the evaluation under a python-chess board, was rejected by arithmetic on the
+measured numbers: at 50--61 thousand nodes per second one node costs roughly 16--20~$\mu$s, of which
+\code{evaluate()} is 3.4--3.8~$\mu$s in the middlegame and 1.6~$\mu$s in the endgame \src{RESULTS.md, row
+``\code{evaluate()} cost''}, so the evaluation is at most a fifth of the node cost and numba cannot read
+python-chess objects without a conversion that would cost more than it saves. The speed has to come from
+replacing the board and the move generator, which is Stage 1.
+
+\begin{table}[H]\centering\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.0cm}>{\raggedright\arraybackslash}p{2.3cm}>{\raggedright\arraybackslash}p{2.4cm}>{\raggedright\arraybackslash}p{2.0cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{1.7cm}@{}}
+\toprule
+architecture & node rate & depth at 120 s + 0.5 s & import time & peak RSS & status \\
+\midrule
+Stage 0: python-chess + pure Python & 50--61k nps (middlegame) & 5--6 (seldepth 18--32) & 0.033 s & 42.4 MB after a 10 s search; 120 MB at the TT cap & shipped (v0.1.0) \\
+Stage 1: numba engine & not built & not built & must be $\leq 40$ s from the zip & must be $< 500$ MB & planned \\
+Stage 4: NNUE-style net & not built & --- & --- & --- & expected to skip \\
+\bottomrule
+\end{tabular}
+\caption{Architectures and the measured numbers that decided the order. Stage 0 rows: RESULTS.md, rows
+``node rate, middlegame'', ``depth at 120 s clock'', ``import time'', ``peak RSS after a 10 s search'',
+``RSS at the TT cap''. Stage 1 limits are the brief's requirements, not measurements. ``nps'' is nodes
+per second; ``seldepth'' is the deepest ply reached including quiescence; RSS is resident memory.}
+\end{table}
+
+Import time was measured three times by timing \code{import agent} with \code{time.perf\_counter()} in a
+fresh interpreter and was 0.033~s each time,
+including a depth-2 warm-up search that runs at import so every code path has executed before the first
+real move \src{RESULTS.md, row ``import time''}. After the 2026-09-07 review the node rate on a 3~s search
+from the initial position rose from 51.7k to 67.2k nps (+30\,\%, same move \code{g1f3}, depth 6/17)
+\src{RESULTS.md, row ``review nps''}; Section~\ref{sec:search} lists what changed.
 
 \section{Board representation and move generation}
-% Stage 0: python-chess. Stage 1: own representation; perft evidence table.
-TODO.
+Stage 0 uses python-chess's \code{Board}: a bitboard representation (one 64-bit integer per piece type
+and per colour) with fully legal move generation, written and tested by the library's authors and pinned
+by the platform at version 1.11.2. Quiescence uses \code{Board.generate\_legal\_captures()} so that only
+captures are generated at the leaves. Squares are indexed as python-chess does (\code{a1 = 0},
+\code{h1 = 7}, \code{a8 = 56}); evaluation tables are stored from White's point of view and a Black piece
+on square $s$ reads the table at $s \oplus 56$ (a vertical mirror). Positions are identified by
+python-chess's own repetition key, \code{Board.\_transposition\_key()}, a tuple of the piece bitboards, the
+side to move, the castling rights and the en passant square; it is exactly what \code{Board.is\_repetition}
+uses, so what we count as a repetition is what the referee counts \src{DECISIONS.md, 2026-09-06,
+``Position keys''}. Two costs are accepted knowingly: the key is a private name (an upgrade of the library
+could remove it, but the platform pins 1.11.2), and it is a tuple rather than a Zobrist hash, which
+Stage 1 replaces.
 
-\section{Search}
-% Each technique, what it does, why it helps here (small node counts, one slow core), and the
-% evidence: ablation table (feature on/off, games, interval).
-TODO.
+\paragraph{Perft.} A perft test counts the leaf nodes of the full move tree to a fixed depth and compares
+the count with a reference; it is the standard proof that a move generator is correct. Stage 0 has no move
+generator of its own, so there is nothing to perft against python-chess: legality agreement with the
+referee, which also uses python-chess, holds by construction. The evidence that the surrounding code uses
+the library correctly is the property-test set (each of the following returns a legal move within budget:
+all four promotion pieces, capture-promotions, under-promotion to a knight when it is the only mate, en
+passant for both colours, castling both ways for both colours, a stalemate trap, insufficient material,
+a single legal move, mate in one, halfmove clock 99, a would-be third repetition) and the 500 fuzz games
+with zero illegal moves (Section~\ref{sec:testing}) \src{tests/test\_properties.py; RESULTS.md fuzz rows}.
+The Stage 1 move generator will be perft-tested against python-chess to depth 4 on the standard public
+positions and to depth 3 on every collected opening and on at least 2\,000 random playout positions, plus a
+legal-move-set equality test on at least 100\,000 random positions, before it replaces the library
+\src{brief, \S 5 Stage 1 DoD}; that table will be added here.
 
-\section{Evaluation}
-% Tapered material + PST from the parametric prior; mop-up; how weights were obtained; before/after.
-TODO.
+\section{Search}\label{sec:search}
+\paragraph{The algorithm in one paragraph.} The search is a \emph{negamax} tree search: every score is
+measured from the side to move's point of view, so the value of a position is the maximum over moves of
+the negated value of the resulting position. \emph{Alpha-beta pruning} carries a window $(\alpha, \beta)$
+of scores that can still matter to the ancestors and abandons a child whose value falls outside it.
+\emph{Iterative deepening} runs the search to depth 1, then 2, then 3, and so on until the clock says
+stop; each iteration seeds the next with good first-try moves, and a fully searched answer is always
+available. At the leaves a \emph{quiescence} search continues with captures (and queen promotions) only,
+because a static evaluation in the middle of an exchange is meaningless; the side to move may always
+\emph{stand pat}, that is, accept the static evaluation instead of capturing. A \emph{transposition table}
+(TT) remembers, per position key, the depth, score, score type (exact, lower bound or upper bound) and
+best move of an earlier visit, so that positions reached by different move orders are not searched
+twice. Scores are integers in centipawns (hundredths of a pawn); a mate delivered $p$ plies from the root
+scores $100\,000 - p$, so shorter mates score higher. All of this is in \code{mikhail\_letal/search.py}.
 
-\section{Time management}
-% Budget formula, in-search clock check, node cap, calibration table (local vs platform move
-% times and init times).
-TODO.
+\paragraph{Why these techniques and not others here.} The platform gives one slow core and pure Python
+gives tens of thousands of nodes per second, so the tree is small (about $10^5$--$10^6$ nodes per move at
+the real clock) and every technique that makes a small tree go deeper, or that keeps the clock check
+honest, matters more than it would at millions of nodes per second. Null-move pruning, late-move
+reductions, futility pruning, aspiration windows and quiescence delta pruning are deliberately absent from
+Stage 0: each will be added as a separate experiment with its own arena result so that the report can say
+what each is worth here \src{DECISIONS.md, 2026-09-06, ``No null-move pruning''}.
 
-\section{Endgame handling}
-% Mop-up, tablebases (adopted or not, evidence), draw handling, 600-ply cap.
-TODO.
+{\footnotesize
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{5.2cm}>{\raggedright\arraybackslash}p{5.9cm}@{}}
+\caption{Search techniques in build v0.1.0 and the local evidence for each. No per-feature arena ablation
+(feature on/off, games, interval) has been run yet; the effects listed are node-rate, latency and
+correctness measurements from the 2026-09-07 review. Elo ablations are Stage 1 work.}\label{tab:search}\\
+\toprule
+technique & what it does and why & measured effect (local, dev box) \\
+\midrule
+\endfirsthead
+\toprule
+technique (continued) & what it does and why & measured effect (local, dev box) \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+Iterative deepening with soft and hard deadlines & No new iteration after the soft deadline; abort mid-iteration at the hard deadline and return the last completed iteration's move (or the current one's if a later root move already beat the first). & Depth 5--6 at 120 s + 0.5 s, 4--6 at 20 s + 0.2 s \src{RESULTS.md, ``depth'' rows}. \\
+Check extension & In check, search one ply deeper (capped at \code{MAX\_PLY = 128}), applied before the TT probe so probe and store see the same depth (review item L: the probe had accepted entries one ply too shallow). & Correctness fix; pinned by a unit test in \code{tests/test\_search.py} (check extension before the table probe). \\
+Quiescence, stand pat first & Test the static evaluation against $\beta$ before generating any capture; a position with no legal move is still scored as mate or stalemate, never evaluated. Before the change, captures were generated and then discarded at seven quiescence nodes in ten. & +43\,\% nps in isolation (reviewer); all review fixes together 51.7k $\to$ 67.2k nps, identical results \src{DECISIONS.md item K; RESULTS.md, ``review nps''}. \\
+Evasion cap, \code{QS\_EVASION\_PLIES = 4} & In check inside quiescence, every evasion is searched for the first four quiescence plies; deeper checks stand pat like any other node so dense positions cannot explode. & Eight queens a side: one depth-1 iteration fell from hundreds of thousands of nodes to 33k \src{DECISIONS.md item M}. \\
+Transposition table, int-only entries & \code{dict} keyed by position, entry \code{(depth, score, flag, move\_code)} with every field an \code{int} (the move is packed as from $|$ to $\ll 6$ $|$ promotion $\ll 12$ and rebuilt at the probe). Mate scores are stored ply-independent. Cap 250\,000 entries; emptied at move start if above 60\,\% of the cap, and as a backstop when the cap is hit mid-search. Persists across moves within a game. & Worst generation-2 garbage-collection pause in a 60 s search: 143 ms (270k \code{chess.Move} entries) $\to$ 13.7 ms; RSS at the cap 143 MB $\to$ 120 MB; nps on that position 50.3k $\to$ 62.7k \src{RESULTS.md, ``gen-2 gc pause'' and ``RSS at the TT cap''}. A 143 ms stall is invisible to the clock check and would have been about three times longer on the platform's core. \\
+Clock check every \code{NODE\_CHECK\_INTERVAL = 128} nodes & Read \code{perf\_counter()} and abort past the hard deadline or past an optional node limit. & With 1024 the search overshot the hard deadline by 25 ms mean, 65 ms worst locally (9 ms worst in the integration game); a clock read costs about 60 ns, and nps is unchanged at 128 \src{DECISIONS.md item A; RESULTS.md, ``hard-deadline overshoot''}. \\
+Move ordering & TT move first; captures and promotions by MVV-LVA (victim value $\times 10$ minus attacker value; a promotion counts the promoted piece as the victim); two killer moves per ply (quiet moves that caused a cutoff at the same ply); remaining quiet moves by the history heuristic (bonus $\mathrm{depth}^2$ per cutoff, indexed by colour, from- and to-square). Captures are never stored as killers. & Structural; no separate measurement. \\
+Repetition inside the tree & A node whose position already occurred in the game history or on the current search path scores 0. The side that is ahead therefore avoids repeating and the side behind seeks it, with no root rule \src{DECISIONS.md, ``Two-fold repetition''}. & Pinned by \code{test\_side\_ahead\_avoids\_repetition} and \code{test\_side\_behind\_seeks\_repetition}. \\
+Graph-history mitigation & A draw found through the path is a fact about the line, not the position, so a node whose value depended on one is not stored with its score; only its move is kept as an ordering hint at depth $-1$, never over an entry earned without the repetition. Draws from the game history are permanent within the game and are stored normally. & Cost 0.15\,\% of nps (A/B, three 3 s searches each). Evidence: after a depth-7 search of \code{8/8/8/4k3/8/8/8/R3K3 w} the table held a depth-5 lower bound of 0 for a position whose fresh value is $-628$ \src{DECISIONS.md item E}. \\
+Root tie-break, \code{DRAW\_TIEBREAK\_MARGIN = 300} & When the best root score is exactly 0, at least two root moves tie at it and the root static evaluation is at least 300 in our favour, the tied move whose child evaluates best is chosen (stalemates excluded): a rule draw inside the horizon must not stall a mop-up. & With the urgency clamps (Section~\ref{sec:time}) the 600-ply case \code{8/8/8/3K4/8/8/8/q6k b - - 0 291} converts (mate in 17 plies); it was drawn at the cap before \src{RESULTS.md, ``Known unconverted wins''}. \\
+Queen over under-promotion on exact ties & If the first root move is an under-promotion, the queen promotion of the same pawn is searched before it, so the queen wins an exact tie (fail-soft scores of later moves are only bounds, so comparing them at the root was rejected). & The reviewer had seen \code{b8=R} chosen over \code{b8=Q} \src{DECISIONS.md item H}. \\
+Urgency clamps & Not a search technique but a budget one: when the 600-ply cap or, in a pawnless mop-up, the fifty-move draw is near, \code{moves\_to\_go} is clamped to the moves left before it so the search gets the time a mate needs (Section~\ref{sec:time}). & Two won KQ-vs-K games had been drawn by rule with the normal budget \src{DECISIONS.md item C}. \\
+\end{longtable}
+}
 
-\section{Safety and failure handling}
-% Wrapper, fallback, panic mode, desync reset; fuzz counts.
-TODO.
+\section{Evaluation}\label{sec:eval}
+\paragraph{Terms.} The static evaluation (\code{mikhail\_letal/evaluation.py}) has three terms: material,
+piece-square tables and a mop-up term. It is \emph{tapered}: every piece has a middlegame table and an
+endgame table, and the position's \emph{phase} blends them. The phase counts the non-pawn pieces on the
+board with weights knight 1, bishop 1, rook 2, queen 4, so it is 24 with every piece on the board and 0
+with only kings and pawns; the score is
+\[
+  \mathrm{score} = \frac{\mathrm{mg} \cdot \mathrm{phase} + \mathrm{eg} \cdot (24 - \mathrm{phase})}{24},
+\]
+truncated toward zero so that mirrored positions score exactly opposite. Material values are folded into
+the tables at load time, so the hot loop does one table lookup per piece per phase. Insufficient material
+scores 0. The result is negated for Black to move, so the search sees every node the same way. Piece
+bitboards are read directly rather than through \code{pieces\_mask} and \code{scan\_forward} (same
+semantics, 1.7$\times$ faster) \src{INTEGRATION\_NOTES.md, ``Builder deviations''}.
 
-\section{Testing methodology and results}
-% Fuzz counts, perft, arena runs per version with intervals, final measurement pass, machine load.
-TODO.
+\paragraph{Piece values.} Pawn 100, knight 320, bishop 330, rook 500, queen 900, in both phases. These
+are the universal textbook values, recorded as such and untuned \src{weights/PROVENANCE.json}.
 
-\section{Rating estimate}
-% CCRL-scale R (interval); FIDE-equivalent a--b; chess.com Rapid c--d; chess.com Blitz e--f, with
-% the two routes and the honest uncertainty. Ladder anchors vs CCRL, and why no direct mapping.
-TODO.
+\paragraph{The parametric prior.} Each of the twelve tables (six pieces $\times$ two phases) is computed
+by \code{tools/gen\_pst.py} from the square's geometry. Two helper quantities: \emph{centrality} is
+$3 - \max(|\mathrm{file} - 3.5|, |\mathrm{rank} - 3.5|)$, which is $2.5$ on the four centre squares and
+$-0.5$ on the rim; \emph{advancement} is the rank seen from the piece's own side, 0 to 7. Then: pawns gain
+\code{pawn\_adv\_mg} per step forward and \code{pawn\_centre\_mg} on d/e files on ranks 3--5 in the
+middlegame, and \code{pawn\_adv\_eg}$\cdot \mathrm{advancement}^2/7$ in the endgame (a passed-pawn shape);
+knights gain \code{knight\_centre} $\times$ centrality and lose \code{knight\_rim} on the outer ring;
+bishops gain \code{bishop\_centre} $\times$ centrality and \code{bishop\_long\_diagonal} on the two long
+diagonals; rooks gain \code{rook\_seventh} on the seventh rank and \code{rook\_centre\_file} on d/e files
+in the middlegame and are flat in the endgame; queens gain \code{queen\_centre} $\times$ centrality
+$\times 0.5$ and lose \code{queen\_early} for leaving the back two ranks in the middlegame; the king gains
+\code{king\_shelter} on b1/c1/g1 and loses \code{king\_centre\_penalty} per rank of advancement and on the
+d/e files in the middlegame, and gains \code{king\_centre\_eg} $\times$ centrality in the endgame. The
+script prints every table as an 8$\times$8 grid for a human to read, records the parameters and the
+tables' SHA-256 in the JSON's \code{\_provenance} object, and a test checks that the shipped file matches
+the generator bit for bit (\code{test\_pst\_json\_matches\_the\_generator}).
+
+\begin{table}[H]\centering\footnotesize
+\begin{tabular}{@{}lr>{\raggedright\arraybackslash}p{10.6cm}@{}}
+\toprule
+parameter & value & reason recorded in \code{tools/gen\_pst.py} \\
+\midrule
+\code{pawn\_adv\_mg} & 4 & each step forward gains space, but pawn storms weaken the king, so small \\
+\code{pawn\_centre\_mg} & 12 & d/e pawns on ranks 3--5 hold the centre; comparable to a tempo \\
+\code{pawn\_adv\_eg} & 14 & quadratic in steps forward ($14 \times 25 / 7 = 50$ on the 7th), a passed-pawn shape \\
+\code{knight\_centre} & 12 & knights gain most from the centre ($2.5 \times 12 = 30$) and lose most on the rim \\
+\code{knight\_rim} & 14 & a knight on the edge attacks half as many squares: extra penalty \\
+\code{bishop\_centre} & 6 & bishops act at range, so centrality matters half as much as for knights \\
+\code{bishop\_long\_diagonal} & 6 & the two long diagonals see the whole board \\
+\code{rook\_seventh} & 20 & a rook on the 7th cuts off the king and eats pawns \\
+\code{rook\_centre\_file} & 8 & d/e files are open most often in the middlegame \\
+\code{queen\_centre} & 8 & halved by the formula: the queen is strong everywhere \\
+\code{queen\_early} & 12 & a queen past the second rank invites harassment before the minors develop \\
+\code{king\_shelter} & 25 & castled squares b1/c1/g1 keep pawns in front of the king \\
+\code{king\_centre\_penalty} & 10 & per rank of advancement and for the d/e files, so e8 gives $-80$ at most \\
+\code{king\_centre\_eg} & 10 & the king becomes a fighting piece; $2.5 \times 10 = 25$ in the centre \\
+\code{mopup\_edge} & 10 & per Manhattan step of the bare king from the centre (max 6, so 60) \\
+\code{mopup\_close} & 12 & per step our king is closer than 14; exceeds one ring of \code{king\_centre\_eg} \\
+\bottomrule
+\end{tabular}
+\caption{All sixteen parameters of the prior (\code{PARAMETERS} in \code{tools/gen\_pst.py}, copied into
+\code{weights/pst.json} under \code{\_provenance.parameters}). Magnitudes were chosen so the largest table
+entry stays under a pawn: piece-square effects refine material, they do not rival it. Resulting table
+ranges (min, max): middlegame P 0..24, N $-20$..30, B $-3$..21, R 0..28, Q $-14$..2, K $-80$..25; endgame
+P 0..50, N $-20$..30, B $-3$..21, R 0..0, Q $-2$..10, K $-5$..25 \src{weights/PROVENANCE.json}.}
+\end{table}
+
+\paragraph{Mop-up.} When one side has a bare king, the other has no pawns and at least a rook's worth of
+material (or two minor pieces), the stronger side gains
+$\code{mopup\_edge} \cdot d_{\mathrm{centre}}(\text{weak king}) + \code{mopup\_close} \cdot (14 -
+d(\text{king}, \text{king}))$, with $d$ the Manhattan distance: drive the bare king to the edge and bring
+ours close. The idea is textbook geometry; the two weights (10 and 12) are ours and were chosen by hand
+so that ``close'' beats one ring of the endgame king table \src{DECISIONS.md, 2026-09-06, ``Mop-up term''}.
+
+\paragraph{Cost.} \code{evaluate()} takes 3.4--3.8~$\mu$s in the middlegame and 1.6~$\mu$s in the endgame
+(10\,000-call loops) \src{RESULTS.md, row ``\code{evaluate()} cost''}.
+
+\paragraph{How the weights were obtained, and before/after.} They were not tuned: Stage 0 ships the prior
+as generated, so there is no tuning script, data set or run to cite and no before/after arena result.
+Texel-style tuning of the piece values and tables on positions from our own arena games and public human
+games, labelled by game result or by a local reference engine's static evaluation (permitted by the
+rules), is a Stage 2 experiment; it will be accepted only on a positive interval against the untuned set,
+and its script, data hash and run id will be added to Appendix~\ref{app:provenance}.
+
+\section{Time management}\label{sec:time}
+\paragraph{The budget formula.} Every constant lives in one frozen dataclass, \code{TimeParams}
+(file \code{mikhail\_letal/timing.py}), so that a calibration changes one object and nothing else. With
+$t$ the clock in milliseconds before the move and $m$ the number of moves we have played this game:
+\begin{align*}
+  \mathrm{moves\_to\_go} &= \mathrm{clamp}(40 - \lfloor m/2 \rfloor,\ 12,\ 40), \\
+  \mathrm{moves\_to\_go} &= \min(\mathrm{moves\_to\_go},\ \lceil \mathrm{plies\_to\_cap}/2 \rceil,\ \lceil \mathrm{fifty\_move\_room}/2 \rceil), \\
+  \mathrm{soft} &= (t - \mathrm{overhead}) / \mathrm{moves\_to\_go} + 0.8 \times 500, \\
+  \mathrm{hard} &= \min(3 \times \mathrm{soft},\ 0.25\, t), \\
+  \mathrm{floor} &= \max(1500,\ 0.05\, t), \\
+  \mathrm{hard} &= \min(\mathrm{hard},\ t - \mathrm{overhead} - \mathrm{floor}), \qquad \mathrm{soft} = \min(\mathrm{soft}, \mathrm{hard}),
+\end{align*}
+both clamped to be non-negative. \code{plies\_to\_cap} $= 600 - \mathrm{ply}$ is always passed;
+\code{fifty\_move\_room} $= 100 - \mathrm{halfmove\ clock}$ is passed only in a pawnless mop-up, where
+nothing but the mate itself resets the halfmove clock (the urgency clamps of review item C). Worked
+examples from the unit tests: at $t = 120\,000$, $m = 0$: moves\_to\_go 40, soft $= 119\,850/40 + 400 =
+3396.25$~ms, hard $= 10\,188.75$~ms; at $t = 60\,000$, $m = 20$: moves\_to\_go 30, soft $= 2395$~ms, hard
+$= 7185$~ms \src{tests/test\_timing.py}.
+
+\paragraph{How the budget is used.} \code{get\_move} starts its own timer on entry, so board construction
+and history bookkeeping count against the budget as they do on the platform. The searcher is handed two
+absolute deadlines: a soft deadline at $0.45 \times \mathrm{soft}$ after which no new iteration starts
+(the next iteration costs several times the previous one), and a hard deadline at which the search aborts
+mid-iteration; the clock is read every 128 nodes (Section~\ref{sec:search}). A node limit is supported by
+the search and tested (\code{test\_node\_limit\_stops\_search\_close\_to\_the\_limit}) but is not set in
+Stage 0; the brief's node cap derived from a measured node rate is for the jitted search, where a
+misbehaving clock read is the risk it backs up. Below \code{panic\_ms} $= 1650$~ms the engine is skipped
+and the fallback plays (Section~\ref{sec:safety}); a position with a single legal move is played without
+searching.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}ll>{\raggedright\arraybackslash}p{7.6cm}@{}}
+\toprule
+constant & value & origin \\
+\midrule
+\code{increment\_ms} & 500 & agent contract \\
+\code{overhead\_ms} & 150 & brief's initial guess; to be replaced by $\max$ over a game of (platform-measured move time $-$ self-measured) $+ 50$ \\
+\code{moves\_to\_go\_max} / \code{min} & 40 / 12 & brief \S 6.2 \\
+\code{increment\_fraction} & 0.8 & brief \S 6.2 \\
+\code{hard\_multiplier} / \code{hard\_fraction} & 3.0 / 0.25 & brief \S 6.2 \\
+\code{floor\_ms} / \code{floor\_fraction} & 1500 / 0.05 & brief \S 6.2 \\
+\code{panic\_ms} & 1650 & \code{overhead\_ms} + \code{floor\_ms}: below it the formula has no time to plan with (the brief suggested about 1500; in the band 1500--1650 the formula returned a zero budget and a depth-0 move) \\
+\code{next\_iteration\_fraction} & 0.45 & brief; to be replaced by the measured iteration-cost ratio \\
+\bottomrule
+\end{tabular}
+\caption{Time-management constants of build v0.1.0, all uncalibrated \src{docs/CALIBRATION.md}.}
+\end{table}
+
+\paragraph{What the local games show.} At the real clock the smoke games from the extracted zip ran 1.5 to
+7.7~s per move against a soft target of about 3.3~s and a hard limit of about 10~s, with an average spend
+of 3.1--3.5~s per move including the increment \src{RESULTS.md, row ``depth at 120 s clock'';
+INTEGRATION\_NOTES.md, ``Time profile''}. The reason moves overrun the soft target is the iteration-cost
+ratio $T(d)/T(d-1)$: median 4.3--5.2 and up to about 10 on middlegame searches, so an iteration begun at
+$0.45 \times \mathrm{soft}$ usually runs to 2--2.5 $\times$ soft and is cut by the hard limit; below
+about 20~s on the clock the hard limit ($0.25\, t$) binds every move \src{CALIBRATION.md,
+``Observations''}. This is sustainable at 40 moves to go but is the first thing to check in the validation
+log. Worst hard-deadline overshoot inside \code{get\_move}: 9~ms (\code{t 2661} against \code{h 2652}),
+with the 1024-node check interval then in force; the local harness's own overhead (referee-measured minus
+self-measured) was 0--1~ms per move \src{RESULTS.md, rows ``hard-deadline overshoot'' and ``local harness
+overhead''}.
+
+\paragraph{Calibration procedure.} When a validation log arrives the operator pastes it and the following
+is done \src{CALIBRATION.md, ``Procedure''}: (1)~extract the init time, every per-move time, the clock left
+after each move and any stderr; (2)~pair each platform-measured move time with the self-measured \code{t}
+token of our log line; the difference is the platform overhead for that move, and
+\code{overhead\_ms} $= \max(\text{difference}) + 50$; (3)~compute the platform node rate from our \code{nps}
+tokens and divide by the local node rate on the same build and positions to get the speed factor, and
+rescale any node cap; (4)~record the platform init time against the local one; (5)~commit the new
+constants with the log excerpt. The speed factor and the calibration table are
+\pending{first platform validation log: table of local vs platform move times, init time, overhead and
+speed factor (CALIBRATION.md, ``Log of calibrations'')}.
+
+\section{Endgame handling}\label{sec:endgame}
+\paragraph{Mop-up.} Section~\ref{sec:eval}: a geometric term so that KX-vs-K converts without tablebases.
+\paragraph{Tablebases.} Not adopted in this build. Syzygy 3--4-man probing through \code{chess.syzygy} is
+a Stage 2 experiment; it ships only if the files fit inside the size cap with margin and an arena run from
+endgame-heavy positions shows a positive interval, otherwise the mop-up term stays
+\src{DECISIONS.md, 2026-09-06, ``Mop-up term instead of tablebases''}.
+\paragraph{Draw handling.} Inside the tree the terminal checks run in this order: ply $\geq 600$ is a draw;
+a position already in the game history or on the search path is a draw; halfmove clock $\geq 100$ is
+checkmate if the side to move is mated, otherwise a draw (the referee checks mate first, and so do we:
+\code{test\_mate\_in\_one\_beats\_the\_fifty\_move\_rule}). The game history starts at the first FEN
+received, as the referee's does, and is kept by \code{GameState} (Section~\ref{sec:safety}). Because any
+earlier occurrence scores a draw, the engine steers away from a repetition before the third occurrence
+when ahead, and toward one when behind. Near a rule deadline the urgency clamps
+(Section~\ref{sec:time}) and the root tie-break (Section~\ref{sec:search}) make sure a won position is not
+shuffled into a draw.
+\paragraph{The 600-ply cap.} \code{GAME\_PLY\_CAP = 600}; the ply is taken from the FEN's move number, so
+the count matches the referee's, which counts the opening position \src{tests: \code{test\_ply\_cap\_scores\_draw}}.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{5.2cm}>{\raggedright\arraybackslash}p{2.5cm}>{\raggedright\arraybackslash}p{7.0cm}@{}}
+\toprule
+position & outcome at 5 s/move & note \\
+\midrule
+Lucena \code{1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1} & not converted & rook-endgame technique beyond a depth-6 horizon; Stage 2 \\
+\code{8/8/8/8/3k4/8/8/4KQ2 w - - 82 60} (KQ vs K, 18 plies of fifty-move room) & not converted: draw by fifty moves, mate two moves short & the tablebase (queried by hand) gives mate in 13 plies, so it is winnable; the engine drives the king to the edge but not at tablebase pace, and depth 6 at 1\,250 ms per move never sees the mate in time \\
+\code{8/8/8/3K4/8/8/8/q6k b - - 0 291} (KQ vs K, 19 plies before the 600-ply cap) & converted, mate in 9 moves (17 plies) & drawn at the cap before the 2026-09-07 fixes \\
+\bottomrule
+\end{tabular}
+\caption{Endgame probes with the reviewer's driver at 5\,000 ms per move, where the hard limit
+($0.25 \times$ clock) caps every move at 1\,250 ms; the opponent is a second copy of the engine
+\src{RESULTS.md, ``Known unconverted wins''}. At the real 120 s clock the urgency clamps can add time; at
+5 s they cannot.}
+\end{table}
+
+\section{Safety and failure handling}\label{sec:safety}
+\paragraph{The wrapper.} \code{agent.py} is deliberately small. \code{get\_move} builds the board from
+the FEN, updates the game history, lists the legal moves, decides a budget, calls the engine, and checks
+the answer. The whole body is inside one \code{try}: any exception is logged in one line and the fallback
+plays. The engine's move is accepted only if it is in the legal-move list; then a \emph{final guard}
+(\code{\_validated}) parses the UCI string back and looks it up in the legal moves of a fresh
+\code{chess.Board(fen)}, exactly as the referee will, replacing it with the fallback if that fails. Only
+after this check is the move recorded in the history and printed. Even the logging is wrapped, and lines
+are capped at 120 bytes because the platform keeps only the first and last 4~KB of output.
+\paragraph{The fallback.} \code{fallback\_move} looks one ply ahead: a mate in one if there is one,
+otherwise the move that leaves us the most material, preferring big captures and queen promotions, with the
+UCI string as the last tie-break so the same position always gives the same move. It returns in a few
+milliseconds and is tested on its own (mate in one, best capture, promotion, en passant, determinism,
+legality in random positions, speed) \src{tests/test\_fallback.py}.
+\paragraph{The panic band.} Below \code{panic\_ms} $= 1650$~ms the engine is not called at all. The
+threshold equals \code{overhead\_ms} $+$ \code{floor\_ms}: in the band 1500--1650~ms the formula returned
+a zero budget and the search aborted at its first clock check with a depth-0 move, so the band was routed
+to the fallback instead \src{INTEGRATION\_NOTES.md, ``For the reviewers'' item 2; commit 974264d}.
+\paragraph{Desync reset.} The platform sends nothing but a FEN and a clock. \code{GameState.observe}
+expects each received position to be one legal move away from the position after our last move, and
+reconstructs the opponent's move by trying every legal move and comparing repetition keys. If no move
+matches (a desync: the platform and our history disagree), the history is reset to the received position,
+a line is logged, and the engine's transposition table is cleared, because stored draws may rest on the
+history just discarded \src{agent.py; DECISIONS.md item E}. One known gap is benign by design: when we
+play Black we never see the game's true start position, so its count stays one below the referee's; since
+any earlier occurrence already scores a draw, nothing changes
+(\code{test\_black\_never\_sees\_the\_start\_position}).
+\paragraph{Start-up.} A depth-2 search from the initial position runs at import so every code path has
+executed before the clock starts; the table is cleared after it. \code{OMP\_NUM\_THREADS} and
+\code{NUMBA\_NUM\_THREADS} are set to 1 before any other import. Log lines are printed with
+\code{flush=True}: the runner points our stdout at a pipe, which Python block-buffers, and kills the
+process when the game ends; without the flush the first local game printed no agent output at all
+\src{INTEGRATION\_NOTES.md, ``What changed in integration''}.
+\paragraph{Fuzz counts.} 300 games against \code{baselines/random} at 3~s + 0.05~s and 200 against
+\code{baselines/greedy} at 10~s + 0.1~s, over the collected openings, twelve games in parallel: 500 games,
+500 wins by checkmate, zero terminations by crash, illegal move, flag or init
+\src{RESULTS.md, rows \code{fuzz-random-v0.1} and \code{fuzz-greedy-v0.1}}. The random mover is the
+opponent that plays the strange moves (under-promotions, en passant, stalemate tries) that exercise the
+guard paths.
+
+\section{Testing methodology and results}\label{sec:testing}
+\paragraph{Machines and load.} Development machine: 16 cores, 7.8~GB RAM, WSL2 on Windows, Python
+3.12.14. Platform: one core of an AMD EPYC 9V74 at 2.60~GHz, 2~GB \src{RESULTS.md, ``Machine''}. Every
+arena row records the one-minute load average at the start and the end of the run, because games sharing
+a machine stop measuring time management; the deciding games (real clock, previous version, strongest
+baseline, $\geq 40$ games with the slowest move and minimum clock inspected) must be run alone.
+\paragraph{Statistics.} \code{tools/arena\_openings.py} draws openings from \code{data/openings.txt}
+(219 distinct FENs under 34 names, collected from 400 public game pages of 80 of the 335 teams, one request
+per second, on 6~September) \src{RESULTS.md, row ``curated openings collected''}, alternates colours, and
+prints the same score, 95\,\% interval and Elo formulas as the starter harness, plus draw rate and
+termination counts. Rule of thumb for sample size (score near 50\,\%, about 25\,\% draws): the Elo standard
+error is about $300/\sqrt{n}$, so about 300 games resolve $+50$ Elo and about 1\,500 resolve $+20$; no
+improvement whose interval includes zero is ever claimed \src{brief, \S 7.3}.
+
+\begin{table}[H]\centering\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{1.4cm}>{\raggedright\arraybackslash}p{1.6cm}>{\raggedright\arraybackslash}p{0.8cm}>{\raggedright\arraybackslash}p{1.7cm}>{\raggedright\arraybackslash}p{1.0cm}>{\raggedright\arraybackslash}p{1.0cm}>{\raggedright\arraybackslash}p{2.2cm}>{\raggedright\arraybackslash}p{1.2cm}>{\raggedright\arraybackslash}p{2.2cm}@{}}
+\toprule
+opponent & tc & games & +W =D $-$L & score & 95\,\% & terminations & workers & load start / end \\
+\midrule
+\code{random} & 3\,+\,0.05~s & 300 & +300 =0 $-$0 & 100.0\,\% & $\pm$0.0\,\% & checkmate 300 & 12 & 0.10 0.27 0.22 / 7.45 2.31 0.93 \\
+\code{greedy} & 10\,+\,0.1~s & 200 & +200 =0 $-$0 & 100.0\,\% & $\pm$0.0\,\% & checkmate 200 & 12 & 7.45 2.31 0.93 / 10.55 5.77 2.43 \\
+\code{minimax} & 120\,+\,0.5~s & 40 & +39 =1 $-$0 & 98.8\,\% & $\pm$2.4\,\% & checkmate 39, threefold repetition 1 & 4 & 1.48 3.05 2.04 / 2.66 3.91 3.34 \\
+\bottomrule
+\end{tabular}
+\caption{Arena runs of build v0.1.0: rows \code{fuzz-random-v0.1}, \code{fuzz-greedy-v0.1} and
+\code{v0.1-vs-minimax-real-clock} of RESULTS.md, in that order; opponents are the starter's
+\code{baselines/random}, \code{greedy} and \code{minimax}. Openings: \code{data/openings.txt}.
+The tool printed no Elo for these runs. Loads of 7--10 during the fuzz runs are expected with twelve
+workers and mean those games do not measure time management; the minimax run used four workers (load
+1.5--3.9 on 16 cores), so its per-move times are indicative but it is not the solo pass of Stage 3. Its one
+draw is by threefold repetition; the PGNs are kept under \code{data/pgn/}.
+\code{baselines/greedy} searches one ply on material; \code{baselines/minimax} two plies on material and
+mobility with no time management \src{README.md}.}
+\end{table}
+
+\begin{table}[H]\centering\footnotesize
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.9cm}>{\raggedright\arraybackslash}p{4.3cm}>{\raggedright\arraybackslash}p{5.5cm}@{}}
+\toprule
+measurement & value & how \\
+\midrule
+node rate, middlegame & 50--61k nps & agent log lines, \code{harness.play} vs greedy at 20 s + 0.2 s \\
+depth at 20 s clock & 4--6 (seldepth 13--21) & same game \\
+depth at 120 s clock & 5--6 (seldepth 18--32); 1.5--7.7 s per move vs soft $\approx$ 3.3 s, hard $\approx$ 10 s & \code{harness.package} smoke games from the extracted zip \\
+hard-deadline overshoot inside \code{get\_move} & 9 ms worst seen & clock read every 1024 nodes at the time \\
+local harness overhead & 0--1 ms per move & referee clocks minus the \code{t} token \\
+import time (incl. depth-2 warm-up) & 0.033 s & three runs \\
+peak RSS after a 10 s search & 42.4 MB (16.8 MB before); 53\,640 TT entries & \code{resource.getrusage} \\
+\code{evaluate()} cost & 3.4--3.8 $\mu$s middlegame, 1.6 $\mu$s endgame & 10\,000-call loops \\
+zip & 23\,333 bytes, 66\,825 unzipped & \code{harness.package}; both smoke games clean \\
+test suite & 143 passed (44 property tests ran) & \code{pytest -q}, 33 s \\
+review nps (3 s search, start position) & 51.7k $\to$ 67.2k (+30\,\%), same move, depth 6/17 & median of 3 \\
+gen-2 gc pause, 60 s search & 143 ms max $\to$ 13.7 ms max & \code{gc.callbacks} timing \\
+RSS at the TT cap & 120 MB (250k entries) after; 143 MB (270k) before & same 60 s search \\
+\bottomrule
+\end{tabular}
+\caption{Other measurements of build v0.1.0, development machine \src{RESULTS.md, ``Other measurements''}.}
+\end{table}
+
+\paragraph{Static checks and smoke games.} \code{ruff format --check}: 32 files already formatted;
+\code{ruff check .}: all checks passed; \code{mypy --strict}: no issues in 28 source files;
+\code{pytest -q}: 143 passed in 32.8~s; \code{harness.arena} vs random, 2 games at 5~s: +2 =0 $-$0 by
+checkmate; \code{harness.play} vs greedy at 20~s + 0.2~s: won by checkmate in 16 of our moves, twice;
+\code{harness.package}: zip built and both platform-style smoke games (120~s + 0.5~s, 20 plies) clean
+\src{INTEGRATION\_NOTES.md, ``Checks run''}.
+\paragraph{Perft.} Not applicable to Stage 0 (Section 4); the Stage 1 table will go here.
+\paragraph{Per-move log of the minimax run.} \pending{slowest move, minimum clock reached, any move over
+its hard cap, and the position of the repetition draw, from the logs of \code{v0.1-vs-minimax-real-clock}}.
+\paragraph{Final measurement pass.} \pending{Stage 3 final pass alone on the machine at 120 s + 0.5 s:
+vs the previous version, vs the strongest baseline, and $\geq 40$ games with the slowest move and the
+minimum clock reached}.
+
+\section{Rating estimate}\label{sec:rating}
+Everything in this section is a method statement; the numbers are \pending{Stage 3 rating estimate:
+yardstick matches, MLE fit, and the four-scale conversion}. The statement will be tagged as an estimate.
+
+\paragraph{Why the ladder's anchors cannot be mapped to CCRL directly.} Five house engines hold fixed
+ladder ratings and also have published CCRL Blitz (40/4) ratings. The two sets do not agree even in order.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}lrr@{}}
+\toprule
+house engine & CCRL Blitz 40/4 (fetched 6 Sep 2026) & ladder anchor \\
+\midrule
+Loki 3.0.0 & 2427 $\pm$ 13 & 1721 \\
+Zagreus 5.0 & 2168 $\pm$ 16 & 1686 \\
+Rustic Alpha 3.0.0 & 1791 $\pm$ 16 & 1630 \\
+Shallow Blue 2.0.0 & 1576 $\pm$ 19 & 1632 \\
+Zagreus 2.3.1 & 1399 $\pm$ 20 & 1527 \\
+\midrule
+spread & 1\,028 & 194 \\
+\bottomrule
+\end{tabular}
+\caption{The five fixed-rating house engines \src{brief, \S 8.1}.}
+\end{table}
+
+A 1\,028-point CCRL spread compressed to 194 ladder points, not in CCRL order, with similar win--loss
+records, means the organisers are almost certainly running these engines throttled (fixed depth or nodes
+or similar) and set the anchor values by their own calibration. We therefore do not derive a ladder-to-CCRL
+mapping from the anchors; both sets of numbers are recorded here and that is all.
+
+\paragraph{Yardstick matches (local only).} The instrument is \code{tools/yardstick/agent.py}, a
+harness-compatible agent that drives a UCI engine through \code{chess.engine.SimpleEngine} on the real
+clock it is handed, with \code{Threads=1}, \code{Hash=16}, \code{Move Overhead=100},
+\code{UCI\_LimitStrength=True} and \code{UCI\_Elo} at a level taken from an environment variable. The
+engine is a locally installed Stockfish, whose \code{UCI\_Elo} is documented as calibrated at 120~s + 1~s
+and anchored to CCRL 40/4, close to the competition clock; the same wrapper without strength options runs
+the real Sunfish as a second yardstick. Levels 1400, 1600, 1800, 2000 and 2200 (extended upward if the
+agent scores over 70\,\% at 2200), at least 60 games per level at 120~s + 0.5~s, colours alternated,
+openings from \code{data/openings.txt}, machine load noted. Fit: the maximum-likelihood rating $R$ over all
+games with expected score $1/(1 + 10^{(L - R)/400})$ against level $L$ and draws counted as one half; a
+bootstrap over games for the 95\,\% interval; then the yardstick's own calibration uncertainty ($\pm 100$)
+added in quadrature. Reported as ``CCRL-40/4-scale $\approx R$ (95\,\% interval \ldots)''. Alongside it:
+the harness's Elo-vs-baselines numbers, the score against the real Sunfish, and, once the operator has
+ladder results, the ladder rating, which pins one point of the ladder-to-CCRL map at our own strength.
+
+\paragraph{Conversion to human scales, two independent routes.} Engine-pool Elo does not map cleanly to
+human ratings; a difference of $X$ between two engines is not a difference of $X$ between two humans, and
+the mapping is not linear, so two routes are used and the union of their ranges is quoted.
+\emph{Route A (engine pool to FIDE)}: from the CCRL-scale $R$, the TalkChess rule of thumb
+$\mathrm{FIDE} \approx 2800 - 0.7 \times (2800 - \mathrm{CCRL})$ as the upper end (it is stated to break
+down below about 1800 CCRL) and $\mathrm{FIDE} \approx \mathrm{CCRL} - 100$ as the lower end; low
+confidence. \emph{Route B (human-anchored bot)}: the real Sunfish bot on lichess holds a rapid rating of
+1808 against humans, running on PyPy with pondering; on CPython without pondering about 100 lower is
+assumed, so about 1700 lichess rapid. Our measured Elo difference against Sunfish is compressed by
+0.7--1.0 for the engine-to-human transfer and added to that anchor, then converted lichess rapid $\to$
+FIDE and $\to$ chess.com with the ChessGoals July-2026 comparison table (about 20\,000 profiles; its FIDE
+column has no reliable data below about 1550 FIDE). The chess.com Rapid and Blitz ranges come from the
+same table by interpolation between these points: FIDE 1740 $\leftrightarrow$ blitz 1500 / rapid 1655;
+1865 $\leftrightarrow$ 1800 / 1870; 1965 $\leftrightarrow$ 2000 / 1995; 2075 $\leftrightarrow$ 2200 /
+2110; 2190 $\leftrightarrow$ 2400 / 2215; 2300 $\leftrightarrow$ 2600 / 2300. Ranges, never a point.
+
+\paragraph{Final statement (to be filled in).} CCRL-scale $\approx$ \pending{$R$ (interval)};
+FIDE-equivalent $\approx$ \pending{$a$--$b$}; chess.com Rapid-equivalent $\approx$ \pending{$c$--$d$};
+chess.com Blitz-equivalent $\approx$ \pending{$e$--$f$}. These are estimates built on (i) a rating-limited
+reference engine, (ii) one human-rated bot and (iii) a survey-based table; the honest uncertainty is
+$\pm 200$ or more on the human scales.
 
 \section{Known limitations and next stage}
-TODO.
+\begin{itemize}[nosep]
+  \item \textbf{Lucena.} The rook-endgame technique of \code{1K1k4/1P6/8/8/8/8/r7/2R5 w} is beyond a
+        depth-6 horizon; not converted at 5~s per move \src{RESULTS.md, ``Known unconverted wins''}.
+  \item \textbf{KQ vs K at halfmove clock 82.} \code{8/8/8/8/3k4/8/8/4KQ2 w - - 82 60} is winnable (mate
+        in 13 plies with 18 of room) but is drawn by the fifty-move rule at 5~s per move: the engine makes
+        steady progress but not at tablebase pace, and is two moves from mate when the rule lands. At the
+        real clock the urgency clamps can buy time; at 5~s the hard limit caps every move at 1\,250~ms
+        \src{DECISIONS.md item D}.
+  \item \textbf{TT clear stall.} When the table hits its 250\,000-entry cap mid-search it is emptied
+        before the next store: crude but safe. The clear at move start above 60\,\% keeps this from
+        landing mid-iteration in normal play, but it happened once in the 60~s stress search
+        \src{RESULTS.md, ``RSS at the TT cap''}. An ageing replacement scheme is Stage 1 work.
+  \item \textbf{Pure-Python speed.} 50--67k nps and depth 5--6 at the real clock is the ceiling of this
+        architecture; the platform's core is slower than the development machine by a factor that is
+        \pending{speed factor from the first validation log}.
+  \item \textbf{Uncalibrated time constants} until the first validation log; the soft target is
+        overrun by design (Section~\ref{sec:time}) and the first log decides whether that is safe.
+  \item \textbf{No tuning and no ablations.} The evaluation is the untuned prior and no search technique
+        has an Elo ablation yet; both are on the plan below.
+  \item \textbf{Private-API key.} \code{Board.\_transposition\_key()} is private to python-chess; safe at
+        the pinned 1.11.2, replaced by our own Zobrist keys in Stage 1.
+\end{itemize}
+\paragraph{Next stage.} Stage 1 is the numba engine: our own board representation, move generation,
+make/unmake, evaluation and search compiled with numba and called from the same wrapper, with python-chess
+kept as the legality oracle and fallback. Its definition of done: perft agreement with python-chess to
+depth 4 on the standard positions and depth 3 on every collected opening and $\geq 2\,000$ random
+positions, identical legal-move sets on $\geq 100\,000$ random positions; Stage 0's fuzz and property tests
+passing unchanged; import time from the zip $\leq 40$~s; $\geq 300$ games against v0.1 at 10~s + 0.1~s
+with the 95\,\% interval entirely above zero, then $\geq 100$ games at the real clock, alone on the
+machine, zero flags and interval above zero \src{brief, \S 5}. Inside it: principal-variation search,
+null-move pruning, late-move reductions, aspiration windows, mate-distance pruning and a fixed-size numpy
+transposition table, each measured. Stage 2 then adds evaluation terms, Texel tuning, the tablebase
+experiment and time-management refinements, one arena run each.
 
 \appendix
 \section{Provenance of every constant}\label{app:provenance}
-% Generated from docs/PROVENANCE.md and weights/PROVENANCE.json.
-TODO.
+Copied from two files: \code{docs/PROVENANCE.md}, which lists the search and timing constants that
+live in code, and \code{weights/PROVENANCE.json}, which lists the tables and ships in the zip. The generator commit is \code{4109710}
+(full hash in the JSON); the tables' SHA-256 is recorded in \code{weights/pst.json} under
+\code{\_provenance.tables\_sha256}.
+
+{\footnotesize
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{1.8cm}>{\raggedright\arraybackslash}p{2.3cm}@{}}
+\caption{Provenance table. Rules: every generating script is deterministic and re-runnable; a
+hand-adjusted value says so in its note with the reason; a weight file's header names its script and data
+hash.}\label{tab:provenance}\\
+\toprule
+parameter / file & value or shape & produced by & data & date & note \\
+\midrule
+\endfirsthead
+\toprule
+parameter / file (continued) & value or shape & produced by & data & date & note \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+piece values (mg, eg) & P 100, N 320, B 330, R 500, Q 900, K 0 & \code{tools/gen\_pst.py} @ 4109710 & none (textbook) & 2026-09-06 & universal textbook values, recorded as such; to be tuned in Stage 2 \\
+\code{weights/pst.json} PSTs & 6 pieces $\times$ 64 $\times$ \{mg, eg\}; ranges in Section~\ref{sec:eval} & \code{tools/gen\_pst.py} @ 4109710 (parametric geometric prior; parameters in the file's \code{\_provenance}) & none (formula) & 2026-09-06 & not copied from any engine; printed and eyeballed; one coincidental row vs CPW (Section~\ref{sec:rules}) \\
+mop-up weights & edge 10, close 12 & \code{tools/gen\_pst.py} & none & 2026-09-06 & chosen by hand from the geometric idea \\
+phase weights & N 1, B 1, R 2, Q 4 (total 24) & \code{tools/gen\_pst.py} $\to$ \code{pst.json} (\code{evaluation.py} only validates them) & none & 2026-09-06 & standard tapered-evaluation weighting \\
+\code{MATE\_SCORE}, \code{MATE\_THRESHOLD} & 100\,000, 99\,000 & code & none & 2026-09-06 & arbitrary large constants \\
+TT entry cap & 250\,000 (default of \code{Engine}); \code{dict}, cleared when full and at move start above 60\,\% (\code{TT\_CLEAR\_FRACTION}) & code & none & 2026-09-07 & bounds memory: 120 MB RSS at the cap; int-only entries keep gc pauses $\leq 14$ ms \\
+\code{NODE\_CHECK\_INTERVAL} & 128 & code & none & 2026-09-07 & clock cadence; 1024 gave 25 ms mean / 65 ms max overshoot locally; a read costs about 60 ns \\
+\code{MAX\_PLY} & 128 & code & none & 2026-09-06 & recursion bound for search, quiescence and extensions \\
+check extension & +1 ply when in check & code & none & 2026-09-06 & textbook; applied before the TT probe \\
+\code{QS\_EVASION\_PLIES} & 4 & code & none & 2026-09-07 & keeps eight-queens-a-side positions under 100k nodes at depth 1 \\
+\code{DRAW\_TIEBREAK\_MARGIN} & 300 & code & none & 2026-09-07 & ``clearly ahead'' = at least a minor piece \\
+history heuristic bonus & $\mathrm{depth}^2$ & code & none & 2026-09-06 & textbook \\
+\code{GAME\_PLY\_CAP} & 600 & code & none & 2026-09-06 & the referee's cap \\
+time constants & Section~\ref{sec:time} table & code & none & 2026-09-06 & brief \S 6.2 initial values; calibration \pending{first validation log} \\
+\end{longtable}
+}
 
 \end{document}
