@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 
 from harness.rules import PLY_CAP
 from tools.webapp import games
+from tools.webapp.analysis import AnalysisService
 from tools.webapp.games import GameError, Registry
 
 STATIC = Path(__file__).resolve().parent / "static"
@@ -41,19 +42,23 @@ JsonObject = dict[str, object]
 
 
 class WebApp:
-    """The request-independent application: repository root plus the game registry."""
+    """The request-independent application: repository root, the game registry and the
+    analysis service (Stockfish, when a local binary is found)."""
 
-    def __init__(self, registry: Registry) -> None:
+    def __init__(self, registry: Registry, analysis: AnalysisService | None = None) -> None:
         self.registry = registry
         self.root = registry.root
+        self.analysis = analysis if analysis is not None else AnalysisService(registry)
 
     def info(self) -> JsonObject:
+        engine = self.analysis.engine_status()
         return {
             **games.engine_identity(self.root),
             "git": games.git_info(self.root),
             "results": games.results_status(self.root),
             "contract": games.contract(),
             "engines": [engine.to_dict() for engine in games.list_engines(self.root)],
+            "analysis": {"available": engine["available"], "name": engine["name"]},
             "time_controls": [
                 {"label": label, "base_ms": base, "increment_ms": increment}
                 for label, base, increment in games.TIME_CONTROLS
@@ -86,6 +91,8 @@ class WebApp:
             if resource in simple:
                 return 200, simple[resource]()
             raise GameError(404, f"no such endpoint: {path}")
+        if resource == "analysis":
+            return self._analysis(method, path, parts[2:], body)
         if resource != "games":
             raise GameError(404, f"no such endpoint: {path}")
         if method == "POST" and len(parts) == 2:
@@ -123,6 +130,30 @@ class WebApp:
             return 200, game.snapshot()
         raise GameError(404, f"no such endpoint: {method} {path}")
 
+    def _analysis(
+        self, method: str, path: str, rest: list[str], body: JsonObject | None
+    ) -> tuple[int, object]:
+        """``/api/analysis``: the engine, the sources, the job list, one job."""
+        service = self.analysis
+        if method == "POST" and not rest:
+            job, cached = service.submit(body or {})
+            return 202, {"job_id": job.id, "cached": cached}
+        if len(rest) != 1:
+            raise GameError(404, f"no such endpoint: {method} {path}")
+        name = rest[0]
+        if method == "GET":
+            if name == "engine":
+                return 200, service.engine_status()
+            if name == "sources":
+                return 200, service.sources()
+            if name == "jobs":
+                return 200, service.jobs()
+            return 200, service.get(name).to_dict(with_result=True)
+        if method == "DELETE":
+            service.cancel(name)
+            return 204, None
+        raise GameError(405, f"{method} is not allowed on {path}")
+
 
 def make_handler(app: WebApp, quiet: bool = True) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
@@ -150,7 +181,9 @@ def make_handler(app: WebApp, quiet: bool = True) -> type[BaseHTTPRequestHandler
                 if path.startswith("/api/"):
                     body = self._read_json() if method in ("POST", "DELETE") else None
                     status, payload = app.api(method, path, body)
-                    if isinstance(payload, str):
+                    if status == 204:
+                        self._empty(status)
+                    elif isinstance(payload, str):
                         headers = {}
                         if path.endswith("/pgn"):
                             game_id = path.split("/")[3]
@@ -208,6 +241,12 @@ def make_handler(app: WebApp, quiet: bool = True) -> type[BaseHTTPRequestHandler
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self._send(status, data, "application/json; charset=utf-8")
 
+        def _empty(self, status: int) -> None:
+            # 204 carries neither a body nor a Content-Length (RFC 9110); keep-alive stays intact
+            # because the client knows there is nothing to read.
+            self.send_response(status)
+            self.end_headers()
+
         def _send(
             self,
             status: int,
@@ -237,10 +276,11 @@ def serve(
     port: int = 8000,
     registry: Registry | None = None,
     quiet: bool = True,
+    analysis: AnalysisService | None = None,
 ) -> tuple[Server, WebApp]:
     """Bind and return the server without running it; ``server.serve_forever()`` starts it."""
     registry = registry if registry is not None else Registry()
-    app = WebApp(registry)
+    app = WebApp(registry, analysis)
     server = Server((host, port), make_handler(app, quiet=quiet))
     return server, app
 
@@ -281,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     # leaving suspended agent processes behind. Route it through the same path as Ctrl-C.
     signal.signal(signal.SIGTERM, _raise_interrupt)
     try:
-        server, _ = serve(arguments.host, arguments.port, registry, quiet=not arguments.verbose)
+        server, app = serve(arguments.host, arguments.port, registry, quiet=not arguments.verbose)
     except OSError as error:
         print(f"could not bind {arguments.host}:{arguments.port}: {error}", file=sys.stderr)
         return 1
@@ -289,12 +329,18 @@ def main(argv: list[str] | None = None) -> int:
     shown = "localhost" if host in ("127.0.0.1", "::1") else str(host)
     print(f"Mikhail LeTal webapp: http://{shown}:{port}/  (Ctrl-C to stop)", flush=True)
     print(f"repository: {registry.root}", flush=True)
+    engine = app.analysis.engine_status()
+    if engine["available"]:
+        print(f"analysis and Stockfish seats: {engine['name']} at {engine['path']}", flush=True)
+    else:
+        print(f"analysis off: {engine['reason']}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nstopping agents...")
     finally:
         server.server_close()
+        app.analysis.shutdown()
         registry.shutdown()
     return 0
 

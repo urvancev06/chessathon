@@ -10,3 +10,4 @@ data/pgn/
 .pytest_cache/
 data/cache/
 data/webapp_games/
+data/webapp_analysis/
