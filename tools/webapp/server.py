@@ -27,7 +27,7 @@ from tools.webapp import games
 from tools.webapp.analysis import AnalysisService
 from tools.webapp.games import GameError, Registry
 
-STATIC = Path(__file__).resolve().parent / "static"
+APP = Path(__file__).resolve().parents[2] / "app"  # the front end: app/index.html, css/, js/
 MAX_BODY_BYTES = 1_000_000
 CONTENT_TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -123,10 +123,19 @@ class WebApp:
             game.takeback()
             return 200, game.snapshot()
         if method == "POST" and action == "resign":
-            game.resign()
+            reason = (body or {}).get("reason", "resignation")
+            if reason not in ("resignation", "flag"):
+                raise GameError(400, "reason must be 'resignation' or 'flag'")
+            game.resign(str(reason))
             return 200, game.snapshot()
         if method == "POST" and action == "stop":
             game.stop("aborted")
+            return 200, game.snapshot()
+        if method == "POST" and action == "pause":
+            game.pause(True)
+            return 200, game.snapshot()
+        if method == "POST" and action == "resume":
+            game.pause(False)
             return 200, game.snapshot()
         raise GameError(404, f"no such endpoint: {method} {path}")
 
@@ -197,13 +206,9 @@ def make_handler(app: WebApp, quiet: bool = True) -> type[BaseHTTPRequestHandler
                     return
                 if method != "GET":
                     raise GameError(405, f"{method} is not allowed on {path}")
-                if path in ("/", "/index.html"):
-                    self._static("index.html")
-                elif path.startswith("/static/"):
-                    self._static(path[len("/static/") :])
-                else:
-                    # Hash routing lives in the browser; anything else is a typo.
-                    raise GameError(404, f"not found: {path}")
+                # Hash routing lives in the browser: "/" is the app, anything else is a file
+                # under app/ (css/, js/, pieces/, favicon.svg) or a typo.
+                self._static("index.html" if path in ("/", "/index.html") else path.lstrip("/"))
             except GameError as error:
                 self._json(error.status, {"error": error.message})
             except (BrokenPipeError, ConnectionResetError):
@@ -228,9 +233,11 @@ def make_handler(app: WebApp, quiet: bool = True) -> type[BaseHTTPRequestHandler
             return {str(key): value for key, value in payload.items()}
 
         def _static(self, name: str) -> None:
-            target = (STATIC / name).resolve()
-            if STATIC not in target.parents or not target.is_file():
-                raise GameError(404, f"not found: /static/{name}")
+            if not name or "\x00" in name:
+                raise GameError(404, f"not found: /{name}")
+            target = (APP / name).resolve()
+            if APP not in target.parents or not target.is_file():
+                raise GameError(404, f"not found: /{name}")
             content_type = CONTENT_TYPES.get(
                 target.suffix.lower(),
                 mimetypes.guess_type(target.name)[0] or "application/octet-stream",

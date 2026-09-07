@@ -697,6 +697,9 @@ class Game:
         self._stop_result: Result = "void"
         self._slots_released = False
         self._finishing = False
+        self.paused = False
+        self._go = threading.Event()  # cleared while a spectate game is paused between moves
+        self._go.set()
         seed = int.from_bytes(os.urandom(4), "big") % 1_000_000
         self.seats: dict[chess.Color, Seat] = {}
         movetime = spec.stockfish_movetime_ms
@@ -739,7 +742,7 @@ class Game:
                     return
             if self.kind == "spectate":
                 while self._engine_turn():
-                    pass
+                    self._wait_while_paused()
             else:
                 self._engine_turn()
         except Exception as exc:  # an engine problem must never crash the server
@@ -787,6 +790,15 @@ class Game:
                 return False
             self._push(move, mover, spent_ms, seat.records[-1] if seat.records else None)
             return not self._check_end()
+
+    def _wait_while_paused(self) -> None:
+        """Block the spectate loop between two moves while the game is paused. No move is being
+        timed, so both clocks stand still; a stop request ends the wait at once."""
+        while not self._go.is_set():
+            with self._lock:
+                if self._stop_requested or self.status != "running":
+                    return
+            self._go.wait(0.2)
 
     def _push(
         self, move: chess.Move, mover: chess.Color, spent_ms: float, log: LogRecord | None
@@ -918,30 +930,50 @@ class Game:
     def _side_to_move(self) -> Colour:
         return _side(self.board.turn)
 
-    def resign(self) -> None:
+    def resign(self, reason: str = "resignation") -> None:
+        """End a human game: ``reason`` is "resignation" or "flag" (the browser saw the human's
+        clock reach zero; the server displays that clock but never enforces it)."""
         with self._lock:
             self._touch()
             if self.status == "finished":
                 raise GameError(409, "the game is over")
             if self.human is None:
                 raise GameError(409, "only a human can resign; use stop")
-            winner: Result = "black" if self.human == "white" else "white"
+            human = chess.WHITE if self.human == "white" else chess.BLACK
+            winner: Result = _flagged(self.board, human) if reason == "flag" else _side(not human)
+            if reason == "flag":
+                self.clock[human] = 0.0
             if self.thinking or self.status == "starting":
                 # The engine thread owns the process; make its move() return now and let it
                 # finish the game with the recorded result and reason.
                 self._stop_requested = True
-                self._stop_reason = "resignation"
+                self._stop_reason = reason
                 self._stop_result = winner
                 for seat in self.seats.values():
                     seat.kill()
                 return
-            self._finish(winner, "resignation")
+            self._finish(winner, reason)
+
+    def pause(self, paused: bool) -> None:
+        """Freeze or continue an engine-vs-engine game between moves; idempotent."""
+        with self._lock:
+            self._touch()
+            if self.kind != "spectate":
+                raise GameError(409, "only a spectate game can be paused")
+            if self.status == "finished":
+                raise GameError(409, "the game is over")
+            self.paused = paused
+            if paused:
+                self._go.clear()
+            else:
+                self._go.set()
 
     def stop(self, reason: str = "aborted") -> None:
         with self._lock:
             self._touch()
             if self.status == "finished":
                 return
+            self._go.set()  # a paused spectate loop must wake up to finish
             self._stop_requested = True
             self._stop_reason = reason
             self._stop_result = "void"
@@ -977,6 +1009,7 @@ class Game:
                 "black": self._player(chess.BLACK),
                 "turn": self._side_to_move(),
                 "thinking": self.thinking,
+                "paused": self.paused,
                 "thinking_since": (
                     None if self.thinking_since is None else int(self.thinking_since * 1000)
                 ),
@@ -1310,6 +1343,7 @@ def git_info(root: Path) -> dict[str, object]:
         "branch": _git(root, "rev-parse", "--abbrev-ref", "HEAD"),
         "describe": _git(root, "describe", "--tags", "--always", "--dirty"),
         "dirty": None if status is None else bool(status.strip()),
+        "built": _git(root, "log", "-1", "--format=%cs"),  # the HEAD commit's date, ISO
     }
 
 
