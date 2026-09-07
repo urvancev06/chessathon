@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{margin:0;background:#f7f6f3;color:#1c1b19;font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:inherit}a:hover{color:#6f6d68}
+@keyframes settle{from{opacity:0}to{opacity:1}}
+</style>
+</helmet>
+<div style="{{ rootStyle }}">
+<div style="max-width:1100px; margin:0 auto; padding:0 24px 64px; font-size:14px; line-height:1.5; color:var(--ink,#1c1b19)">
+
+  <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 24px; padding:14px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="display:flex; align-items:center; gap:10px; font-size:15px; color:var(--ink,#1c1b19)">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-label="Mikhail LeTal" style="flex:none"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg>
+      <span style="display:inline-flex; align-items:baseline; font-weight:500; letter-spacing:-0.015em; line-height:1; white-space:nowrap">Mikhail Le<svg viewBox="0 0 60 72" style="height:0.72em; width:0.6em; overflow:visible; margin:0 0.02em 0 0.04em; flex:none" aria-hidden="true"><path d="M25 0h10v72h-10zM0 0h138v8.5H0z" fill="currentColor"></path></svg>al</span>
+    </div>
+    <nav style="display:flex; flex-wrap:wrap; gap:2px 20px; flex:1 1 auto; min-width:min(440px, 100%); order:{{ navOrder }}" aria-label="Screens">
+      <sc-for list="{{ nav }}" as="n" hint-placeholder-count="7">
+        <button onClick="{{ n.go }}" aria-current="{{ n.current }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:{{ n.color }}; font-weight:{{ n.weight }}; border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ n.label }}</button>
+      </sc-for>
+    </nav>
+    <div style="display:flex; align-items:center; gap:18px; font-size:12px; color:var(--grey,#6f6d68)">
+      <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px">v0.9.3 · a1f4c2e</span>
+      <button onClick="{{ toggleTheme }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ themeLabel }}</button>
+    </div>
+  </div>
+
+  <sc-if value="{{ isPlay }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Play" style="display:flex; flex-wrap:wrap; gap:40px 48px; padding-top:32px; animation:settle 120ms ease-out">
+    <div style="flex:1 1 440px; max-width:640px; min-width:0">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:12px; color:var(--grey,#6f6d68)">
+        <span>{{ turnLabel }}</span>
+        <button onClick="{{ flip }}" style="background:none; border:0; padding:4px 0; font:inherit; font-size:12px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Flip board</button>
+      </div>
+      <div style="container-type:inline-size; border:1px solid var(--line,#e1e0dd)">
+        <div style="display:grid; grid-template-columns:repeat(8, minmax(0,1fr)); aspect-ratio:1; position:relative">
+          <sc-for list="{{ squares }}" as="sq" hint-placeholder-count="64">
+            <button onClick="{{ sq.click }}" aria-label="{{ sq.name }}" style="position:relative; aspect-ratio:1; border:0; margin:0; padding:0; background:{{ sq.bg }}; cursor:pointer; font:inherit; min-width:0" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:-2px; z-index:2">
+              <span style="position:absolute; inset:0; background:{{ sq.overlay }}"></span>
+              <sc-if value="{{ sq.rankLabel }}"><span style="position:absolute; top:2px; left:3px; font-size:max(8px, 1.4cqw); line-height:1; color:var(--coord,rgba(28,27,25,0.5)); font-variant-numeric:tabular-nums">{{ sq.rankLabel }}</span></sc-if>
+              <sc-if value="{{ sq.fileLabel }}"><span style="position:absolute; bottom:2px; right:3px; font-size:max(8px, 1.4cqw); line-height:1; color:var(--coord,rgba(28,27,25,0.5))">{{ sq.fileLabel }}</span></sc-if>
+              <sc-if value="{{ sq.dot }}"><span style="position:absolute; left:39%; top:39%; width:22%; height:22%; border-radius:50%; background:var(--dot,rgba(28,27,25,0.35))"></span></sc-if>
+              <sc-if value="{{ sq.glyph }}"><span style="{{ sq.gs }}">{{ sq.glyph }}</span></sc-if>
+            </button>
+          </sc-for>
+          <sc-if value="{{ promo }}">
+            <div style="{{ promo.style }}">
+              <sc-for list="{{ promo.options }}" as="o">
+                <button onClick="{{ o.pick }}" aria-label="{{ o.label }}" style="{{ o.style }}" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:-2px">{{ o.glyph }}</button>
+              </sc-for>
+            </div>
+          </sc-if>
+        </div>
+      </div>
+      <div style="margin-top:10px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--grey,#6f6d68); overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ fen }}</div>
+    </div>
+
+    <div style="flex:1 1 320px; min-width:0; display:flex; flex-direction:column; gap:28px">
+      <sc-if value="{{ result }}">
+        <div style="border:1px solid var(--line,#e1e0dd); padding:10px 14px; display:flex; gap:14px; align-items:baseline; font-size:14px; animation:settle 120ms ease-out">
+          <span style="font-weight:500; font-variant-numeric:tabular-nums">{{ result.score }}</span>
+          <span style="color:var(--grey,#6f6d68)">{{ result.reason }}</span>
+        </div>
+      </sc-if>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px">
+        <div>
+          <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">White · you</div>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:6px">
+            <span style="font-size:40px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums; color:{{ wClockColor }}">{{ wClock }}</span>
+            <span style="font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">{{ incLabel }}</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Black · engine</div>
+          <div style="display:flex; align-items:baseline; gap:8px; margin-top:6px">
+            <span style="font-size:40px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums; color:{{ bClockColor }}">{{ bClock }}</span>
+            <span style="font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">{{ incLabel }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--line,#e1e0dd); padding-top:14px">
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px">
+          <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">{{ think.title }}</span>
+          <span style="font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">{{ think.clock }}</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; margin-top:10px; font-variant-numeric:tabular-nums">
+          <div><div style="font-size:11px; color:var(--grey,#6f6d68)">depth</div><div style="font-size:16px; font-weight:500">{{ think.depth }}</div></div>
+          <div><div style="font-size:11px; color:var(--grey,#6f6d68)">nodes</div><div style="font-size:16px; font-weight:500">{{ think.nodes }}</div></div>
+          <div><div style="font-size:11px; color:var(--grey,#6f6d68)">nodes/s</div><div style="font-size:16px; font-weight:500">{{ think.nps }}</div></div>
+          <div><div style="font-size:11px; color:var(--grey,#6f6d68)">time</div><div style="font-size:16px; font-weight:500">{{ think.time }}</div></div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="position:relative; height:2px; background:var(--line,#e1e0dd)">
+            <span style="position:absolute; left:0; top:0; height:2px; width:{{ think.softPct }}; background:var(--grey,#6f6d68); opacity:0.45"></span>
+            <span style="position:absolute; left:0; top:0; height:2px; width:{{ think.usedPct }}; background:var(--ink,#1c1b19)"></span>
+            <span style="position:absolute; top:-3px; width:1px; height:8px; background:var(--grey,#6f6d68); left:{{ think.softPct }}"></span>
+          </div>
+          <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">
+            <span>{{ think.time }} used</span><span>soft {{ think.soft }}</span><span>hard {{ think.hard }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; border-top:1px solid var(--line,#e1e0dd); padding-top:14px">
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--grey,#6f6d68)"><span>time per move</span><span style="font-variant-numeric:tabular-nums">{{ sparkTimeLast }}</span></div>
+          <svg viewBox="0 0 100 28" preserveAspectRatio="none" style="display:block; width:100%; height:28px; margin-top:6px; overflow:visible"><polyline points="{{ sparkTime }}" fill="none" stroke="var(--ink,#1c1b19)" stroke-width="1" vector-effect="non-scaling-stroke"></polyline></svg>
+        </div>
+        <div>
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--grey,#6f6d68)"><span>nodes per move</span><span style="font-variant-numeric:tabular-nums">{{ sparkNodesLast }}</span></div>
+          <svg viewBox="0 0 100 28" preserveAspectRatio="none" style="display:block; width:100%; height:28px; margin-top:6px; overflow:visible"><polyline points="{{ sparkNodes }}" fill="none" stroke="var(--ink,#1c1b19)" stroke-width="1" vector-effect="non-scaling-stroke"></polyline></svg>
+        </div>
+      </div>
+
+      <div style="border-top:1px solid var(--line,#e1e0dd); padding-top:14px">
+        <div style="display:flex; justify-content:space-between; font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500"><span>Moves</span><span style="font-variant-numeric:tabular-nums">{{ plyCount }} plies</span></div>
+        <div style="display:grid; grid-template-columns:2.4em minmax(0,1fr) auto minmax(0,1fr) auto; gap:2px 10px; margin-top:8px; font-size:13px; max-height:260px; overflow:auto; font-variant-numeric:tabular-nums">
+          <sc-for list="{{ moveRows }}" as="m" hint-placeholder-count="6">
+            <span style="color:var(--grey,#6f6d68)">{{ m.no }}</span>
+            <span style="font-weight:{{ m.wWeight }}">{{ m.w }}</span>
+            <span style="font-size:11px; color:var(--grey,#6f6d68); text-align:right">{{ m.wc }}</span>
+            <span style="font-weight:{{ m.bWeight }}">{{ m.b }}</span>
+            <span style="font-size:11px; color:var(--grey,#6f6d68); text-align:right">{{ m.bc }}</span>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="display:flex; flex-wrap:wrap; gap:4px 20px; border-top:1px solid var(--line,#e1e0dd); padding-top:12px">
+        <button onClick="{{ takeback }}" disabled="{{ noTakeback }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:{{ takebackColor }}; border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Takeback</button>
+        <button onClick="{{ resign }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Resign</button>
+        <button onClick="{{ goNew }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">New game</button>
+        <button onClick="{{ downloadPgn }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Download PGN</button>
+        <button onClick="{{ copyFen }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ copyLabel }}</button>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isNew }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="New game" style="max-width:640px; padding-top:32px; display:flex; flex-direction:column; gap:32px; animation:settle 120ms ease-out">
+    <div style="display:flex; justify-content:space-between; align-items:baseline"><span style="font-size:20px; font-weight:500; letter-spacing:-0.01em">New game</span><span style="font-size:12px; color:var(--grey,#6f6d68)">Nothing starts until you press Start</span></div>
+
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Engine build</div>
+      <div style="border-top:1px solid var(--line,#e1e0dd)">
+        <sc-for list="{{ builds }}" as="b" hint-placeholder-count="5">
+          <button onClick="{{ b.pick }}" aria-pressed="{{ b.on }}" style="display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:none; border:0; border-bottom:1px solid var(--line,#e1e0dd); padding:10px 2px; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:-2px">
+            <span style="width:12px; height:12px; border:1px solid var(--ink,#1c1b19); flex:none; background:{{ b.mark }}"></span>
+            <span style="flex:1 1 auto">{{ b.name }}</span>
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--grey,#6f6d68)">{{ b.meta }}</span>
+          </button>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px,1fr)); gap:28px">
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Your colour</div>
+        <div style="display:flex; gap:8px">
+          <sc-for list="{{ colours }}" as="c" hint-placeholder-count="3">
+            <button onClick="{{ c.pick }}" aria-pressed="{{ c.on }}" style="background:none; padding:7px 12px; font:inherit; font-size:13px; cursor:pointer; border-radius:2px; border:1px solid {{ c.border }}; color:{{ c.color }}" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ c.label }}</button>
+          </sc-for>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Time control</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap">
+          <sc-for list="{{ tcs }}" as="t" hint-placeholder-count="5">
+            <button onClick="{{ t.pick }}" aria-pressed="{{ t.on }}" style="background:none; padding:7px 10px; font:inherit; font-size:13px; cursor:pointer; border-radius:2px; font-variant-numeric:tabular-nums; border:1px solid {{ t.border }}; color:{{ t.color }}" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ t.label }}</button>
+          </sc-for>
+        </div>
+        <div style="display:flex; gap:12px; margin-top:10px; align-items:center; font-size:12px; color:var(--grey,#6f6d68)">
+          <label style="display:flex; align-items:center; gap:6px">base<input value="{{ tcBase }}" onChange="{{ setBase }}" inputMode="decimal" aria-label="Base seconds" style="width:64px; padding:5px 8px; font:inherit; font-size:13px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19); font-variant-numeric:tabular-nums" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px">s</label>
+          <label style="display:flex; align-items:center; gap:6px">increment<input value="{{ tcInc }}" onChange="{{ setInc }}" inputMode="decimal" aria-label="Increment seconds" style="width:64px; padding:5px 8px; font:inherit; font-size:13px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19); font-variant-numeric:tabular-nums" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px">s</label>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Starting position</div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap">
+        <sc-for list="{{ starts }}" as="s" hint-placeholder-count="3">
+          <button onClick="{{ s.pick }}" aria-pressed="{{ s.on }}" style="background:none; padding:7px 12px; font:inherit; font-size:13px; cursor:pointer; border-radius:2px; border:1px solid {{ s.border }}; color:{{ s.color }}" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ s.label }}</button>
+        </sc-for>
+      </div>
+      <sc-if value="{{ startIsIndex }}">
+        <div style="display:flex; gap:12px; margin-top:12px; align-items:center; font-size:13px">
+          <input value="{{ openingIndex }}" onChange="{{ setOpeningIndex }}" inputMode="numeric" aria-label="Opening index" style="width:72px; padding:6px 8px; font:inherit; font-size:13px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19); font-variant-numeric:tabular-nums" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px">
+          <span style="color:var(--grey,#6f6d68)">{{ openingIndexName }}</span>
+        </div>
+      </sc-if>
+      <sc-if value="{{ startIsFen }}">
+        <div style="margin-top:12px">
+          <input value="{{ customFen }}" onChange="{{ setCustomFen }}" spellCheck="{{ false }}" aria-label="FEN" style="width:100%; padding:8px 10px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px">
+          <div style="margin-top:6px; font-size:12px; color:{{ fenStatusColor }}">{{ fenStatus }}</div>
+        </div>
+      </sc-if>
+    </div>
+
+    <div style="display:flex; gap:20px; align-items:center; border-top:1px solid var(--line,#e1e0dd); padding-top:20px">
+      <button onClick="{{ startGame }}" disabled="{{ startDisabled }}" style="background:var(--acc,#a3513b); color:var(--paper,#f7f6f3); border:0; border-radius:2px; padding:9px 16px; font:inherit; font-size:13px; font-weight:500; cursor:pointer; opacity:{{ startOpacity }}" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Start game</button>
+      <button onClick="{{ goPlay }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Cancel</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSpectate }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Spectate" style="max-width:560px; margin:0 auto; padding-top:32px; display:flex; flex-direction:column; gap:16px; animation:settle 120ms ease-out">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums"><span>{{ specStatus }}</span><span>120 + 0.5 · one core each</span></div>
+
+    <div style="border-top:1px solid var(--line,#e1e0dd); padding-top:12px">
+      <div style="display:flex; justify-content:space-between; align-items:baseline">
+        <span style="font-size:14px; font-weight:500; color:{{ specTopColor }}">{{ specTopName }}</span>
+        <span style="font-size:24px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums; color:{{ specTopColor }}">{{ specTopClock }}</span>
+      </div>
+      <div style="display:flex; gap:16px; margin-top:6px; font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums; flex-wrap:wrap"><span>{{ specTopThink.depth }}</span><span>{{ specTopThink.nodes }}</span><span>{{ specTopThink.nps }}</span><span>{{ specTopThink.time }}</span></div>
+    </div>
+
+    <div style="container-type:inline-size; border:1px solid var(--line,#e1e0dd)">
+      <div style="display:grid; grid-template-columns:repeat(8, minmax(0,1fr)); aspect-ratio:1">
+        <sc-for list="{{ specSquares }}" as="sq" hint-placeholder-count="64">
+          <div aria-label="{{ sq.name }}" style="position:relative; aspect-ratio:1; background:{{ sq.bg }}; min-width:0">
+            <span style="position:absolute; inset:0; background:{{ sq.overlay }}"></span>
+            <sc-if value="{{ sq.rankLabel }}"><span style="position:absolute; top:2px; left:3px; font-size:max(8px, 1.4cqw); line-height:1; color:var(--coord,rgba(28,27,25,0.5)); font-variant-numeric:tabular-nums">{{ sq.rankLabel }}</span></sc-if>
+            <sc-if value="{{ sq.fileLabel }}"><span style="position:absolute; bottom:2px; right:3px; font-size:max(8px, 1.4cqw); line-height:1; color:var(--coord,rgba(28,27,25,0.5))">{{ sq.fileLabel }}</span></sc-if>
+            <sc-if value="{{ sq.glyph }}"><span style="{{ sq.gs }}">{{ sq.glyph }}</span></sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="border-bottom:1px solid var(--line,#e1e0dd); padding-bottom:12px">
+      <div style="display:flex; justify-content:space-between; align-items:baseline">
+        <span style="font-size:14px; font-weight:500; color:{{ specBotColor }}">{{ specBotName }}</span>
+        <span style="font-size:24px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums; color:{{ specBotColor }}">{{ specBotClock }}</span>
+      </div>
+      <div style="display:flex; gap:16px; margin-top:6px; font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums; flex-wrap:wrap"><span>{{ specBotThink.depth }}</span><span>{{ specBotThink.nodes }}</span><span>{{ specBotThink.nps }}</span><span>{{ specBotThink.time }}</span></div>
+    </div>
+
+    <div style="display:grid; grid-template-columns:2.4em minmax(0,1fr) auto minmax(0,1fr) auto; gap:2px 10px; font-size:13px; max-height:220px; overflow:auto; font-variant-numeric:tabular-nums">
+      <sc-for list="{{ specRows }}" as="m" hint-placeholder-count="4">
+        <span style="color:var(--grey,#6f6d68)">{{ m.no }}</span>
+        <span style="font-weight:{{ m.wWeight }}">{{ m.w }}</span>
+        <span style="font-size:11px; color:var(--grey,#6f6d68); text-align:right">{{ m.wc }}</span>
+        <span style="font-weight:{{ m.bWeight }}">{{ m.b }}</span>
+        <span style="font-size:11px; color:var(--grey,#6f6d68); text-align:right">{{ m.bc }}</span>
+      </sc-for>
+    </div>
+
+    <div style="display:flex; gap:20px; border-top:1px solid var(--line,#e1e0dd); padding-top:12px">
+      <button onClick="{{ specToggle }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ specToggleLabel }}</button>
+      <button onClick="{{ specRestart }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Restart</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Overview" style="max-width:720px; padding-top:40px; display:flex; flex-direction:column; gap:40px; animation:settle 120ms ease-out">
+    <div>
+      <div style="display:flex; align-items:center; gap:16px; font-size:32px; color:var(--ink,#1c1b19)">
+        <svg viewBox="0 0 24 24" width="40" height="40" style="flex:none"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg>
+        <span style="display:inline-flex; align-items:baseline; font-weight:500; letter-spacing:-0.015em; line-height:1; white-space:nowrap">Mikhail Le<svg viewBox="0 0 60 72" style="height:0.72em; width:0.6em; overflow:visible; margin:0 0.02em 0 0.04em; flex:none" aria-hidden="true"><path d="M25 0h10v72h-10zM0 0h138v8.5H0z" fill="currentColor"></path></svg>al</span>
+      </div>
+      <p style="font-size:16px; margin:20px 0 0; max-width:56ch; text-wrap:pretty">A single-core chess engine written for the competition: alpha–beta search, a tapered hand-tuned evaluation, and a time manager that never flags.</p>
+      <div style="margin-top:12px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:var(--grey,#6f6d68)">v0.9.3 · a1f4c2e · built 2026-09-04 · C++20, no dependencies</div>
+    </div>
+
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Competition contract</div>
+      <div style="display:grid; grid-template-columns:minmax(120px,1fr) 2fr; font-size:13px; border-top:1px solid var(--line,#e1e0dd)">
+        <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">Time control</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-variant-numeric:tabular-nums">120 s + 0.5 s per move, per side</span>
+        <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">Hardware</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-variant-numeric:tabular-nums">1 CPU core, 2 GB RAM</span>
+        <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">Initialisation</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-variant-numeric:tabular-nums">90 s before the first move</span>
+        <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">Game length</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-variant-numeric:tabular-nums">Draw at 600 plies</span>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:12px">How it works</div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:20px 40px; font-size:14px; max-width:70ch">
+        <div><div style="font-weight:500">Search</div><p style="margin:4px 0 0; color:var(--grey,#6f6d68); text-wrap:pretty">Iterative deepening alpha–beta with a transposition table, null-move and late-move reductions, and a quiescence search for captures. Moves are ordered by hash move, captures and killer history.</p></div>
+        <div><div style="font-weight:500">Evaluation</div><p style="margin:4px 0 0; color:var(--grey,#6f6d68); text-wrap:pretty">Material plus piece-square tables, blended between a middlegame and an endgame set by the phase of the game. Small terms for pawn structure, king safety and mobility. Weights tuned on 1.2 million positions.</p></div>
+        <div><div style="font-weight:500">Time management</div><p style="margin:4px 0 0; color:var(--grey,#6f6d68); text-wrap:pretty">Each move gets a soft budget from the clock and the increment, and a hard budget twice that. The search finishes its iteration at the soft limit unless the best move is unstable; it stops at the hard limit regardless.</p></div>
+        <div><div style="font-weight:500">Safety wrapper</div><p style="margin:4px 0 0; color:var(--grey,#6f6d68); text-wrap:pretty">A watchdog around the engine process: it validates every move, falls back to the last completed iteration on a timeout, and always answers before the clock runs out.</p></div>
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Latest results</div>
+      <div style="overflow-x:auto">
+        <div style="display:grid; grid-template-columns:auto 1fr auto auto auto; gap:0 20px; font-size:13px; border-top:1px solid var(--line,#e1e0dd); min-width:520px; font-variant-numeric:tabular-nums">
+          <sc-for list="{{ results }}" as="r" hint-placeholder-count="5">
+            <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">{{ r.date }}</span>
+            <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd)">{{ r.opp }}</span>
+            <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-weight:500">{{ r.score }}</span>
+            <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">{{ r.reason }}</span>
+            <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68); text-align:right">{{ r.moves }}</span>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isDocs }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Docs" style="display:flex; flex-wrap:wrap; gap:32px 56px; padding-top:32px; animation:settle 120ms ease-out">
+    <div style="flex:0 0 180px; display:flex; flex-direction:column; align-items:flex-start; gap:2px" role="list">
+      <sc-for list="{{ docList }}" as="d" hint-placeholder-count="6">
+        <button onClick="{{ d.go }}" aria-current="{{ d.current }}" style="background:none; border:0; padding:5px 0; font:inherit; font-size:13px; cursor:pointer; text-align:left; color:{{ d.color }}; font-weight:{{ d.weight }}; border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ d.name }}</button>
+      </sc-for>
+    </div>
+    <div style="flex:1 1 320px; min-width:0; max-width:70ch; font-size:15px; line-height:1.6">{{ docBody }}</div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isWeights }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Weights" style="padding-top:32px; display:flex; flex-direction:column; gap:36px; animation:settle 120ms ease-out">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:32px 48px; align-items:start">
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Piece values and phase weights</div>
+        <div style="display:grid; grid-template-columns:1fr auto auto auto; gap:0 24px; font-size:13px; border-top:1px solid var(--line,#e1e0dd); font-variant-numeric:tabular-nums">
+          <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; color:var(--grey,#6f6d68)">piece</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; color:var(--grey,#6f6d68); text-align:right">mg</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; color:var(--grey,#6f6d68); text-align:right">eg</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; color:var(--grey,#6f6d68); text-align:right">phase</span>
+          <sc-for list="{{ pieceValues }}" as="p" hint-placeholder-count="6">
+            <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd)">{{ p.name }}</span>
+            <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right">{{ p.mg }}</span>
+            <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right">{{ p.eg }}</span>
+            <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right; color:var(--grey,#6f6d68)">{{ p.phase }}</span>
+          </sc-for>
+        </div>
+        <div style="margin-top:8px; font-size:12px; color:var(--grey,#6f6d68)">Phase = Σ weights of non-pawn pieces on the board, 24 at the start, 0 in a pawn ending. Score = (mg · phase + eg · (24 − phase)) / 24.</div>
+      </div>
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; margin-bottom:8px">Provenance</div>
+        <pre style="margin:0; padding:12px 14px; background:var(--code,#efeeea); font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; line-height:1.55; overflow-x:auto; white-space:pre">source    tune/psqt_v3.txt
+method    texel tuning, k = 1.13
+data      1 204 331 positions, 2026-08 self-play
+epochs    40 · lr 0.002 · l2 1e-6
+commit    a1f4c2e · 2026-08-30
+loaded    at startup, 12 × 64 × int16</pre>
+      </div>
+    </div>
+
+    <div>
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px">
+        <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Piece-square tables · white's view, rank 8 at the top</span>
+        <span style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums"><span>{{ hmMin }}</span><span style="width:96px; height:6px; background:{{ scaleGradient }}"></span><span>{{ hmMax }}</span></span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px,1fr)); gap:28px 24px">
+        <sc-for list="{{ heatmaps }}" as="hm" hint-placeholder-count="12">
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:12px"><span style="font-weight:500">{{ hm.title }}</span><span style="color:var(--grey,#6f6d68)">{{ hm.phase }}</span></div>
+            <div style="display:grid; grid-template-columns:repeat(8, minmax(0,1fr)); margin-top:6px; border:1px solid var(--line,#e1e0dd)">
+              <sc-for list="{{ hm.cells }}" as="c">
+                <span style="aspect-ratio:1; display:flex; align-items:center; justify-content:center; font-size:9px; font-variant-numeric:tabular-nums; background:{{ c.bg }}; color:var(--ink,#1c1b19); min-width:0">{{ c.v }}</span>
+              </sc-for>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(8,1fr); font-size:9px; color:var(--grey,#6f6d68); text-align:center; margin-top:3px"><span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isOpenings }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Openings" style="padding-top:32px; animation:settle 120ms ease-out">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px 24px">
+      <div style="display:flex; align-items:baseline; gap:12px"><span style="font-size:20px; font-weight:500; letter-spacing:-0.01em">Openings</span><span style="font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">{{ openingCount }} positions</span></div>
+      <input value="{{ openingFilter }}" onChange="{{ setOpeningFilter }}" placeholder="Filter by name" aria-label="Filter openings" style="width:220px; padding:6px 8px; font:inherit; font-size:13px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px">
+    </div>
+    <div style="margin-top:16px; border-top:1px solid var(--line,#e1e0dd)">
+      <sc-for list="{{ openingRows }}" as="op" hint-placeholder-count="8">
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; padding:10px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+          <span style="width:2.6em; font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace">{{ op.index }}</span>
+          <span style="flex:1 1 180px; font-size:13px; font-weight:500; min-width:0">{{ op.name }}</span>
+          <span style="display:grid; grid-template-columns:repeat(8,12px); grid-auto-rows:12px; width:96px; height:96px; border:1px solid var(--line,#e1e0dd); flex:none; box-sizing:content-box">
+            <sc-for list="{{ op.squares }}" as="s">
+              <span style="display:flex; align-items:center; justify-content:center; background:{{ s.bg }}"><span style="{{ s.gs }}">{{ s.g }}</span></span>
+            </sc-for>
+          </span>
+          <span style="flex:1 1 300px; min-width:0; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--grey,#6f6d68); overflow-wrap:anywhere">{{ op.fen }}</span>
+          <button onClick="{{ op.play }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Play</button>
+        </div>
+      </sc-for>
+    </div>
+    <div style="margin-top:12px; font-size:12px; color:var(--grey,#6f6d68)">{{ openingFooter }}</div>
+  </div>
+  </sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;'light'|'dark'&quot;,&quot;section&quot;:&quot;Appearance&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;brick&quot;,&quot;ochre&quot;],&quot;default&quot;:&quot;brick&quot;,&quot;tsType&quot;:&quot;'brick'|'ochre'&quot;,&quot;section&quot;:&quot;Appearance&quot;},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;play&quot;,&quot;new&quot;,&quot;spectate&quot;,&quot;overview&quot;,&quot;docs&quot;,&quot;weights&quot;,&quot;openings&quot;],&quot;default&quot;:&quot;play&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navigation&quot;},&quot;live&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behaviour&quot;}}">
+const FILES = 'abcdefgh';
+const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
+const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
+const MONO = "ui-monospace,'SF Mono',Menlo,Consolas,monospace";
+const THEMES = {
+  light: { paper: '#f7f6f3', ink: '#1c1b19', grey: '#6f6d68', line: 'rgba(28,27,25,0.1)', sqL: '#e8e6e1', sqD: '#a8a49b', pW: '#f6f4f0', pWs: '0.05em #38362f', pB: '#1d1c1a', pBs: '0', dot: 'rgba(28,27,25,0.35)', sel: 'rgba(28,27,25,0.16)', red: 'rgba(158,66,56,0.4)', redText: '#96473b', code: '#efeeea', coord: 'rgba(28,27,25,0.5)', neg: '#8f8c86' },
+  dark: { paper: '#222221', ink: '#ebe9e4', grey: '#9a9893', line: 'rgba(235,233,228,0.12)', sqL: '#3a3a3a', sqD: '#262626', pW: '#ecebe7', pWs: '0.05em #141414', pB: '#121212', pBs: '0.04em #8c8c8c', dot: 'rgba(235,233,228,0.35)', sel: 'rgba(235,233,228,0.18)', red: 'rgba(205,95,85,0.4)', redText: '#d0847a', code: '#2b2b2a', coord: 'rgba(235,233,228,0.4)', neg: '#6a6864' }
+};
+const ACCENT = { brick: { light: '#a3513b', dark: '#c8735c' }, ochre: { light: '#7f6320', dark: '#c4a04e' } };
+const SCRIPT = [
+  ['e4','e2','e4'],['c5','c7','c5'],['Nf3','g1','f3'],['d6','d7','d6'],['d4','d2','d4'],['cxd4','c5','d4'],['Nxd4','f3','d4'],['Nf6','g8','f6'],
+  ['Nc3','b1','c3'],['a6','a7','a6'],['Be3','c1','e3'],['e5','e7','e5'],['Nb3','d4','b3'],['Be6','c8','e6'],['f3','f2','f3'],['Be7','f8','e7'],
+  ['Qd2','d1','d2'],['O-O','e8','g8','h8','f8'],['O-O-O','e1','c1','a1','d1'],['Nbd7','b8','d7'],['g4','g2','g4'],['b5','b7','b5'],['g5','g4','g5'],['b4','b5','b4'],
+  ['Ne2','c3','e2'],['Ne8','f6','e8'],['f4','f3','f4'],['a5','a6','a5'],['f5','f4','f5'],['a4','a5','a4'],['Nbd4','b3','d4'],['exd4','e5','d4'],
+  ['Nxd4','e2','d4'],['b3','b4','b3'],['Kb1','c1','b1'],['bxc2+','b3','c2'],['Nxc2','d4','c2'],['Bb3','e6','b3'],['axb3','a2','b3'],['axb3','a4','b3'],['Na3','c2','a3'],['Ne5','d7','e5']
+];
+const WT = [2.1,1.8,3.4,2.9,4.6,5.2,3.1,3.8,4.4,2.6,6.1,2.3,4.0,3.3,2.9,4.7,2.2,2.0,2.6,2.4,3.5];
+const BT = [1.9,2.0,2.2,2.1,2.3,2.0,2.4,2.1,2.2,2.3,2.5,2.0,2.2,2.0,2.4,3.1,2.6,2.2,2.0,1.9,2.3];
+const OPENINGS = [
+  ['Sicilian Defence, Najdorf', 'rnbqkb1r/1p2pppp/p2p1n2/8/3NP3/2N5/PPP2PPP/R1BQKB1R w KQkq - 0 6'],
+  ['Ruy Lopez, Closed', 'r1bqk2r/1pppbppp/p1n2n2/4p3/B3P3/5N2/PPPP1PPP/RNBQ1RK1 w kq - 4 6'],
+  ["Queen's Gambit Declined", 'rnbqkb1r/ppp2ppp/4pn2/3p4/2PP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4'],
+  ["King's Indian Defence", 'rnbqk2r/ppp1ppbp/3p1np1/8/2PPP3/2N5/PP3PPP/R1BQKBNR w KQkq - 0 5'],
+  ['Caro-Kann, Advance', 'rn1qkbnr/pp2pppp/2p5/3pPb2/3P4/8/PPP2PPP/RNBQKBNR w KQkq - 1 4'],
+  ['French Defence, Winawer', 'rnbqk1nr/ppp2ppp/4p3/3p4/1b1PP3/2N5/PPP2PPP/R1BQKBNR w KQkq - 2 4'],
+  ['Nimzo-Indian Defence', 'rnbqk2r/pppp1ppp/4pn2/8/1bPP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 2 4'],
+  ['Italian Game, Giuoco Piano', 'r1bqk1nr/pppp1ppp/2n5/2b1p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4'],
+  ['Slav Defence', 'rnbqkb1r/pp2pppp/2p2n2/3p4/2PP4/5N2/PP2PPPP/RNBQKB1R w KQkq - 2 4'],
+  ['Grünfeld Defence', 'rnbqkb1r/ppp1pp1p/5np1/3p4/2PP4/2N5/PP2PPPP/R1BQKBNR w KQkq - 0 4'],
+  ['English Opening, Symmetrical', 'r1bqkbnr/pp1ppp1p/2n3p1/2p5/2P5/2N3P1/PP1PPP1P/R1BQKBNR w KQkq - 0 4'],
+  ['Scotch Game', 'r1bqkbnr/pppp1ppp/2n5/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4'],
+  ['Scandinavian Defence', 'rnb1kbnr/ppp1pppp/8/q7/8/2N5/PPPP1PPP/R1BQKBNR w KQkq - 2 4']
+];
+const DOCS = {
+  'README': `# Mikhail LeTal\n\nA chess engine for the competition, written in C++20 with no dependencies. The name is a pun on Mikhail Tal; the play is less brilliant and more careful.\n\n## Building\n\n\`\`\`\ncmake -B build -DCMAKE_BUILD_TYPE=Release\ncmake --build build\n./build/letal --selftest\n\`\`\`\n\n## Contract\n\n| Item | Value |\n| --- | --- |\n| Time control | 120 s + 0.5 s per side |\n| Hardware | 1 core, 2 GB |\n| Initialisation | 90 s |\n| Game length | 600-ply cap |\n\nThe app in this folder talks to the engine over a local pipe. Nothing leaves the machine.`,
+  'Architecture': `# Architecture\n\nThree processes: the engine, a watchdog, and this web app.\n\n- The **engine** reads a position and a budget, writes a move and a report.\n- The **watchdog** owns the clock. It validates each move and answers for the engine if it fails to.\n- The **app** is a static page served from \`app/\` and a small local server that forwards commands.\n\n## Source layout\n\n\`\`\`\nsrc/search.cpp      iterative deepening, alpha-beta\nsrc/eval.cpp        tapered evaluation\nsrc/time.cpp        soft and hard budgets\nsrc/wrapper.cpp     watchdog\ntune/psqt_v3.txt    weights, generated\n\`\`\``,
+  'Search': `# Search\n\nIterative deepening over a fail-soft alpha–beta with a 64 MB transposition table.\n\n## Pruning and reductions\n\n- Null-move pruning from depth 3, reduction 2 + depth / 6.\n- Late-move reductions after the third quiet move.\n- Futility pruning at the last two plies.\n- Check extensions, capped at one per branch.\n\n## Move ordering\n\n| Priority | Source |\n| --- | --- |\n| 1 | Hash move |\n| 2 | Captures by MVV-LVA |\n| 3 | Killer moves |\n| 4 | History heuristic |\n\nQuiescence searches captures and promotions only, with a stand-pat cutoff.`,
+  'Time management': `# Time management\n\nEvery move receives two budgets.\n\n- **Soft**: \`clock / 40 + increment · 0.8\`. The search does not start a new iteration once it is spent.\n- **Hard**: \`soft · 2\`, never more than \`clock / 8\`. The search stops immediately.\n\nIf the best move changed in the last two iterations, the soft budget grows by 30 %, once.\n\n## Reserve\n\nThe watchdog keeps 1.5 s in reserve. If the engine has not answered at hard + reserve, the watchdog plays the best move of the last completed iteration.\n\n\`\`\`\nsoft  = clock / 40 + inc * 0.8\nhard  = min(soft * 2, clock / 8)\n\`\`\``,
+  'Testing': `# Testing\n\n## Self-play\n\nEach build plays 200 games against the previous frozen version at 10 + 0.1 from the 219 curated openings, both colours.\n\n| Build | Score | Elo diff | Draws |\n| --- | --- | --- | --- |\n| v0.9.3 | 118.5 / 200 | +65 ± 38 | 41 % |\n| v0.9.2 | 104 / 200 | +14 ± 39 | 44 % |\n| v0.9.0 | 92 / 200 | −28 ± 40 | 39 % |\n\n## Perft\n\n\`\`\`\nstart   depth 5   4 865 609   ok\nkiwipete depth 4   4 085 603   ok\n\`\`\``,
+  'Changelog': `# Changelog\n\n## v0.9.3 · 2026-09-04\n\n- Soft budget grows when the best move is unstable.\n- Piece-square tables retuned (psqt_v3).\n- Fixed a repetition check that missed positions before the root.\n\n## v0.9.2 · 2026-08-21\n\n- Late-move reductions.\n- Watchdog reserve raised from 1 s to 1.5 s.\n\n## v0.9.0 · 2026-08-02\n\n- First version that completes the 600-ply cap without flagging.`
+};
+const BUILDS = [['Working tree', 'a1f4c2e · dirty'], ['Frozen v0.9.3', 'a1f4c2e'], ['Frozen v0.9.2', '7c03b91'], ['Baseline · material only, 1 ply', 'baseline-1'], ['Baseline · random mover', 'baseline-0']];
+const TCS = [[120, 0.5], [60, 0.5], [30, 0.3], [10, 0.1], [3, 0.05]];
+const RESULTS = [
+  ['2026-09-06', 'Frozen v0.9.2', '1–0', 'checkmate', 58],
+  ['2026-09-06', 'Frozen v0.9.2', '½–½', 'threefold repetition', 71],
+  ['2026-09-05', 'Baseline · material only', '1–0', 'checkmate', 34],
+  ['2026-09-05', 'Frozen v0.9.2', '0–1', 'resignation', 63],
+  ['2026-09-04', 'Frozen v0.9.0', '½–½', '600-ply cap', 300]
+];
+
+const idx = n => FILES.indexOf(n[0]) + (8 - +n[1]) * 8;
+const sqName = i => FILES[i % 8] + (8 - Math.floor(i / 8));
+const isWhite = p => !!p && p === p.toUpperCase();
+function parseFen(f) {
+  const [pl, turn = 'w', cast = '-'] = f.trim().split(/\s+/);
+  const b = [];
+  for (const ch of pl) { if (ch === '/') continue; if (/\d/.test(ch)) for (let k = 0; k < +ch; k++) b.push(''); else b.push(ch); }
+  return { board: b, turn, cast };
+}
+function toFen(b, turn, cast, full) {
+  let s = '';
+  for (let r = 0; r < 8; r++) { let e = 0; for (let f = 0; f < 8; f++) { const p = b[r * 8 + f]; if (!p) e++; else { if (e) { s += e; e = 0; } s += p; } } if (e) s += e; if (r < 7) s += '/'; }
+  return `${s} ${turn} ${cast || '-'} - 0 ${full}`;
+}
+function pseudo(b, i, inclK) {
+  const p = b[i]; if (!p) return [];
+  const w = isWhite(p), t = p.toLowerCase(), f = i % 8, r = Math.floor(i / 8), out = [];
+  const add = (ff, rr) => { if (ff < 0 || ff > 7 || rr < 0 || rr > 7) return false; const j = rr * 8 + ff, q = b[j]; if (!q) { out.push(j); return true; } if (isWhite(q) !== w && (inclK || q.toLowerCase() !== 'k')) out.push(j); return false; };
+  if (t === 'p') {
+    const d = w ? -1 : 1, start = w ? 6 : 1, rr = r + d;
+    if (rr >= 0 && rr < 8 && !b[rr * 8 + f]) { out.push(rr * 8 + f); if (r === start && !b[(r + 2 * d) * 8 + f]) out.push((r + 2 * d) * 8 + f); }
+    for (const df of [-1, 1]) { const ff = f + df; if (ff < 0 || ff > 7 || rr < 0 || rr > 7) continue; const q = b[rr * 8 + ff]; if (q && isWhite(q) !== w && (inclK || q.toLowerCase() !== 'k')) out.push(rr * 8 + ff); }
+  } else if (t === 'n') [[1,2],[2,1],[-1,2],[-2,1],[1,-2],[2,-1],[-1,-2],[-2,-1]].forEach(([df, dr]) => add(f + df, r + dr));
+  else if (t === 'k') [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([df, dr]) => add(f + df, r + dr));
+  else {
+    const d = []; if (t !== 'b') d.push([1,0],[-1,0],[0,1],[0,-1]); if (t !== 'r') d.push([1,1],[1,-1],[-1,1],[-1,-1]);
+    d.forEach(([df, dr]) => { let ff = f + df, rr = r + dr; while (add(ff, rr)) { ff += df; rr += dr; } });
+  }
+  return out;
+}
+function inCheck(b, white) {
+  const k = b.indexOf(white ? 'K' : 'k'); if (k < 0) return false;
+  for (let i = 0; i < 64; i++) { const p = b[i]; if (p && isWhite(p) !== white && pseudo(b, i, true).includes(k)) return true; }
+  return false;
+}
+function allMoves(b, white) { const ms = []; for (let i = 0; i < 64; i++) { const p = b[i]; if (p && isWhite(p) === white) pseudo(b, i).forEach(j => ms.push([i, j])); } return ms; }
+function sanOf(b, from, to, promo) {
+  const p = b[from], t = p.toLowerCase(), cap = !!b[to];
+  if (t === 'k' && Math.abs(from - to) === 2) return to > from ? 'O-O' : 'O-O-O';
+  if (t === 'p') return (cap ? FILES[from % 8] + 'x' : '') + sqName(to) + (promo ? '=' + promo.toUpperCase() : '');
+  return t.toUpperCase() + (cap ? 'x' : '') + sqName(to);
+}
+function applyMove(b, from, to, rf, rt, promo) {
+  const nb = b.slice(); nb[to] = nb[from]; nb[from] = '';
+  if (rf != null) { nb[rt] = nb[rf]; nb[rf] = ''; }
+  if (promo) nb[to] = promo;
+  return nb;
+}
+function dropCast(cast, from, to) {
+  let c = cast || '';
+  for (const s of [from, to]) { const n = sqName(s); if (n === 'e1') c = c.replace(/[KQ]/g, ''); if (n === 'h1') c = c.replace('K', ''); if (n === 'a1') c = c.replace('Q', ''); if (n === 'e8') c = c.replace(/[kq]/g, ''); if (n === 'h8') c = c.replace('k', ''); if (n === 'a8') c = c.replace('q', ''); }
+  return c || '-';
+}
+const fmtClock = s => { s = Math.max(0, s); const m = Math.floor(s / 60), r = Math.floor(s - m * 60); return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`; };
+const fmtNodes = n => n >= 1e6 ? (n / 1e6).toFixed(2) + ' M' : n >= 1e3 ? (n / 1e3).toFixed(0) + ' k' : String(n);
+const fmtS = s => s.toFixed(s < 10 ? 2 : 1) + ' s';
+function hexToRgba(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+function mix(a, b, t) { const A = parseInt(a.slice(1), 16), B = parseInt(b.slice(1), 16); const c = k => Math.round(((A >> k) & 255) * (1 - t) + ((B >> k) & 255) * t); return `rgb(${c(16)},${c(8)},${c(0)})`; }
+function thinkFor(t, clock, seed) {
+  const nps = 1.85e6 + ((seed * 7919) % 200) * 1000, nodes = Math.round(nps * t);
+  const depth = 13 + Math.round(t * 2) + (seed % 3), sel = depth + 9 + (seed % 5);
+  const soft = clock / 40 + 0.4, hard = Math.min(soft * 2, clock / 8);
+  return { depth: `${depth}/${sel}`, nodes: fmtNodes(nodes), nps: fmtNodes(nps) + '/s', time: fmtS(t), soft: fmtS(soft), hard: fmtS(hard), softPct: Math.min(100, soft / hard * 100).toFixed(1) + '%', usedPct: Math.min(100, t / hard * 100).toFixed(1) + '%', rawNodes: nodes, rawT: t, clock: 'clock left ' + fmtClock(clock) };
+}
+function psqt(piece, eg) {
+  const v = [];
+  for (let i = 0; i < 64; i++) {
+    const f = i % 8, r = 8 - Math.floor(i / 8), cf = Math.abs(f - 3.5) - 0.5, cr = Math.abs(r - 4.5) - 0.5, centre = 3 - (cf + cr) / 2;
+    let x = 0;
+    if (piece === 'P') x = (r === 1 || r === 8) ? 0 : eg ? (r - 2) * 14 + (r > 5 ? 20 : 0) : (r - 2) * 6 + (r === 4 || r === 5 ? (3 - cf) * 5 : 0) - (r === 2 && (f === 3 || f === 4) ? 10 : 0);
+    else if (piece === 'N') x = centre * (eg ? 10 : 14) - 18 + (r === 1 || r === 8 ? -12 : 0);
+    else if (piece === 'B') x = centre * (eg ? 6 : 8) - 8 + ((f === r - 1 || f === 8 - r) ? 6 : 0);
+    else if (piece === 'R') x = eg ? centre * 2 : (r === 7 ? 14 : 0) + (f === 3 || f === 4 ? 6 : 0) + (r === 1 && (f === 0 || f === 7) ? -8 : 0);
+    else if (piece === 'Q') x = eg ? centre * 8 - 6 : centre * 4 - 8 + (r <= 2 ? -6 : 0) - (r >= 6 ? 10 : 0);
+    else x = eg ? centre * 14 - 24 : (r === 1 ? 10 : r === 2 ? -6 : -26 - (r - 2) * 6) + (r === 1 && (f === 1 || f === 2 || f === 6) ? 22 : 0) - (r === 1 && (f === 3 || f === 4) ? 14 : 0);
+    v.push(Math.round(x));
+  }
+  return v;
+}
+function md(src, T, acc) {
+  const lines = src.split('\n'), out = []; let i = 0, key = 0;
+  const inline = s => { const parts = s.split(/(`[^`]+`|\*\*[^*]+\*\*)/g); return parts.map((p, k) => p.startsWith('`') ? React.createElement('code', { key: k, style: { fontFamily: MONO, fontSize: '0.86em', background: T.code, padding: '1px 5px', borderRadius: 2 } }, p.slice(1, -1)) : p.startsWith('**') ? React.createElement('strong', { key: k, style: { fontWeight: 500 } }, p.slice(2, -2)) : p); };
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) { i++; continue; }
+    if (l.startsWith('```')) { const buf = []; i++; while (i < lines.length && !lines[i].startsWith('```')) buf.push(lines[i++]); i++; out.push(React.createElement('pre', { key: key++, style: { margin: '20px 0', padding: '12px 14px', background: T.code, fontFamily: MONO, fontSize: 12.5, lineHeight: 1.55, overflowX: 'auto', whiteSpace: 'pre' } }, buf.join('\n'))); continue; }
+    const h = l.match(/^(#{1,3}) (.*)/);
+    if (h) { const lv = h[1].length; out.push(React.createElement('h' + lv, { key: key++, style: { fontSize: lv === 1 ? 24 : lv === 2 ? 16 : 14, fontWeight: 500, letterSpacing: lv === 1 ? '-0.01em' : 0, margin: lv === 1 ? '0 0 16px' : '32px 0 8px', lineHeight: 1.3 } }, h[2])); i++; continue; }
+    if (l.startsWith('|')) {
+      const rows = []; while (i < lines.length && lines[i].startsWith('|')) rows.push(lines[i++]);
+      const cells = r => r.split('|').slice(1, -1).map(c => c.trim());
+      const head = cells(rows[0]), body = rows.slice(2).map(cells);
+      const cs = { padding: '7px 16px 7px 0', borderBottom: `1px solid ${T.line}`, textAlign: 'left', fontSize: 13.5, whiteSpace: 'nowrap', verticalAlign: 'top' };
+      out.push(React.createElement('div', { key: key++, style: { overflowX: 'auto', margin: '16px 0' } }, React.createElement('table', { style: { borderCollapse: 'collapse', minWidth: '100%', borderTop: `1px solid ${T.line}` } },
+        React.createElement('thead', null, React.createElement('tr', null, head.map((c, k) => React.createElement('th', { key: k, style: { ...cs, fontWeight: 500, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: T.grey } }, c)))),
+        React.createElement('tbody', null, body.map((r, k) => React.createElement('tr', { key: k }, r.map((c, j) => React.createElement('td', { key: j, style: { ...cs, fontVariantNumeric: 'tabular-nums' } }, inline(c)))))))));
+      continue;
+    }
+    if (l.startsWith('- ')) { const items = []; while (i < lines.length && lines[i].startsWith('- ')) items.push(lines[i++].slice(2)); out.push(React.createElement('ul', { key: key++, style: { margin: '12px 0', padding: '0 0 0 1.2em' } }, items.map((it, k) => React.createElement('li', { key: k, style: { margin: '4px 0' } }, inline(it))))); continue; }
+    const buf = []; while (i < lines.length && lines[i].trim() && !/^(#|```|\||- )/.test(lines[i])) buf.push(lines[i++]);
+    out.push(React.createElement('p', { key: key++, style: { margin: '12px 0', textWrap: 'pretty' } }, inline(buf.join(' '))));
+  }
+  return React.createElement('div', null, out);
+}
+function validateFen(f) {
+  const parts = f.trim().split(/\s+/);
+  if (parts.length < 2) return { ok: false, msg: 'Needs at least placement and side to move' };
+  const ranks = parts[0].split('/');
+  if (ranks.length !== 8) return { ok: false, msg: `${ranks.length} ranks, expected 8` };
+  for (let r = 0; r < 8; r++) { let n = 0; for (const ch of ranks[r]) { if (/[1-8]/.test(ch)) n += +ch; else if (/[prnbqkPRNBQK]/.test(ch)) n++; else return { ok: false, msg: `Unknown character “${ch}” in rank ${8 - r}` }; } if (n !== 8) return { ok: false, msg: `Rank ${8 - r} has ${n} squares` }; }
+  const K = (parts[0].match(/K/g) || []).length, k = (parts[0].match(/k/g) || []).length;
+  if (K !== 1 || k !== 1) return { ok: false, msg: 'Each side needs exactly one king' };
+  if (!/^[wb]$/.test(parts[1])) return { ok: false, msg: 'Side to move must be w or b' };
+  if (parts[2] && !/^(-|K?Q?k?q?)$/.test(parts[2])) return { ok: false, msg: 'Castling field is malformed' };
+  if (parts[3] && !/^(-|[a-h][36])$/.test(parts[3])) return { ok: false, msg: 'En passant square is malformed' };
+  return { ok: true, msg: `Valid · ${parts[1] === 'w' ? 'white' : 'black'} to move · castling ${parts[2] || '-'}` };
+}
+function playFrom(n) {
+  let board = parseFen(START).board, cast = 'KQkq', w = 120, b = 120; const plies = [];
+  for (let i = 0; i < n; i++) {
+    const [san, from, to, rf, rt] = SCRIPT[i], fi = idx(from), ti = idx(to);
+    const white = i % 2 === 0, t = white ? WT[i >> 1] : BT[i >> 1];
+    if (white) w = w - t + 0.5; else b = b - t + 0.5;
+    plies.push({ san, clock: fmtClock(white ? w : b), t, nodes: white ? 0 : Math.round(1.9e6 * t) });
+    cast = dropCast(cast, fi, ti);
+    board = applyMove(board, fi, ti, rf && idx(rf), rt && idx(rt));
+  }
+  return { board, cast, plies, w, b, last: n ? [idx(SCRIPT[n - 1][1]), idx(SCRIPT[n - 1][2])] : null, turn: n % 2 ? 'b' : 'w', scriptPos: n };
+}
+
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const g = playFrom(28);
+    this.state = {
+      theme: props.theme || 'light', screen: props.screen || 'play', flipped: false,
+      game: { ...g, selected: null, result: null, promo: null, think: thinkFor(2.0, g.b, 28), thinking: false, base: 120, inc: 0.5 },
+      spec: { ...playFrom(0), w: 120, b: 120, elapsed: 0, running: true, tick: 0, thinkW: thinkFor(0.1, 120, 1), thinkB: thinkFor(0.1, 120, 2) },
+      form: { build: 0, colour: 0, start: 0, tc: 0, base: '120', inc: '0.5', index: '17', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1' },
+      doc: 'README', filter: '', copied: false
+    };
+  }
+  componentDidMount() { if (this.props.live !== false) this.timer = setInterval(() => this.tick(), 1000); this.syncBody(); }
+  componentWillUnmount() { clearInterval(this.timer); clearTimeout(this.replyTimer); }
+  componentDidUpdate(prev) {
+    if (prev.theme !== this.props.theme && this.props.theme) this.setState({ theme: this.props.theme });
+    if (prev.screen !== this.props.screen && this.props.screen) this.setState({ screen: this.props.screen });
+    this.syncBody();
+  }
+  syncBody() { if (!this.props.screen && typeof document !== 'undefined') document.body.style.background = THEMES[this.state.theme].paper; }
+  T() { return THEMES[this.state.theme]; }
+  acc() { return ACCENT[this.props.accent || 'brick'][this.state.theme]; }
+  tick() {
+    this.setState(s => {
+      const ns = {};
+      const g = s.game;
+      if (s.screen === 'play' && !g.result && !g.thinking) {
+        const w = g.turn === 'w' ? g.w - 1 : g.w, b = g.turn === 'b' ? g.b - 1 : g.b;
+        let result = g.result;
+        if (w <= 0) result = { score: '0–1', reason: 'flag' }; if (b <= 0) result = { score: '1–0', reason: 'flag' };
+        ns.game = { ...g, w: Math.max(0, w), b: Math.max(0, b), result };
+      }
+      const sp = s.spec;
+      if (s.screen === 'spectate' && sp.running) {
+        let n = { ...sp, elapsed: sp.elapsed + 1, tick: sp.tick + 1 };
+        if (n.turn === 'w') n.w = Math.max(0, n.w - 1); else n.b = Math.max(0, n.b - 1);
+        if (n.tick % 3 === 0) {
+          if (n.scriptPos >= SCRIPT.length) { n = { ...n, ...playFrom(0), w: 120, b: 120, elapsed: 0 }; }
+          else {
+            const i = n.scriptPos, [san, from, to, rf, rt] = SCRIPT[i], fi = idx(from), ti = idx(to), white = i % 2 === 0, t = white ? WT[i >> 1] : BT[i >> 1];
+            const clock = white ? (n.w = n.w - t + 3.5) : (n.b = n.b - t + 3.5);
+            const th = thinkFor(t, clock, i + 5);
+            n = { ...n, board: applyMove(n.board, fi, ti, rf && idx(rf), rt && idx(rt)), cast: dropCast(n.cast, fi, ti), plies: [...n.plies, { san, clock: fmtClock(clock), t }], last: [fi, ti], turn: white ? 'b' : 'w', scriptPos: i + 1, [white ? 'thinkW' : 'thinkB']: th };
+          }
+        }
+        ns.spec = n;
+      }
+      return Object.keys(ns).length ? ns : null;
+    });
+  }
+  setGame(patch) { this.setState(s => ({ game: { ...s.game, ...(typeof patch === 'function' ? patch(s.game) : patch) } })); }
+  clickSquare(i) {
+    const g = this.state.game; if (g.result || g.thinking || g.promo || g.turn !== 'w') return;
+    const p = g.board[i];
+    if (g.selected != null && g.targets.includes(i)) {
+      const from = g.selected;
+      if (g.board[from] === 'P' && i < 8) { this.setGame({ promo: { from, to: i }, selected: null, targets: [] }); return; }
+      this.humanMove(from, i); return;
+    }
+    if (p && isWhite(p)) this.setGame({ selected: i === g.selected ? null : i, targets: i === g.selected ? [] : pseudo(g.board, i) });
+    else this.setGame({ selected: null, targets: [] });
+  }
+  humanMove(from, to, promo) {
+    const g = this.state.game, t = 2 + Math.random() * 4;
+    let rf, rt; if (g.board[from] === 'K' && Math.abs(from - to) === 2) { rf = to > from ? from + 3 : from - 4; rt = to > from ? from + 1 : from - 1; }
+    const w = Math.max(0.1, g.w - t + g.inc);
+    const board = applyMove(g.board, from, to, rf, rt, promo);
+    const ng = { ...g, board, cast: dropCast(g.cast, from, to), plies: [...g.plies, { san: sanOf(g.board, from, to, promo), clock: fmtClock(w), t, nodes: 0 }], last: [from, to], turn: 'b', w, selected: null, targets: [], promo: null, thinking: true, scriptPos: g.scriptPos + 1 };
+    this.setState({ game: ng });
+    clearTimeout(this.replyTimer);
+    this.replyTimer = setTimeout(() => this.engineReply(), 900 + Math.random() * 900);
+  }
+  engineReply() {
+    const g = this.state.game; if (g.turn !== 'b') return;
+    const scripted = SCRIPT[g.scriptPos - 1], next = SCRIPT[g.scriptPos];
+    let from, to, rf, rt;
+    if (scripted && next && g.plies[g.plies.length - 1].san === scripted[0] && g.board[idx(next[1])] === (next[3] ? 'k' : g.board[idx(next[1])]) && g.board[idx(next[1])] && !isWhite(g.board[idx(next[1])])) { from = idx(next[1]); to = idx(next[2]); if (next[3]) { rf = idx(next[3]); rt = idx(next[4]); } }
+    else {
+      const ms = allMoves(g.board, false);
+      if (!ms.length) { this.setGame({ thinking: false, result: inCheck(g.board, false) ? { score: '1–0', reason: 'checkmate' } : { score: '½–½', reason: 'stalemate' } }); return; }
+      const caps = ms.filter(([, j]) => g.board[j]);
+      const pick = (caps.length && Math.random() < 0.6 ? caps : ms)[Math.floor(Math.random() * (caps.length && Math.random() < 0.6 ? caps.length : ms.length))] || ms[0];
+      [from, to] = pick;
+    }
+    const t = 1.6 + Math.random() * 1.2, b = Math.max(0.1, g.b - t + g.inc), promo = g.board[from] === 'p' && to >= 56 ? 'q' : undefined;
+    const board = applyMove(g.board, from, to, rf, rt, promo);
+    const plies = [...g.plies, { san: sanOf(g.board, from, to, promo), clock: fmtClock(b), t, nodes: Math.round(1.9e6 * t) }];
+    let result = null;
+    if (!allMoves(board, true).length) result = inCheck(board, true) ? { score: '0–1', reason: 'checkmate' } : { score: '½–½', reason: 'stalemate' };
+    if (plies.length >= 600) result = { score: '½–½', reason: '600-ply cap' };
+    this.setGame({ board, cast: dropCast(g.cast, from, to), plies, last: [from, to], turn: 'w', b, thinking: false, think: thinkFor(t, b, plies.length), result, scriptPos: g.scriptPos + 1 });
+  }
+  startGame() {
+    const f = this.state.form; let board, cast = 'KQkq', turn = 'w';
+    if (f.start === 1) { const o = OPENINGS[(+f.index || 0) % OPENINGS.length]; ({ board, cast, turn } = parseFen(o[1])); }
+    else if (f.start === 2) ({ board, cast, turn } = parseFen(f.fen));
+    else board = parseFen(START).board;
+    const [base, inc] = f.tc < TCS.length ? TCS[f.tc] : [+f.base || 120, +f.inc || 0];
+    this.setState({ screen: 'play', flipped: f.colour === 1, game: { board, cast, turn, plies: [], w: base, b: base, last: null, selected: null, targets: [], result: null, promo: null, think: thinkFor(0, base, 0), thinking: false, scriptPos: -1, base, inc } });
+    if (turn === 'b') { clearTimeout(this.replyTimer); this.replyTimer = setTimeout(() => this.engineReply(), 1200); }
+  }
+  squaresFor(g, interactive) {
+    const T = this.T(), acc = this.acc(), order = [...Array(64).keys()]; if (this.state.flipped) order.reverse();
+    const check = inCheck(g.board, g.turn === 'w') ? g.board.indexOf(g.turn === 'w' ? 'K' : 'k') : -1;
+    return order.map((i, v) => {
+      const p = g.board[i], f = i % 8, r = 8 - Math.floor(i / 8), light = (f + r) % 2 === 0;
+      let overlay = 'transparent';
+      if (g.last && (g.last[0] === i || g.last[1] === i)) overlay = hexToRgba(acc, 0.3);
+      if (interactive && g.selected === i) overlay = T.sel;
+      if (check === i) overlay = T.red;
+      const w = isWhite(p);
+      return { name: sqName(i) + (p ? ' ' + p : ''), bg: light ? T.sqL : T.sqD, overlay, rankLabel: v % 8 === 0 ? String(r) : '', fileLabel: v >= 56 ? FILES[f] : '', dot: !!(interactive && g.targets && g.targets.includes(i)), glyph: p ? GLYPH[p.toLowerCase()] : '',
+        gs: { position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '9cqw', lineHeight: 1, color: w ? T.pW : T.pB, WebkitTextStroke: w ? T.pWs : T.pBs, animation: 'settle 120ms ease-out', pointerEvents: 'none' },
+        click: interactive ? () => this.clickSquare(i) : undefined };
+    });
+  }
+  rows(plies, bold) {
+    const rows = []; for (let i = 0; i < plies.length; i += 2) rows.push({ no: (i / 2 + 1) + '.', w: plies[i].san, wc: plies[i].clock, b: plies[i + 1] ? plies[i + 1].san : '', bc: plies[i + 1] ? plies[i + 1].clock : '', wWeight: bold && i === plies.length - 1 ? 500 : 400, bWeight: bold && i + 1 === plies.length - 1 ? 500 : 400 });
+    return rows;
+  }
+  spark(vals) { if (vals.length < 2) return '0,27 100,27'; const max = Math.max(...vals, 1e-9); return vals.map((v, i) => `${(i / (vals.length - 1) * 100).toFixed(1)},${(27 - v / max * 26).toFixed(1)}`).join(' '); }
+  miniSquares(fen) {
+    const T = this.T(), b = parseFen(fen).board;
+    return b.map((p, i) => { const f = i % 8, r = 8 - Math.floor(i / 8), w = isWhite(p); return { bg: (f + r) % 2 === 0 ? T.sqL : T.sqD, g: p ? GLYPH[p.toLowerCase()] : '', gs: { fontSize: 10, lineHeight: '12px', color: w ? T.pW : T.pB, WebkitTextStroke: w ? '0.4px #2a2a2a' : (this.state.theme === 'dark' ? '0.3px #8c8c8c' : '0') } }; });
+  }
+  renderVals() {
+    const s = this.state, T = this.T(), acc = this.acc(), g = s.game, sp = s.spec, f = s.form;
+    const go = sc => () => this.setState({ screen: sc });
+    const screens = [['play', 'Play'], ['new', 'New game'], ['spectate', 'Spectate'], ['overview', 'Overview'], ['docs', 'Docs'], ['weights', 'Weights'], ['openings', 'Openings']];
+    const wActive = g.turn === 'w' && !g.result, bActive = !wActive && !g.result;
+    const engineTimes = g.plies.filter(p => p.nodes).slice(-24);
+    const fenVal = validateFen(f.fen);
+    const startDisabled = f.start === 2 && !fenVal.ok;
+    const hm = []; ['P', 'N', 'B', 'R', 'Q', 'K'].forEach(pc => [false, true].forEach(eg => hm.push({ pc, eg, v: psqt(pc, eg) })));
+    const allV = hm.flatMap(h => h.v), hmMin = Math.min(...allV), hmMax = Math.max(...allV);
+    const cellBg = v => v >= 0 ? mix(T.paper, acc, Math.min(1, v / hmMax) * 0.62) : mix(T.paper, T.neg, Math.min(1, v / hmMin) * 0.7);
+    const names = { P: 'Pawn', N: 'Knight', B: 'Bishop', R: 'Rook', Q: 'Queen', K: 'King' };
+    const filtered = OPENINGS.map((o, i) => ({ o, i })).filter(({ o }) => o[0].toLowerCase().includes(s.filter.toLowerCase()));
+    const sel = on => ({ border: on ? T.ink : T.line, color: on ? T.ink : T.grey, on });
+    const promo = g.promo ? (() => { const v = s.flipped ? 63 - g.promo.to : g.promo.to, col = Math.min(v % 8, 4), row = Math.floor(v / 8); return { style: { position: 'absolute', left: col * 12.5 + '%', top: row * 12.5 + '%', width: '50%', height: '12.5%', display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', background: T.paper, border: `1px solid ${T.ink}`, zIndex: 3, animation: 'settle 120ms ease-out' }, options: ['q', 'r', 'b', 'n'].map(k => ({ glyph: GLYPH[k], label: 'Promote to ' + k, style: { background: 'none', border: 0, padding: 0, cursor: 'pointer', fontSize: '7cqw', lineHeight: 1, color: T.pW, WebkitTextStroke: T.pWs, fontFamily: 'inherit' }, pick: () => this.humanMove(g.promo.from, g.promo.to, k.toUpperCase()) })) }; })() : null;
+    const specTopWhite = s.flipped, topSide = specTopWhite ? 'w' : 'b', botSide = specTopWhite ? 'b' : 'w';
+    const agent = side => side === 'w' ? 'Mikhail LeTal · working tree' : 'Mikhail LeTal · frozen v0.9.2';
+    const specTh = side => { const th = side === 'w' ? sp.thinkW : sp.thinkB; return { depth: 'd ' + th.depth, nodes: th.nodes + ' nodes', nps: th.nps, time: th.time }; };
+    return {
+      rootStyle: { '--paper': T.paper, '--ink': T.ink, '--grey': T.grey, '--line': T.line, '--acc': acc, '--code': T.code, '--coord': T.coord, '--dot': T.dot, background: T.paper, color: T.ink, minHeight: this.props.screen ? 'auto' : '100vh' },
+      navOrder: 0,
+      nav: screens.map(([id, label]) => ({ label, go: go(id), current: s.screen === id ? 'page' : undefined, color: s.screen === id ? acc : T.ink, weight: s.screen === id ? 500 : 400 })),
+      toggleTheme: () => this.setState({ theme: s.theme === 'light' ? 'dark' : 'light' }), themeLabel: s.theme === 'light' ? 'Dark' : 'Light',
+      isPlay: s.screen === 'play', isNew: s.screen === 'new', isSpectate: s.screen === 'spectate', isOverview: s.screen === 'overview', isDocs: s.screen === 'docs', isWeights: s.screen === 'weights', isOpenings: s.screen === 'openings',
+      squares: this.squaresFor(g, true), promo, flip: () => this.setState({ flipped: !s.flipped }),
+      turnLabel: g.result ? 'Game over' : g.thinking ? 'Engine is thinking' : g.turn === 'w' ? 'White to move' : 'Black to move',
+      fen: toFen(g.board, g.turn, g.cast, Math.floor(g.plies.length / 2) + 1),
+      result: g.result, wClock: fmtClock(g.w), bClock: fmtClock(g.b), wClockColor: wActive ? T.ink : T.grey, bClockColor: bActive ? T.ink : T.grey, incLabel: '+' + g.inc,
+      think: g.thinking ? { ...g.think, title: 'Thinking…', depth: '·', nodes: '·', nps: '·', time: '·' } : { ...g.think, title: g.plies.length ? `Last move · ${Math.ceil(g.plies.length / 2)}${g.plies.length % 2 ? '.' : '…'} ${g.plies[g.plies.length - 1].san}` : 'Engine · idle' },
+      sparkTime: this.spark(engineTimes.map(p => p.t)), sparkNodes: this.spark(engineTimes.map(p => p.nodes)), sparkTimeLast: engineTimes.length ? fmtS(engineTimes[engineTimes.length - 1].t) : '—', sparkNodesLast: engineTimes.length ? fmtNodes(engineTimes[engineTimes.length - 1].nodes) : '—',
+      moveRows: this.rows(g.plies, true), plyCount: g.plies.length,
+      takeback: () => this.setGame(gg => { if (gg.plies.length < 2 || gg.result) return {}; const n = gg.plies.length - 2; const base = playFrom(Math.min(n, Math.max(0, gg.scriptPos - 2))); return { board: base.board, cast: base.cast, plies: gg.plies.slice(0, n), last: base.last, turn: 'w', selected: null, targets: [], thinking: false, scriptPos: base.scriptPos }; }),
+      noTakeback: g.plies.length < 2 || !!g.result || g.thinking, takebackColor: g.plies.length < 2 || g.result || g.thinking ? hexToRgba(T.ink, 0.35) : T.ink,
+      resign: () => this.setGame({ result: g.result || { score: '0–1', reason: 'resignation' } }),
+      goNew: go('new'), goPlay: go('play'),
+      downloadPgn: () => { const rows = this.rows(g.plies).map(r => `${r.no} ${r.w} ${r.b}`).join(' '); const blob = new Blob([`[Event "Local"]\n[White "You"]\n[Black "Mikhail LeTal"]\n[Result "${g.result ? g.result.score.replace('½', '1/2') : '*'}"]\n\n${rows} ${g.result ? g.result.score.replace('½', '1/2') : '*'}\n`], { type: 'application/x-chess-pgn' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'letal.pgn'; a.click(); },
+      copyFen: () => { const fen = toFen(g.board, g.turn, g.cast, Math.floor(g.plies.length / 2) + 1); if (navigator.clipboard) navigator.clipboard.writeText(fen).catch(() => {}); this.setState({ copied: true }); setTimeout(() => this.setState({ copied: false }), 1500); }, copyLabel: s.copied ? 'Copied' : 'Copy FEN',
+      builds: BUILDS.map(([name, meta], i) => ({ name, meta, on: f.build === i, mark: f.build === i ? T.ink : 'transparent', pick: () => this.setState({ form: { ...f, build: i } }) })),
+      colours: ['White', 'Black', 'Random'].map((label, i) => ({ label, ...sel(f.colour === i), pick: () => this.setState({ form: { ...f, colour: i } }) })),
+      tcs: TCS.map(([b, inc], i) => ({ label: `${b} + ${inc}`, ...sel(f.tc === i), pick: () => this.setState({ form: { ...f, tc: i, base: String(b), inc: String(inc) } }) })),
+      tcBase: f.base, tcInc: f.inc, setBase: e => this.setState({ form: { ...f, base: e.target.value, tc: 99 } }), setInc: e => this.setState({ form: { ...f, inc: e.target.value, tc: 99 } }),
+      starts: ['Standard', 'Curated opening by index', 'Custom FEN'].map((label, i) => ({ label, ...sel(f.start === i), pick: () => this.setState({ form: { ...f, start: i } }) })),
+      startIsIndex: f.start === 1, startIsFen: f.start === 2, openingIndex: f.index, setOpeningIndex: e => this.setState({ form: { ...f, index: e.target.value } }), openingIndexName: OPENINGS[(+f.index || 0) % OPENINGS.length] ? OPENINGS[(+f.index || 0) % OPENINGS.length][0] : '',
+      customFen: f.fen, setCustomFen: e => this.setState({ form: { ...f, fen: e.target.value } }), fenStatus: fenVal.msg, fenStatusColor: fenVal.ok ? T.grey : T.redText,
+      startGame: () => this.startGame(), startDisabled, startOpacity: startDisabled ? 0.4 : 1,
+      specStatus: `move ${Math.floor(sp.plies.length / 2) + 1} · ${sp.turn === 'w' ? 'white' : 'black'} to move · ${fmtClock(sp.elapsed)} elapsed${sp.running ? '' : ' · stopped'}`,
+      specSquares: this.squaresFor(sp, false), specRows: this.rows(sp.plies, true),
+      specTopName: agent(topSide), specBotName: agent(botSide), specTopClock: fmtClock(sp[topSide]), specBotClock: fmtClock(sp[botSide]), specTopColor: sp.turn === topSide ? T.ink : T.grey, specBotColor: sp.turn === botSide ? T.ink : T.grey, specTopThink: specTh(topSide), specBotThink: specTh(botSide),
+      specToggle: () => this.setState({ spec: { ...sp, running: !sp.running } }), specToggleLabel: sp.running ? 'Stop' : 'Resume', specRestart: () => this.setState({ spec: { ...sp, ...playFrom(0), w: 120, b: 120, elapsed: 0, running: true, thinkW: thinkFor(0.1, 120, 1), thinkB: thinkFor(0.1, 120, 2) } }),
+      results: RESULTS.map(([date, opp, score, reason, moves]) => ({ date, opp, score, reason, moves: moves + ' moves' })),
+      docList: Object.keys(DOCS).map(name => ({ name, go: () => this.setState({ doc: name }), current: s.doc === name ? 'page' : undefined, color: s.doc === name ? T.ink : T.grey, weight: s.doc === name ? 500 : 400 })),
+      docBody: md(DOCS[s.doc], T, acc),
+      pieceValues: [['Pawn', 82, 94, '—'], ['Knight', 337, 281, 1], ['Bishop', 365, 297, 1], ['Rook', 477, 512, 2], ['Queen', 1025, 936, 4], ['King', '—', '—', '—']].map(([name, mg, eg, phase]) => ({ name, mg, eg, phase })),
+      heatmaps: hm.map(h => ({ title: names[h.pc], phase: h.eg ? 'endgame' : 'middlegame', cells: h.v.map(v => ({ v, bg: cellBg(v) })) })),
+      hmMin, hmMax, scaleGradient: `linear-gradient(90deg, ${mix(T.paper, T.neg, 0.7)}, ${T.paper} 50%, ${mix(T.paper, acc, 0.62)})`,
+      openingCount: 219, openingFilter: s.filter, setOpeningFilter: e => this.setState({ filter: e.target.value }),
+      openingRows: filtered.map(({ o, i }) => ({ index: String(i).padStart(3, '0'), name: o[0], fen: o[1], squares: this.miniSquares(o[1]), play: () => this.setState({ form: { ...f, start: 1, index: String(i) } }, () => this.startGame()) })),
+      openingFooter: s.filter ? `${filtered.length} of 219 match “${s.filter}”` : `Showing the first ${filtered.length} of 219 · the full set is in openings/curated.fen`
+    };
+  }
+}
+</script>
+</body>
+</html>

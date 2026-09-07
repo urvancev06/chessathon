@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{margin:0;background:#f7f6f3;color:#1c1b19;font-family:system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:inherit}a:hover{color:#6f6d68}
+</style>
+</helmet>
+<div style="{{ rootStyle }}">
+<div style="max-width:1100px; margin:0 auto; padding:48px 24px 96px; font-size:14px; line-height:1.5; color:var(--ink,#1c1b19)">
+
+  <div style="display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap; padding-bottom:16px; border-bottom:1px solid var(--line,#e1e0dd)">
+    <span style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Mikhail LeTal · Components</span>
+    <button onClick="{{ toggleTheme }}" style="background:none; border:0; padding:4px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">{{ themeLabel }}</button>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Logo lockups and favicon</div>
+    <div style="display:flex; flex-wrap:wrap; gap:32px 64px; align-items:center; margin-top:24px">
+      <div style="display:inline-flex; align-items:center; gap:12px; font-size:30px"><svg viewBox="0 0 24 24" width="32" height="32" style="flex:none"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg><span style="display:inline-flex; align-items:baseline; font-weight:500; letter-spacing:-0.015em; line-height:1; white-space:nowrap">Mikhail Le<svg viewBox="0 0 60 72" style="height:0.72em; width:0.6em; overflow:visible; margin:0 0.02em 0 0.04em; flex:none" aria-hidden="true"><path d="M25 0h10v72h-10zM0 0h138v8.5H0z" fill="currentColor"></path></svg>al</span></div>
+      <svg viewBox="0 0 24 24" width="48" height="48"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg>
+      <span style="display:inline-flex; align-items:baseline; font-weight:500; letter-spacing:-0.015em; line-height:1; white-space:nowrap; font-size:24px">Mikhail Le<svg viewBox="0 0 60 72" style="height:0.72em; width:0.6em; overflow:visible; margin:0 0.02em 0 0.04em; flex:none" aria-hidden="true"><path d="M25 0h10v72h-10zM0 0h138v8.5H0z" fill="currentColor"></path></svg>al</span>
+      <div style="display:flex; align-items:center; gap:8px; font-size:12px; border:1px solid var(--line,#e1e0dd); padding:6px 12px"><svg viewBox="0 0 24 24" width="16" height="16" style="flex:none"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg>Mikhail LeTal · Play<span style="color:var(--grey,#6f6d68)">favicon, 16 px</span></div>
+    </div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Typography scale · system sans, tabular numerals for figures, monospace for FEN, PGN and logs</div>
+    <div style="display:grid; grid-template-columns:auto 1fr; gap:18px 32px; align-items:baseline; margin-top:24px">
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">40 / 500 / −0.02em</span><span style="font-size:40px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums">01:17 00:48</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">24 / 500 / −0.01em</span><span style="font-size:24px; font-weight:500; letter-spacing:-0.01em; line-height:1.2">Time management</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">20 / 500</span><span style="font-size:20px; font-weight:500; letter-spacing:-0.01em; line-height:1.2">New game</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">16 / 400</span><span style="font-size:16px">A single-core chess engine written for the competition.</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">14 / 400</span><span style="font-size:14px">Body text. The search finishes its iteration at the soft limit unless the best move is unstable.</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">13 / 400</span><span style="font-size:13px">Dense UI text, buttons, tables and move lists.</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">12 / 400</span><span style="font-size:12px; color:var(--grey,#6f6d68)">Secondary text, status lines, footnotes.</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">11 / 500 / +0.08em</span><span style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Section label</span>
+      <span style="font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">12 / mono</span><span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px">r2qnrk1/3nbppp/3pb3/p3p1P1/1p2PP2/1N2B3/PPPQN2P/2KR1B1R w - - 0 15</span>
+    </div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Colour tokens</div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:32px 48px; margin-top:24px">
+      <div>
+        <div style="font-size:13px; font-weight:500; padding-bottom:8px; border-bottom:1px solid var(--line,#e1e0dd)">Light</div>
+        <sc-for list="{{ lightTokens }}" as="t" hint-placeholder-count="9">
+          <div style="display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:13px">
+            <span style="width:28px; height:28px; flex:none; border:1px solid rgba(28,27,25,0.1); background:{{ t.value }}"></span>
+            <span style="flex:1 1 auto; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px">{{ t.name }}</span>
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:var(--grey,#6f6d68)">{{ t.value }}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div>
+        <div style="font-size:13px; font-weight:500; padding-bottom:8px; border-bottom:1px solid var(--line,#e1e0dd)">Dark</div>
+        <sc-for list="{{ darkTokens }}" as="t" hint-placeholder-count="9">
+          <div style="display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:13px">
+            <span style="width:28px; height:28px; flex:none; border:1px solid rgba(235,233,228,0.15); background:{{ t.value }}"></span>
+            <span style="flex:1 1 auto; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px">{{ t.name }}</span>
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:var(--grey,#6f6d68)">{{ t.value }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="margin-top:16px; font-size:12px; color:var(--grey,#6f6d68); max-width:70ch">The accent appears in exactly three places: the active nav item, the primary button, and the last-move overlay at 30 % opacity. Everything else is ink, paper and grey.</div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Buttons and focus state</div>
+    <div style="display:flex; flex-wrap:wrap; gap:24px 40px; align-items:center; margin-top:24px">
+      <button style="background:var(--acc,#a3513b); color:var(--paper,#f7f6f3); border:0; border-radius:2px; padding:9px 16px; font:inherit; font-size:13px; font-weight:500; cursor:pointer" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Start game</button>
+      <button style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px" style-hover="color:var(--grey,#6f6d68)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:2px">Copy FEN</button>
+      <button disabled="{{ true }}" style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; color:var(--ink,#1c1b19); opacity:0.35; border-radius:2px">Takeback</button>
+      <button style="background:none; padding:7px 12px; font:inherit; font-size:13px; cursor:pointer; border-radius:2px; border:1px solid var(--ink,#1c1b19); color:var(--ink,#1c1b19)">120 + 0.5</button>
+      <button style="background:none; padding:7px 12px; font:inherit; font-size:13px; cursor:pointer; border-radius:2px; border:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">60 + 0.5</button>
+      <button style="background:none; border:0; padding:6px 0; font:inherit; font-size:13px; cursor:pointer; color:var(--ink,#1c1b19); border-radius:2px; outline:2px solid var(--acc,#a3513b); outline-offset:2px">Focused</button>
+    </div>
+    <div style="display:flex; gap:40px; margin-top:14px; font-size:12px; color:var(--grey,#6f6d68); flex-wrap:wrap"><span>primary</span><span>quiet text · hover turns grey</span><span>disabled · 35 % ink</span><span>segmented selected / unselected</span><span>focus · 2 px accent outline, 2 px offset, no ring</span></div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Form fields</div>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(260px,1fr)); gap:24px 40px; margin-top:24px; max-width:760px">
+      <label style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--grey,#6f6d68)">Base seconds<input defaultValue="120" inputMode="decimal" style="width:100%; padding:6px 8px; font:inherit; font-size:13px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19); font-variant-numeric:tabular-nums" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px"></label>
+      <label style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--grey,#6f6d68)">Custom FEN · valid<input defaultValue="rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1" spellCheck="{{ false }}" style="width:100%; padding:7px 8px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px"><span>Valid · black to move · castling KQkq</span></label>
+      <label style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--grey,#6f6d68)">Custom FEN · invalid<input defaultValue="rnbqkbnr/ppppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w" spellCheck="{{ false }}" style="width:100%; padding:7px 8px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; border:1px solid var(--line,#e1e0dd); border-radius:2px; background:transparent; color:var(--ink,#1c1b19)" style-focus="outline:2px solid var(--acc,#a3513b); outline-offset:1px"><span style="color:var(--redText,#96473b)">Rank 7 has 9 squares</span></label>
+      <div style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--grey,#6f6d68)">Option list
+        <div style="border-top:1px solid var(--line,#e1e0dd); color:var(--ink,#1c1b19)">
+          <div style="display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line,#e1e0dd); padding:9px 2px; font-size:13px"><span style="width:12px; height:12px; border:1px solid var(--ink,#1c1b19); background:var(--ink,#1c1b19); flex:none"></span><span style="flex:1 1 auto">Working tree</span><span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--grey,#6f6d68)">a1f4c2e · dirty</span></div>
+          <div style="display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--line,#e1e0dd); padding:9px 2px; font-size:13px"><span style="width:12px; height:12px; border:1px solid var(--ink,#1c1b19); flex:none"></span><span style="flex:1 1 auto">Frozen v0.9.2</span><span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; color:var(--grey,#6f6d68)">7c03b91</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Hairline table</div>
+    <div style="display:grid; grid-template-columns:auto 1fr auto auto; gap:0 20px; font-size:13px; border-top:1px solid var(--line,#e1e0dd); margin-top:24px; max-width:640px; font-variant-numeric:tabular-nums">
+      <span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">date</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">opponent</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">result</span><span style="padding:7px 0; border-bottom:1px solid var(--line,#e1e0dd); font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500; text-align:right">moves</span>
+      <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">2026-09-06</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd)">Frozen v0.9.2</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-weight:500">1–0</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right; color:var(--grey,#6f6d68)">58</span>
+      <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">2026-09-06</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd)">Frozen v0.9.2</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-weight:500">½–½</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right; color:var(--grey,#6f6d68)">71</span>
+      <span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); color:var(--grey,#6f6d68)">2026-09-05</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd)">Baseline · material only</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); font-weight:500">1–0</span><span style="padding:9px 0; border-bottom:1px solid var(--line,#e1e0dd); text-align:right; color:var(--grey,#6f6d68)">34</span>
+    </div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:40px 64px">
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Clock block</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:24px; margin-top:24px">
+          <div><div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">White · you</div><div style="display:flex; align-items:baseline; gap:8px; margin-top:6px"><span style="font-size:40px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums">01:17</span><span style="font-size:12px; color:var(--grey,#6f6d68)">+0.5</span></div></div>
+          <div><div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Black · engine</div><div style="display:flex; align-items:baseline; gap:8px; margin-top:6px"><span style="font-size:40px; font-weight:500; letter-spacing:-0.02em; line-height:1; font-variant-numeric:tabular-nums; color:var(--grey,#6f6d68)">01:37</span><span style="font-size:12px; color:var(--grey,#6f6d68)">+0.5</span></div></div>
+        </div>
+        <div style="margin-top:10px; font-size:12px; color:var(--grey,#6f6d68)">Side to move in ink, the other in grey. Never red, never blinking.</div>
+      </div>
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Thinking strip</div>
+        <div style="margin-top:24px; border-top:1px solid var(--line,#e1e0dd); padding-top:14px">
+          <div style="display:flex; justify-content:space-between; align-items:baseline"><span style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Last move · 14… a5</span><span style="font-size:12px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums">clock left 01:37</span></div>
+          <div style="display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:12px; margin-top:10px; font-variant-numeric:tabular-nums">
+            <div><div style="font-size:11px; color:var(--grey,#6f6d68)">depth</div><div style="font-size:16px; font-weight:500">17/29</div></div>
+            <div><div style="font-size:11px; color:var(--grey,#6f6d68)">nodes</div><div style="font-size:16px; font-weight:500">3.84 M</div></div>
+            <div><div style="font-size:11px; color:var(--grey,#6f6d68)">nodes/s</div><div style="font-size:16px; font-weight:500">1.92 M/s</div></div>
+            <div><div style="font-size:11px; color:var(--grey,#6f6d68)">time</div><div style="font-size:16px; font-weight:500">2.00 s</div></div>
+          </div>
+          <div style="margin-top:14px">
+            <div style="position:relative; height:2px; background:var(--line,#e1e0dd)"><span style="position:absolute; left:0; top:0; height:2px; width:57%; background:var(--grey,#6f6d68); opacity:0.45"></span><span style="position:absolute; left:0; top:0; height:2px; width:41%; background:var(--ink,#1c1b19)"></span><span style="position:absolute; top:-3px; width:1px; height:8px; background:var(--grey,#6f6d68); left:57%"></span></div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px; font-size:11px; color:var(--grey,#6f6d68); font-variant-numeric:tabular-nums"><span>2.00 s used</span><span>soft 2.83 s</span><span>hard 4.9 s</span></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Sparkline</div>
+        <div style="margin-top:24px; max-width:280px">
+          <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--grey,#6f6d68)"><span>time per move</span><span style="font-variant-numeric:tabular-nums">2.00 s</span></div>
+          <svg viewBox="0 0 100 28" preserveAspectRatio="none" style="display:block; width:100%; height:28px; margin-top:6px; overflow:visible"><polyline points="{{ spark }}" fill="none" stroke="var(--ink,#1c1b19)" stroke-width="1" vector-effect="non-scaling-stroke"></polyline></svg>
+        </div>
+        <div style="margin-top:10px; font-size:12px; color:var(--grey,#6f6d68)">One-pixel ink line, no fill, no dots, no axes. Last value printed at the right.</div>
+      </div>
+      <div>
+        <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Result banner</div>
+        <div style="display:flex; flex-direction:column; gap:10px; margin-top:24px; max-width:420px">
+          <div style="border:1px solid var(--line,#e1e0dd); padding:10px 14px; display:flex; gap:14px; align-items:baseline; font-size:14px"><span style="font-weight:500; font-variant-numeric:tabular-nums">1–0</span><span style="color:var(--grey,#6f6d68)">checkmate</span></div>
+          <div style="border:1px solid var(--line,#e1e0dd); padding:10px 14px; display:flex; gap:14px; align-items:baseline; font-size:14px"><span style="font-weight:500; font-variant-numeric:tabular-nums">½–½</span><span style="color:var(--grey,#6f6d68)">threefold repetition</span></div>
+          <div style="border:1px solid var(--line,#e1e0dd); padding:10px 14px; display:flex; gap:14px; align-items:baseline; font-size:14px"><span style="font-weight:500; font-variant-numeric:tabular-nums">0–1</span><span style="color:var(--grey,#6f6d68)">flag</span></div>
+        </div>
+        <div style="margin-top:10px; font-size:12px; color:var(--grey,#6f6d68)">Reasons: checkmate, stalemate, threefold repetition, fifty-move rule, 600-ply cap, flag, resignation.</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:48px 0; border-bottom:1px solid var(--line,#e1e0dd)">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Nav bar · mark at 20 px</div>
+    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 24px; padding:14px 0; border-top:1px solid var(--line,#e1e0dd); border-bottom:1px solid var(--line,#e1e0dd); margin-top:24px">
+      <div style="display:flex; align-items:center; gap:10px; font-size:15px"><svg viewBox="0 0 24 24" width="20" height="20" style="flex:none"><path d="M5 1.5h7v21h-7zM5 8.5h7M5 15.5h7" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M11.25 14.75h8.5v8.5h-8.5z" fill="currentColor"></path></svg><span style="display:inline-flex; align-items:baseline; font-weight:500; letter-spacing:-0.015em; line-height:1; white-space:nowrap">Mikhail Le<svg viewBox="0 0 60 72" style="height:0.72em; width:0.6em; overflow:visible; margin:0 0.02em 0 0.04em; flex:none" aria-hidden="true"><path d="M25 0h10v72h-10zM0 0h138v8.5H0z" fill="currentColor"></path></svg>al</span></div>
+      <div style="display:flex; flex-wrap:wrap; gap:2px 20px; flex:1 1 auto; font-size:13px">
+        <span style="color:var(--acc,#a3513b); font-weight:500; padding:6px 0">Play</span><span style="padding:6px 0">New game</span><span style="padding:6px 0">Spectate</span><span style="padding:6px 0">Overview</span><span style="padding:6px 0">Docs</span><span style="padding:6px 0">Weights</span><span style="padding:6px 0">Openings</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:18px; font-size:12px; color:var(--grey,#6f6d68)"><span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px">v0.9.3 · a1f4c2e</span><span style="color:var(--ink,#1c1b19); font-size:13px">Dark</span></div>
+    </div>
+  </div>
+
+  <div style="padding:48px 0 0">
+    <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--grey,#6f6d68); font-weight:500">Board square states</div>
+    <div style="display:flex; flex-wrap:wrap; gap:24px 28px; margin-top:24px">
+      <sc-for list="{{ states }}" as="st" hint-placeholder-count="7">
+        <div style="display:flex; flex-direction:column; gap:8px; width:96px">
+          <div style="position:relative; width:96px; height:96px; background:{{ st.bg }}; border:1px solid var(--line,#e1e0dd)">
+            <span style="position:absolute; inset:0; background:{{ st.overlay }}"></span>
+            <sc-if value="{{ st.dot }}"><span style="position:absolute; left:39%; top:39%; width:22%; height:22%; border-radius:50%; background:var(--dot,rgba(28,27,25,0.35))"></span></sc-if>
+            <sc-if value="{{ st.glyph }}"><span style="{{ st.gs }}">{{ st.glyph }}</span></sc-if>
+            <span style="position:absolute; top:3px; left:4px; font-size:9px; line-height:1; color:var(--coord,rgba(28,27,25,0.5))">{{ st.coord }}</span>
+          </div>
+          <span style="font-size:12px; color:var(--grey,#6f6d68)">{{ st.label }}</span>
+        </div>
+      </sc-for>
+      <div style="display:flex; flex-direction:column; gap:8px">
+        <div style="position:relative; width:96px; height:96px; background:var(--sqL,#e8e6e1); border:1px solid var(--line,#e1e0dd)">
+          <div style="position:absolute; left:0; top:0; height:24px; width:96px; display:grid; grid-template-columns:repeat(4,1fr); background:var(--paper,#f7f6f3); border:1px solid var(--ink,#1c1b19)">
+            <span style="{{ promoGlyph }}">♛</span><span style="{{ promoGlyph }}">♜</span><span style="{{ promoGlyph }}">♝</span><span style="{{ promoGlyph }}">♞</span>
+          </div>
+        </div>
+        <span style="font-size:12px; color:var(--grey,#6f6d68)">promotion strip</span>
+      </div>
+    </div>
+    <div style="margin-top:16px; font-size:12px; color:var(--grey,#6f6d68); max-width:70ch">Pieces are the solid Unicode glyphs for both sides. White: near-white fill with a 0.05 em dark stroke. Black: near-black; in the dark theme it gains a 0.04 em grey stroke so it reads on #262626.</div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;'light'|'dark'&quot;},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;brick&quot;,&quot;ochre&quot;],&quot;default&quot;:&quot;brick&quot;,&quot;tsType&quot;:&quot;'brick'|'ochre'&quot;}}">
+const THEMES = {
+  light: { paper: '#f7f6f3', ink: '#1c1b19', grey: '#6f6d68', line: 'rgba(28,27,25,0.1)', sqL: '#e8e6e1', sqD: '#a8a49b', pW: '#f6f4f0', pWs: '0.05em #38362f', pB: '#1d1c1a', pBs: '0', dot: 'rgba(28,27,25,0.35)', sel: 'rgba(28,27,25,0.16)', red: 'rgba(158,66,56,0.4)', redText: '#96473b', code: '#efeeea', coord: 'rgba(28,27,25,0.5)' },
+  dark: { paper: '#222221', ink: '#ebe9e4', grey: '#9a9893', line: 'rgba(235,233,228,0.12)', sqL: '#3a3a3a', sqD: '#262626', pW: '#ecebe7', pWs: '0.05em #141414', pB: '#121212', pBs: '0.04em #8c8c8c', dot: 'rgba(235,233,228,0.35)', sel: 'rgba(235,233,228,0.18)', red: 'rgba(205,95,85,0.4)', redText: '#d0847a', code: '#2b2b2a', coord: 'rgba(235,233,228,0.4)' }
+};
+const ACCENT = { brick: { light: '#a3513b', dark: '#c8735c' }, ochre: { light: '#7f6320', dark: '#c4a04e' } };
+const NAMES = { paper: '--paper', ink: '--ink', grey: '--grey', line: '--line', sqL: '--square-light', sqD: '--square-dark', red: '--check', code: '--code-bg', dot: '--legal-dot' };
+function hexToRgba(h, a) { const n = parseInt(h.slice(1), 16); return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`; }
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { theme: props.theme || 'light' }; }
+  componentDidUpdate(prev) { if (prev.theme !== this.props.theme && this.props.theme) this.setState({ theme: this.props.theme }); document.body.style.background = THEMES[this.state.theme].paper; }
+  componentDidMount() { document.body.style.background = THEMES[this.state.theme].paper; }
+  renderVals() {
+    const th = this.state.theme, T = THEMES[th], acc = ACCENT[this.props.accent || 'brick'][th];
+    const tokens = (t, a) => [...Object.keys(NAMES).map(k => ({ name: NAMES[k], value: t[k] })), { name: '--accent', value: a }];
+    const gs = (w, extra) => ({ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64, lineHeight: 1, color: w ? T.pW : T.pB, WebkitTextStroke: w ? T.pWs : T.pBs, pointerEvents: 'none', ...extra });
+    return {
+      rootStyle: { '--paper': T.paper, '--ink': T.ink, '--grey': T.grey, '--line': T.line, '--acc': acc, '--code': T.code, '--coord': T.coord, '--dot': T.dot, '--sqL': T.sqL, '--redText': T.redText, background: T.paper, color: T.ink, minHeight: '100vh' },
+      toggleTheme: () => this.setState({ theme: th === 'light' ? 'dark' : 'light' }), themeLabel: th === 'light' ? 'Dark' : 'Light',
+      lightTokens: tokens(THEMES.light, ACCENT[this.props.accent || 'brick'].light), darkTokens: tokens(THEMES.dark, ACCENT[this.props.accent || 'brick'].dark),
+      spark: '0,20.1 6.3,21.4 12.5,18.8 18.8,20.1 25,17.5 31.3,21.4 37.5,16.2 43.8,20.1 50,18.8 56.3,17.5 62.5,14.9 68.8,20.1 75,17.5 81.3,20.1 87.5,16.2 93.8,1 100,11.0',
+      states: [
+        { label: 'normal · light', bg: T.sqL, overlay: 'transparent', glyph: '♞', gs: gs(true), coord: 'a2' },
+        { label: 'normal · dark', bg: T.sqD, overlay: 'transparent', glyph: '♞', gs: gs(false), coord: 'b2' },
+        { label: 'selected', bg: T.sqL, overlay: T.sel, glyph: '♗', gs: gs(true), coord: 'c1' },
+        { label: 'legal target', bg: T.sqD, overlay: 'transparent', dot: true, glyph: '', coord: 'd4' },
+        { label: 'last move · from', bg: T.sqL, overlay: hexToRgba(acc, 0.3), glyph: '', coord: 'a6' },
+        { label: 'last move · to', bg: T.sqD, overlay: hexToRgba(acc, 0.3), glyph: '♟', gs: gs(false), coord: 'a5' },
+        { label: 'check', bg: T.sqL, overlay: T.red, glyph: '♚', gs: gs(true), coord: 'g1' }
+      ].map(s => ({ ...s, glyph: s.glyph === '♗' ? '♝' : s.glyph })),
+      promoGlyph: { display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, lineHeight: 1, color: T.pW, WebkitTextStroke: T.pWs }
+    };
+  }
+}
+</script>
+</body>
+</html>

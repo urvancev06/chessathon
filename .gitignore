@@ -3,6 +3,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 submission.zip
+*.zip
 *.pgn
 data/*.pgn
 data/pgn/
