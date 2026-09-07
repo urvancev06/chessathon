@@ -15,11 +15,14 @@ snapshots or set flags, so the server keeps answering while an engine thinks for
 from __future__ import annotations
 
 import ast
+import contextlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -29,6 +32,7 @@ from pathlib import Path
 from typing import Literal
 
 import chess
+import chess.engine
 import chess.pgn
 
 from harness import sandbox
@@ -69,6 +73,16 @@ TIME_CONTROLS: tuple[tuple[str, int, int], ...] = (
 MAX_BASE_MS = 3_600_000
 MAX_INCREMENT_MS = 60_000
 MAX_HUMAN_SPENT_MS = 7 * 24 * 3_600_000
+# Stockfish seats (brief 8.2). The binary is a local-only instrument found outside the repo; the
+# seat runs tools/yardstick, which drives it over UCI, so a "stockfish:<elo>" id is just that
+# directory plus the environment the yardstick reads.
+YARDSTICK_DIR = "tools/yardstick"
+STOCKFISH_PREFIX = "stockfish:"
+STOCKFISH_ELOS = (1400, 1600, 1800, 2000, 2200, 2400, 2600)
+STOCKFISH_ELO_RANGE = (1320, 3190)  # what UCI_Elo accepts
+DEFAULT_STOCKFISH = Path.home() / ".local" / "opt" / "stockfish" / "stockfish"
+STOCKFISH_PROBE_RETRY_S = 10.0
+MAX_MOVETIME_MS = 60_000
 LOG_GRACE_S = 0.1
 LOG_POLL_S = 0.01
 # Tokens the engine prints per move (docs/DESIGN.md, "Determinism and logging"). Anything else is
@@ -118,28 +132,155 @@ class GameError(Exception):
 # Engine directories
 
 
+EngineKind = Literal["letal", "version", "baseline", "stockfish"]
+
+
 @dataclass(frozen=True)
 class EngineInfo:
-    path: str
+    """One seat choice. ``id`` is what requests send; ``path`` is the agent directory it runs."""
+
+    id: str
     label: str
     short: str
-    kind: Literal["engine", "version", "baseline"]
+    kind: EngineKind
+    path: str
 
     def to_dict(self) -> dict[str, object]:
-        return {"path": self.path, "label": self.label, "short": self.short, "kind": self.kind}
+        return {
+            "id": self.id,
+            "label": self.label,
+            "short": self.short,
+            "kind": self.kind,
+            "path": self.path,
+        }
+
+
+def _directory_info(spec: str, label: str, short: str, kind: EngineKind) -> EngineInfo:
+    return EngineInfo(spec, label, short, kind, spec)
+
+
+# -- Stockfish, the local yardstick ----------------------------------------------------------
+
+
+def stockfish_path() -> Path | None:
+    """The binary: ``YARDSTICK_ENGINE``, then ``~/.local/opt/stockfish/stockfish``, then PATH."""
+    candidates: list[Path] = []
+    configured = os.environ.get("YARDSTICK_ENGINE", "").strip()
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.append(DEFAULT_STOCKFISH)
+    found = shutil.which("stockfish")
+    if found:
+        candidates.append(Path(found))
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+_probe_lock = threading.Lock()
+_probes: dict[str, tuple[str | None, str | None, float]] = {}  # path -> (name, reason, when)
+
+
+def stockfish_name(path: Path) -> tuple[str | None, str | None]:
+    """``(UCI id name, None)`` or ``(None, reason)``; the binary is started once per path.
+
+    The probe is cached because /api/info asks on every page load; a failed probe is retried
+    after a short while so a fixed binary is picked up without a server restart.
+    """
+    key = str(path)
+    with _probe_lock:
+        cached = _probes.get(key)
+        if cached is not None and (
+            cached[0] is not None or time.monotonic() - cached[2] < STOCKFISH_PROBE_RETRY_S
+        ):
+            return cached[0], cached[1]
+        name: str | None = None
+        reason: str | None = None
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(key, timeout=10.0)
+        except Exception as exc:  # not a UCI engine, not executable, killed at start...
+            reason = f"{path} did not answer as a UCI engine: {type(exc).__name__}: {exc}"
+        else:
+            name = str(engine.id.get("name") or path.name)
+            with contextlib.suppress(Exception):  # the probe is over either way
+                engine.quit()
+        _probes[key] = (name, reason, time.monotonic())
+        return name, reason
+
+
+def stockfish_status(root: Path) -> dict[str, object]:
+    """``{"available", "path", "name", "reason"}`` for the analysis and the seat list."""
+    path = stockfish_path()
+    if path is None:
+        return {
+            "available": False,
+            "path": None,
+            "name": None,
+            "reason": (
+                "no Stockfish binary: set YARDSTICK_ENGINE or install it at "
+                f"{DEFAULT_STOCKFISH} (it stays outside the repository)"
+            ),
+        }
+    name, reason = stockfish_name(path)
+    if name is None:
+        return {"available": False, "path": str(path), "name": None, "reason": reason}
+    if not (root / YARDSTICK_DIR / "agent.py").is_file():
+        reason = f"{YARDSTICK_DIR}/agent.py is missing, so Stockfish cannot take a seat"
+    return {"available": True, "path": str(path), "name": name, "reason": reason}
+
+
+def stockfish_level(spec: str) -> str | None:
+    """``"1600"`` or ``"full"`` for a ``stockfish:<level>`` id, None for any other spec."""
+    if not spec.startswith(STOCKFISH_PREFIX):
+        return None
+    level = spec[len(STOCKFISH_PREFIX) :].strip().lower()
+    if level == "full":
+        return level
+    low, high = STOCKFISH_ELO_RANGE
+    if not level.isdigit() or not low <= int(level) <= high:
+        raise GameError(
+            400, f"{spec!r}: the level must be 'full' or an Elo between {low} and {high}"
+        )
+    return str(int(level))
+
+
+def stockfish_info(name: str, level: str) -> EngineInfo:
+    strength = "full strength" if level == "full" else f"Elo {level}"
+    return EngineInfo(
+        f"{STOCKFISH_PREFIX}{level}",
+        f"{name} · {strength}",
+        f"sf-{level}",
+        "stockfish",
+        YARDSTICK_DIR,
+    )
+
+
+def stockfish_environment(level: str, path: Path, movetime_ms: int | None) -> dict[str, str]:
+    """What tools/yardstick reads: the binary, the level, and an optional fixed movetime."""
+    environment = {"YARDSTICK_ENGINE": str(path)}
+    if level != "full":
+        environment["YARDSTICK_ELO"] = level
+    if movetime_ms is not None:
+        environment["YARDSTICK_MOVETIME_MS"] = str(movetime_ms)
+    return environment
+
+
+# -- the seat list -----------------------------------------------------------------------------
 
 
 def list_engines(root: Path) -> list[EngineInfo]:
-    """The working tree, every frozen ``versions/*`` build, then the four baselines."""
+    """The working tree, every frozen ``versions/*`` build, the four baselines, then Stockfish
+    levels when the local binary and ``tools/yardstick`` are both present."""
     engines: list[EngineInfo] = []
     if (root / "agent.py").is_file():
-        engines.append(EngineInfo(".", f"{ENGINE_NAME} (working tree)", "letal", "engine"))
+        engines.append(_directory_info(".", f"{ENGINE_NAME} (working tree)", "letal", "letal"))
     versions = root / "versions"
     if versions.is_dir():
         for directory in sorted(versions.iterdir()):
             if (directory / "agent.py").is_file():
                 engines.append(
-                    EngineInfo(
+                    _directory_info(
                         f"versions/{directory.name}",
                         f"{ENGINE_NAME} {directory.name}",
                         f"letal-{directory.name}",
@@ -148,15 +289,31 @@ def list_engines(root: Path) -> list[EngineInfo]:
                 )
     for name in BASELINES:
         if (root / "baselines" / name / "agent.py").is_file():
-            engines.append(EngineInfo(f"baselines/{name}", f"Baseline: {name}", name, "baseline"))
+            engines.append(
+                _directory_info(f"baselines/{name}", f"Baseline: {name}", name, "baseline")
+            )
+    status = stockfish_status(root)
+    engine_name = status["name"]
+    if status["available"] and status["reason"] is None and isinstance(engine_name, str):
+        engines.extend(stockfish_info(engine_name, str(elo)) for elo in STOCKFISH_ELOS)
+        engines.append(stockfish_info(engine_name, "full"))
     return engines
 
 
 def resolve_engine(root: Path, spec: str) -> Path:
-    """The agent directory for ``spec``; it must sit inside the repo and contain ``agent.py``."""
+    """The agent directory for ``spec``; it must sit inside the repo and contain ``agent.py``.
+
+    A ``stockfish:<level>`` id resolves to ``tools/yardstick`` and additionally requires the
+    local binary, so a seat that could only play fallback moves is refused up front.
+    """
     if not isinstance(spec, str) or not spec.strip() or "\x00" in spec:
         raise GameError(400, "engine directory is missing")
     spec = spec.strip()
+    if stockfish_level(spec) is not None:
+        status = stockfish_status(root)
+        if not status["available"] or status["reason"] is not None:
+            raise GameError(503, f"Stockfish is not available: {status['reason']}")
+        spec = YARDSTICK_DIR
     if Path(spec).is_absolute():
         raise GameError(400, "engine directory must be relative to the repository root")
     repo = root.resolve()
@@ -170,11 +327,15 @@ def resolve_engine(root: Path, spec: str) -> Path:
 
 def engine_label(root: Path, spec: str) -> EngineInfo:
     spec = spec.strip()
+    level = stockfish_level(spec)
+    if level is not None:
+        name = stockfish_status(root)["name"]
+        return stockfish_info(name if isinstance(name, str) else "Stockfish", level)
     for info in list_engines(root):
-        if info.path == spec or Path(info.path) == Path(spec):
+        if info.id == spec or Path(info.path) == Path(spec):
             return info
     resolved = resolve_engine(root, spec)
-    return EngineInfo(spec, resolved.name, resolved.name, "engine")
+    return _directory_info(spec, resolved.name, resolved.name, "letal")
 
 
 # --------------------------------------------------------------------------------------------
@@ -272,13 +433,42 @@ def _await_output(agent: sandbox.Agent, before: str, grace_s: float = LOG_GRACE_
 # One agent process
 
 
+class ConfiguredAgent(sandbox.Agent):
+    """``sandbox.local`` plus environment variables for this one seat.
+
+    ``Agent._environment`` copies ``os.environ`` when the process starts, so a seat-specific
+    setting (the yardstick's Elo) would otherwise need the server's own environment mutated
+    under a lock around every start. Overriding the builder keeps the harness untouched and
+    the seats independent.
+    """
+
+    def __init__(self, directory: Path, seed: int, extra: dict[str, str]) -> None:
+        resolved = directory.resolve()
+        super().__init__([sys.executable, str(sandbox.RUNNER), str(resolved)], resolved.name, seed)
+        self.extra = extra
+
+    def _environment(self, scratch: str) -> dict[str, str]:
+        environment = super()._environment(scratch)
+        environment.update(self.extra)
+        return environment
+
+
 class Seat:
     """One engine process, driven exactly as harness.referee drives it."""
 
-    def __init__(self, root: Path, spec: str, seed: int) -> None:
+    def __init__(self, root: Path, spec: str, seed: int, movetime_ms: int | None = None) -> None:
         self.path = resolve_engine(root, spec)
         self.info = engine_label(root, spec)
-        self.agent = sandbox.local(self.path, seed)
+        extra: dict[str, str] = {}
+        level = stockfish_level(spec.strip())
+        if level is not None:
+            binary = stockfish_path()
+            if binary is None:  # resolve_engine just checked; a race with an uninstall
+                raise GameError(503, "Stockfish is not available")
+            extra = stockfish_environment(level, binary, movetime_ms)
+        self.agent: sandbox.Agent = (
+            ConfiguredAgent(self.path, seed, extra) if extra else sandbox.local(self.path, seed)
+        )
         self.init_ms: float | None = None
         self.init_failure: str | None = None
         self.init_log = ""
@@ -366,6 +556,8 @@ class Seat:
     def to_dict(self) -> dict[str, object]:
         return {
             "kind": "engine",
+            "id": self.info.id,
+            "engine_kind": self.info.kind,
             "path": self.info.path,
             "label": self.info.label,
             "short": self.info.short,
@@ -421,6 +613,7 @@ class GameSpec:
     start_fen: str
     ply_cap: int
     opening: str | None
+    stockfish_movetime_ms: int | None = None  # fixed time per move for Stockfish seats
 
     @property
     def human(self) -> Colour | None:
@@ -506,10 +699,11 @@ class Game:
         self._finishing = False
         seed = int.from_bytes(os.urandom(4), "big") % 1_000_000
         self.seats: dict[chess.Color, Seat] = {}
+        movetime = spec.stockfish_movetime_ms
         if spec.white is not None:
-            self.seats[chess.WHITE] = Seat(registry.root, spec.white, seed)
+            self.seats[chess.WHITE] = Seat(registry.root, spec.white, seed, movetime)
         if spec.black is not None:
-            self.seats[chess.BLACK] = Seat(registry.root, spec.black, seed + 1)
+            self.seats[chess.BLACK] = Seat(registry.root, spec.black, seed + 1, movetime)
         self.slots = len(self.seats)
 
     # -- lifecycle ---------------------------------------------------------------------------
@@ -835,6 +1029,7 @@ class Game:
                 "white": self._player_label(chess.WHITE),
                 "black": self._player_label(chess.BLACK),
                 "ply": self.board.ply(),
+                "moves": len(self.moves),
                 "result": self.result,
                 "termination": self.termination,
                 "updated_at": int(self.updated_at * 1000),
@@ -1038,6 +1233,9 @@ def parse_spec(root: Path, body: dict[str, object]) -> GameSpec:
     opening = _str_field(body, "opening")
     if opening is not None:
         opening = opening.strip()[:120] or None
+    movetime: int | None = None
+    if body.get("stockfish_movetime_ms") is not None:
+        movetime = _int_field(body, "stockfish_movetime_ms", 0, 1, MAX_MOVETIME_MS)
     if kind == "play":
         engine = _str_field(body, "engine")
         if engine is None:
@@ -1063,6 +1261,7 @@ def parse_spec(root: Path, body: dict[str, object]) -> GameSpec:
         start_fen=board.fen(),
         ply_cap=ply_cap,
         opening=opening,
+        stockfish_movetime_ms=movetime,
     )
 
 
