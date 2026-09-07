@@ -363,6 +363,9 @@ def test_pause_and_resume(client: Client, registry: Registry) -> None:
     status, later = client.get(f"/api/games/{game_id}")
     assert later["status"] == "running" and later["paused"] is True
     assert later["ply"] == frozen["ply"] and later["clocks"] == frozen["clocks"]
+    # Copy PGN on Spectate reads the game so far, mid-game, with an open result.
+    status, payload, content_type = client.raw("GET", f"/api/games/{game_id}/pgn")
+    assert status == 200 and "chess-pgn" in content_type and b'[Result "*"]' in payload
     status, state = client.post(f"/api/games/{game_id}/resume")
     assert status == 200 and state["paused"] is False
     state = client.wait(game_id, "finished", timeout=30)

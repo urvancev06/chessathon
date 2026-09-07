@@ -21,13 +21,14 @@ Ctrl-C stops the server and every engine process it started.
   or (locally) Stockfish at a chosen Elo. Click-click or drag to move; a promotion strip
   appears over the target square. Right of the board: the clocks, the thinking strip, two
   sparklines (time and nodes per engine move), the move list with clocks, and Takeback, Resign,
-  New game, Download PGN, Copy FEN and — for a finished game — Analyse.
+  New game, Download PGN, Copy PGN, Copy FEN and — for a finished game — Analyse.
 - **New game** — the setup form: engine build, your colour (Random included), time control
   presets or your own base/increment, and the starting position (standard, a curated opening by
   index, or a FEN that is validated as you type). Nothing starts until you press Start.
 - **Spectate** — engine against engine, played entirely by the server; the browser only
   watches. Pick two seats, a time control, a starting position and a ply cap; Stop pauses the
-  game between moves with the clocks standing still, Resume continues, Restart replays the setup.
+  game between moves with the clocks standing still, Resume continues, Restart replays the setup,
+  Copy PGN copies the game so far (or the finished game) to the clipboard.
 - **Overview** — the identity, the real version and commit, the competition contract, how the
   engine works in four paragraphs, and the latest results table from `docs/RESULTS.md`.
 - **Docs** — every `docs/*.md` file, rendered here. **Weights** — the piece values, the phase
@@ -79,7 +80,9 @@ repository or the zip, and it never influences a move our engine plays. Two uses
 - **Analysis**: every position of a finished game is searched once at the chosen depth and
   number of lines. The eval bar, the eval graph, the `?!` `?` `??` marks, the per-move detail
   (eval before/after, centipawn loss, the engine's rank of the move, the best line) and the
-  accuracy summary use lichess's published formulas.
+  accuracy summary use lichess's published formulas; the summary counts each side's own
+  moves only (best-move and top-3 counts, ACPL, mean accuracy). Copy PGN copies the analysed
+  game.
 
 Without a Stockfish binary the seats are simply absent and the Analyse buttons say why.
 

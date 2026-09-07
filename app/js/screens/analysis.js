@@ -165,7 +165,8 @@
         const total = plies().length;
         const button = (label, target, help) => el('button', { type: 'button', class: 'quiet', title: help, 'aria-label': help, disabled: target === view.index, text: label, onClick: () => goTo(target) });
         navBox.append(button('|<', 0, 'First position (Home)'), button('<', Math.max(0, view.index - 1), 'Previous move (left arrow)'), button('>', Math.min(total, view.index + 1), 'Next move (right arrow)'), button('>|', total, 'Last position (End)'),
-          el('button', { type: 'button', class: 'quiet', text: 'Flip board', onClick: () => { board.flip(); evalBar.classList.toggle('flipped', board.flipped); } }));
+          el('button', { type: 'button', class: 'quiet', text: 'Flip board', onClick: () => { board.flip(); evalBar.classList.toggle('flipped', board.flipped); } }),
+          view.result.pgn ? LT.copyButton('Copy PGN', () => view.result.pgn) : null);
       }
       function renderDetail() {
         LT.clear(detail);

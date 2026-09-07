@@ -57,7 +57,8 @@
       const resign = el('button', { type: 'button', class: 'quiet', text: 'Resign' });
       const newGame = el('a', { class: 'quiet', href: '#/new', text: 'New game' });
       const pgn = el('a', { class: 'quiet', href: `/api/games/${state.id}/pgn`, download: '', text: 'Download PGN' });
-      const copy = el('button', { type: 'button', class: 'quiet', text: 'Copy FEN' });
+      const copyPgn = LT.copyButton('Copy PGN', () => LT.api.text(`/api/games/${state.id}/pgn`));
+      const copy = LT.copyButton('Copy FEN', () => state.fen);
       const analyse = el('a', { class: 'quiet', href: `#/analysis?game=${encodeURIComponent(state.id)}`, text: 'Analyse', hidden: true });
       const notice = el('div', { class: 'notice', hidden: true });
 
@@ -81,7 +82,7 @@
               el('div', { class: 'caption' }, think.capUsed, think.capSoft, think.capHard))),
           el('div', { class: 'sparks' }, sparkTime.node, sparkNodes.node),
           el('div', { class: 'block' }, el('div', { class: 'block-head label' }, el('span', { text: 'Moves' }), plyCount), moves),
-          el('div', { class: 'actions' }, takeback, resign, newGame, pgn, copy, analyse),
+          el('div', { class: 'actions' }, takeback, resign, newGame, pgn, copyPgn, copy, analyse),
           notice)));
 
       // -- board and state ------------------------------------------------------------------------
@@ -264,11 +265,6 @@
       board.onMove(submitMove);
       takeback.addEventListener('click', () => action('takeback'));
       resign.addEventListener('click', () => action('resign'));
-      copy.addEventListener('click', async () => {
-        await LT.copyText(state.fen);
-        copy.textContent = 'Copied';
-        setTimeout(() => { copy.textContent = 'Copy FEN'; }, 1500);
-      });
 
       const ticker = setInterval(tick, 250);
       apply(state);

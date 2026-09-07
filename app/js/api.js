@@ -18,9 +18,24 @@
     }
     return payload;
   }
+  /** GET a text resource (the PGN endpoint); an error carries the server's JSON message. */
+  async function text(path) {
+    let response;
+    try { response = await fetch(path); } catch (error) {
+      throw Object.assign(new Error('the server is not reachable; is it still running?'), { status: 0 });
+    }
+    const body = await response.text();
+    if (!response.ok) {
+      let message = `${response.status} ${response.statusText}`;
+      try { message = JSON.parse(body).error || message; } catch (error) { /* not JSON */ }
+      throw Object.assign(new Error(message), { status: response.status, message });
+    }
+    return body;
+  }
   const cache = {};
   LT.api = {
     get: (path) => request('GET', path),
+    text,
     post: (path, body) => request('POST', path, body || {}),
     del: (path) => request('DELETE', path),
     /** GET once per page load unless forced; used for /api/info and /api/openings. */

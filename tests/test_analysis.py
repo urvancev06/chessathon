@@ -8,6 +8,7 @@ is a local instrument, never something the repository provides.
 
 from __future__ import annotations
 
+import io
 import json
 import math
 import time
@@ -42,6 +43,8 @@ SHORT_PGN = """[Event "Test"]
 3. Bb5 { [%clk 0:01:55] } a6 { [%clk 0:01:54] } 4. Ba4 { [%clk 0:01:53] } Nf6 { [%clk 0:01:52] } *
 """
 FOOLS_MATE = "1. f3 e5 2. g4 Qh4# 0-1"
+# White plays the engine's first choices, Black two moves no engine lists (the second a blunder).
+LOPSIDED_PGN = '[White "Good"]\n[Black "Bad"]\n\n1. e4 f6 2. d4 g5 3. Qh5# 1-0'
 
 
 # --------------------------------------------------------------------------------------------
@@ -212,6 +215,25 @@ def test_summary_aggregates_one_side() -> None:
     assert empty["moves"] == 0 and empty["acpl"] == 0.0 and empty["best_move_pct"] == 0.0
 
 
+def test_summary_counts_each_side_separately() -> None:
+    """Regression: best-move and top-3 counts come from each side's own moves, never from the
+    whole game (the two sides here have different rank distributions, so the counts differ)."""
+    white_ranks = [1, 1, 2, None]
+    black_ranks = [None, None, 3, 1]
+    plies = []
+    for white_rank, black_rank in zip(white_ranks, black_ranks, strict=True):
+        plies.append(_report("white", white_rank, 0 if white_rank == 1 else 20, 2.0, "good"))
+        plies.append(_report("black", black_rank, 0 if black_rank == 1 else 80, 8.0, "good"))
+    white = analysis.summarise(plies, "white", "W")
+    black = analysis.summarise(plies, "black", "B")
+    assert white["moves"] == 4 and black["moves"] == 4
+    assert (white["best_moves"], white["top3_moves"]) == (2, 3)
+    assert (black["best_moves"], black["top3_moves"]) == (1, 2)
+    assert (white["best_move_pct"], white["top3_pct"]) == (50.0, 75.0)
+    assert (black["best_move_pct"], black["top3_pct"]) == (25.0, 50.0)
+    assert white["acpl"] == 10.0 and black["acpl"] == 60.0
+
+
 # --------------------------------------------------------------------------------------------
 # Sources, without an engine
 
@@ -370,7 +392,10 @@ def test_bad_analysis_requests(client: Client) -> None:
 
 
 def _check_result(result: JsonDict, plies: int, multipv: int) -> None:
-    assert set(result) == {"engine", "headers", "start_fen", "plies", "summary"}
+    assert set(result) == {"engine", "headers", "start_fen", "pgn", "plies", "summary"}
+    replay = chess.pgn.read_game(io.StringIO(result["pgn"]))
+    assert replay is not None and not replay.errors
+    assert [node.san() for node in replay.mainline()] == [ply["san"] for ply in result["plies"]]
     assert result["engine"]["depth"] == 8 and result["engine"]["multipv"] == multipv
     assert result["engine"]["name"].startswith("Stockfish")
     assert set(result["headers"]) == {"White", "Black", "Result", "Date", "Termination", "Event"}
@@ -477,6 +502,12 @@ def test_analyse_pasted_pgn_and_cache(
     fresh = AnalysisService(registry, cache_dir=service.cache_dir, pgn_dirs=[])
     job, cached = fresh.submit(body)
     assert cached is True and job.status == "done" and job.result == result
+    # A result cached before "pgn" existed is completed on the way out of the cache.
+    stale = json.loads(cached_files[0].read_text())
+    del stale["pgn"]
+    cached_files[0].write_text(json.dumps(stale))
+    job, cached = AnalysisService(registry, cache_dir=service.cache_dir, pgn_dirs=[]).submit(body)
+    assert cached is True and job.result is not None and job.result["pgn"] == result["pgn"]
     # Different settings are a different job.
     status, other = client.call("POST", "/api/analysis", {**body, "multipv": 1})
     assert status == 202 and other["cached"] is False and other["job_id"] != job_id
@@ -504,6 +535,32 @@ def test_checkmate_is_the_outcome_not_a_search(client: Client) -> None:
     assert result["plies"][2]["judgement"] == "blunder"  # 2. g4??
     assert result["summary"]["white"]["blunders"] >= 1
     assert result["headers"]["Result"] == "0-1"
+
+
+@needs_stockfish
+def test_sides_are_graded_separately(client: Client) -> None:
+    """End to end: one side plays the engine's first choices, the other obvious rubbish; the
+    summary must tell them apart (regression for identical per-side counts)."""
+    body = {"source": {"pgn": LOPSIDED_PGN}, "depth": 8, "multipv": 3}
+    status, submitted = client.call("POST", "/api/analysis", body)
+    assert status == 202, submitted
+    state = client.wait(submitted["job_id"])
+    assert state["status"] == "done", state
+    result = state["result"]
+    _check_result(result, plies=5, multipv=3)
+    plies = result["plies"]
+    assert [ply["mover"] for ply in plies] == ["white", "black", "white", "black", "white"]
+    assert [ply["rank"] for ply in plies if ply["mover"] == "black"] == [None, None]
+    assert plies[-1]["rank"] == 1 and plies[-1]["san"] == "Qh5#"  # the only mate in one
+    assert plies[3]["judgement"] == "blunder" and plies[3]["cp_loss"] > 500  # 2... g5??
+    white, black = result["summary"]["white"], result["summary"]["black"]
+    assert (white["name"], black["name"]) == ("Good", "Bad")
+    assert (white["moves"], black["moves"]) == (3, 2)
+    assert white["top3_moves"] == 3 and white["best_moves"] >= 2 and white["top3_pct"] == 100.0
+    assert black["best_moves"] == 0 and black["top3_moves"] == 0 and black["top3_pct"] == 0.0
+    assert (white["blunders"], black["blunders"]) == (0, 1)
+    assert black["acpl"] > 400 > white["acpl"] and black["accuracy"] < white["accuracy"]
+    assert result["pgn"].startswith('[Event "') and "Qh5#" in result["pgn"]
 
 
 @needs_stockfish

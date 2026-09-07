@@ -382,6 +382,7 @@ def analyse_game(
         "engine": {"name": engine.id.get("name", "unknown"), "depth": depth, "multipv": multipv},
         "headers": headers,
         "start_fen": start_fen,
+        "pgn": str(game),  # the analysed game, canonical, for the Copy PGN button
         "plies": [ply.to_dict() for ply in plies],
         "summary": {
             "white": summarise(plies, "white", headers["White"] or "White"),
@@ -673,6 +674,7 @@ class AnalysisService:
             job.total = sum(1 for _ in game.mainline()) + 1  # every position, the final one too
             cached = self._read_cache(key)
             if cached is not None:
+                cached.setdefault("pgn", str(game))  # results cached before "pgn" was added
                 job.status, job.result, job.done = "done", cached, job.total
             self._remember(job)
         if job.status == "done":

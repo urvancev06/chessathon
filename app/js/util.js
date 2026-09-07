@@ -125,6 +125,22 @@ window.LT = window.LT || {};
       return ok;
     }
   };
+  /**
+   * A quiet button that copies what `getText` resolves to (a string or a promise of one); the
+   * label flips to "Copied" (or "Copy failed") for 1.5 s, as Copy FEN does.
+   */
+  LT.copyButton = function copyButton(label, getText, attrs) {
+    const button = LT.el('button', { type: 'button', class: 'quiet', text: label, ...(attrs || {}) });
+    let timer = null;
+    button.addEventListener('click', async () => {
+      let ok = false;
+      try { ok = await LT.copyText(await getText()); } catch (error) { ok = false; }
+      button.textContent = ok ? 'Copied' : 'Copy failed';
+      clearTimeout(timer);
+      timer = setTimeout(() => { button.textContent = label; }, 1500);
+    });
+    return button;
+  };
   /** The mark, 24-unit viewBox, currentColor. */
   LT.mark = function mark(size) {
     return LT.svg('svg', { viewBox: '0 0 24 24', width: size, height: size, class: 'mark', 'aria-hidden': 'true' },

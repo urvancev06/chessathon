@@ -168,12 +168,13 @@
       const moves = el('div', { class: 'movelist' });
       const toggle = el('button', { type: 'button', class: 'quiet', text: 'Stop' });
       const restart = el('button', { type: 'button', class: 'quiet', text: 'Restart' });
+      const copyPgn = LT.copyButton('Copy PGN', () => LT.api.text(`/api/games/${state.id}/pgn`));
       const analyse = el('a', { class: 'quiet', href: `#/analysis?game=${encodeURIComponent(state.id)}`, text: 'Analyse', hidden: true });
       const actionNotice = el('div', { class: 'notice', hidden: true });
       page.append(
         el('div', { class: 'spec-status' }, statusLeft, statusRight),
         agentBlock('black', 'top'), boardEl, agentBlock('white', 'bottom'), moves,
-        el('div', { class: 'spec-actions' }, toggle, restart, analyse), actionNotice);
+        el('div', { class: 'spec-actions' }, toggle, restart, copyPgn, analyse), actionNotice);
       const board = new LT.Board(boardEl, { interactive: false });
       let signature = '';
       let busy = false;
