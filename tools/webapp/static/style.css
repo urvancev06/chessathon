@@ -270,6 +270,7 @@ dl.kv dl.kv { margin-top: 0.15rem; padding-left: 0.7rem; border-left: 1px solid 
 .eval-bar .tick { position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: rgba(128, 128, 128, 0.6); }
 /* 8px bold with tight tracking: "-M12" fits the 20px bar without wrapping. */
 .eval-bar .text { position: absolute; left: 0; right: 0; text-align: center; font-size: 8px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; white-space: nowrap; overflow: hidden; }
+.eval-bar .text.long { font-size: 7px; letter-spacing: -0.06em; }
 .eval-bar .text.on-white { color: #333333; }
 .eval-bar .text.on-black { color: #dddddd; }
 .eval-bar .text.bottom { bottom: 4px; }

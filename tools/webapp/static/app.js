@@ -570,7 +570,7 @@
       const whiteAhead = cp >= 0;
       const whiteAtBottom = !this.flipped;
       const atBottom = whiteAhead === whiteAtBottom;
-      bar.text.className = `text ${atBottom ? 'bottom' : 'top'} ${whiteAhead ? 'on-white' : 'on-black'}`;
+      bar.text.className = `text ${atBottom ? 'bottom' : 'top'} ${whiteAhead ? 'on-white' : 'on-black'}${label.length > 4 ? ' long' : ''}`;
       bar.el.setAttribute('aria-label', `Evaluation ${label}`);
     }
 
