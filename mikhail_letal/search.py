@@ -52,9 +52,12 @@ from mikhail_letal.evaluation import (
 
 Key = Hashable
 
-# How often (in nodes) the search reads the clock and checks the node limit. Reading the clock
-# costs about as much as a node, so it is done in batches.
-NODE_CHECK_INTERVAL = 1024
+# How often (in nodes) the search reads the clock and checks the node limit. A clock read costs
+# about 60 ns against roughly 20 us per node, so reading it every 128 nodes is free (measured: no
+# change in node rate) and bounds the overshoot past the hard deadline to a few milliseconds.
+# The earlier value of 1024 let the search run 25 ms on average and 65 ms at worst past the
+# deadline on the dev box, and the platform's core is about three times slower.
+NODE_CHECK_INTERVAL = 128
 
 # Deepest ply the tree may reach, including quiescence and check extensions. Python's default
 # recursion limit is 1000; each search ply uses a couple of frames, so 128 leaves ample room.
@@ -63,13 +66,37 @@ MAX_PLY = 128
 # The platform declares any game that reaches this many plies a draw (the opening position counts).
 GAME_PLY_CAP = 600
 
+# In quiescence a side in check gets every evasion searched (there is no standing pat when doing
+# nothing is illegal), but only this many quiescence plies deep. Deeper than that a check is
+# handled like any other quiescence node, so a long chain of checks and captures in a dense
+# position cannot blow the node count up (eight queens a side made one depth-1 iteration cost
+# hundreds of thousands of nodes before this cap).
+QS_EVASION_PLIES = 4
+
+# Root tie-break (see Engine._break_draw_tie): when every root move scores a draw although the
+# static evaluation says we are ahead by at least this much, the draw is a rule draw inside the
+# horizon and the tied moves are told apart by the static evaluation of the positions they reach.
+DRAW_TIEBREAK_MARGIN = 300
+
+# The transposition table is emptied at the start of a search once it holds more than this share
+# of its cap, so the mid-search clear (the backstop when the cap is hit) almost never fires.
+TT_CLEAR_FRACTION = 0.6
+
 # Transposition-table entry flags: what the stored score means.
 EXACT = 0  # the score is the exact minimax value at the stored depth
 LOWER = 1  # the true value is at least the stored score (a beta cutoff happened)
 UPPER = 2  # the true value is at most the stored score (every move failed low)
 
-# (depth, ply-independent score, flag, best move). The move is the one to try first next time.
-TTEntry = tuple[int, int, int, chess.Move | None]
+# (depth, ply-independent score, flag, best move code). The move is the one to try first next
+# time. Every field is an int on purpose: ``chess.Move`` objects have a ``__dict__``, and a table
+# of hundreds of thousands of them made CPython's generation-2 garbage collections stall a single
+# node for 100-175 ms, invisible to the clock check. Int-only tuples hold no references the
+# collector has to trace, so the same collection takes about a millisecond.
+TTEntry = tuple[int, int, int, int]
+
+# Depth of a table entry kept only for its move (see Engine._store): below every real depth, so
+# the probe never uses its score.
+_HINT_DEPTH = -1
 
 # One more than the largest possible score, so it is beyond every real value including mates.
 _INFINITY = MATE_SCORE + 1
@@ -87,7 +114,7 @@ _HISTORY_MAX = _ORDER_KILLER_SECOND - 1
 # "no piece" and contributes nothing.
 _MVV_LVA_RANK = (0, 1, 2, 3, 4, 5, 6)
 
-# Sentinel for "no move" in the integer move codes used by the ordering (see _move_code).
+# Sentinel for "no move" in the integer move codes (see _move_code).
 _NO_MOVE_CODE = -1
 
 # Squares a pawn must stand on to promote with its next push, per colour.
@@ -102,7 +129,7 @@ class SearchAborted(Exception):
 
 @dataclass
 class SearchResult:
-    """What one call to ``Searcher.search`` produced."""
+    """What one call to ``Engine.search`` produced."""
 
     move: chess.Move | None  # None only when the root position has no legal moves
     score: int  # side-to-move perspective, from the iteration that chose ``move``
@@ -114,23 +141,30 @@ class SearchResult:
 
 
 def _move_code(move: chess.Move) -> int:
-    """Pack a move into one small int so ordering can compare moves with integer equality.
+    """Pack a move into one small int: from square, to square (6 bits each), promotion piece.
 
     Comparing ``chess.Move`` objects goes through a Python-level ``__eq__``; comparing ints is
-    several times cheaper, and the ordering does this for every move at every node.
+    several times cheaper, and the ordering does this for every move at every node. The same
+    code is what the transposition table stores (see ``TTEntry``).
     """
     return move.from_square | move.to_square << 6 | (move.promotion or 0) << 12
 
 
-class Searcher:
-    """Iterative-deepening negamax alpha-beta searcher with a transposition table.
+def _code_to_move(code: int) -> chess.Move:
+    """Inverse of ``_move_code``. Castling is a king move of two files and en passant a pawn
+    move to the en passant square in python-chess, so from/to/promotion identify every move."""
+    return chess.Move(code & 63, code >> 6 & 63, code >> 12 or None)
+
+
+class Engine:
+    """Iterative-deepening negamax alpha-beta search with a transposition table.
 
     One instance lives for the whole game: its transposition table, killer moves and history
     heuristic persist from move to move (``new_game`` resets them). The per-search state (node
     counts, deadlines, the repetition path) is reset by every call to ``search``.
     """
 
-    def __init__(self, tt_max_entries: int = 400_000) -> None:
+    def __init__(self, tt_max_entries: int = 250_000) -> None:
         self.tt_max_entries = tt_max_entries
         self._tt: dict[Key, TTEntry] = {}
         # Two killer move codes per ply. Index MAX_PLY itself is reachable by the ply guard.
@@ -148,6 +182,12 @@ class Searcher:
         self._hard_deadline = 0.0
         self._node_limit: int | None = None
         self._root_game_ply = 0
+        # Set when a node below the current one was scored as a draw because its position was
+        # already on the current line (a "path" repetition). Such a score is true for this line
+        # only, so a node that saw one must not be stored in the table with its score: another
+        # line reaching the same position may not have the repetition available. Draws from the
+        # game history are permanent within the game and do not set the flag.
+        self._path_draw = False
         # Progress of the root iteration in flight, used to salvage a move after an abort.
         self._partial: tuple[chess.Move, int] | None = None
         self._first_root_move: chess.Move | None = None
@@ -192,8 +232,14 @@ class Searcher:
             score = -MATE_SCORE if board.is_check() else DRAW_SCORE
             return SearchResult(None, score, 0, 0, 0, _now() - start, False)
 
+        # Empty a table that is well on its way to the cap now, between moves, rather than let
+        # the cap-hit clear inside _store land in the middle of a deep iteration.
+        if len(self._tt) > self.tt_max_entries * TT_CLEAR_FRACTION:
+            self._tt.clear()
+
         self._game_history = history
         self._path = {board._transposition_key(): 1}
+        self._path_draw = False
         self._hard_deadline = hard_deadline
         self._node_limit = node_limit
         self._root_game_ply = board.ply()
@@ -255,10 +301,11 @@ class Searcher:
             # position from the previous move's search. Trying that move first is the ordinary
             # "TT move first" rule applied at the root.
             entry = self._tt.get(root_key)
-            if entry is not None:
-                previous_best = entry[3]
+            if entry is not None and entry[3] != _NO_MOVE_CODE:
+                previous_best = _code_to_move(entry[3])
         first_code = _move_code(previous_best) if previous_best is not None else _NO_MOVE_CODE
         ordered = self._order_moves(board, root_moves, first_code, 0)
+        _queen_promotion_first(ordered)
         self._first_root_move = ordered[0]
 
         negamax = self._negamax
@@ -266,10 +313,13 @@ class Searcher:
         beta = _INFINITY
         best_score = -_INFINITY
         best_move = ordered[0]
+        scores: list[int] = []  # one per move of ``ordered``, for the draw tie-break below
+        self._path_draw = False
         for move in ordered:
             board.push(move)
             score = -negamax(board, depth - 1, -beta, -alpha, 1)
             board.pop()
+            scores.append(score)
             # With alpha raised to the best score so far, any later move that returns a higher
             # score has an exact value (see the fail-soft argument in _negamax), so the root's
             # best score is always exact.
@@ -279,8 +329,37 @@ class Searcher:
                 self._partial = (move, score)
                 alpha = score
 
-        self._store(root_key, depth, best_score, EXACT, best_move, 0)
+        if best_score == DRAW_SCORE:
+            best_move = self._break_draw_tie(board, ordered, scores, best_move)
+        self._store(root_key, depth, best_score, EXACT, _move_code(best_move), 0, self._path_draw)
         return best_score, best_move
+
+    def _break_draw_tie(
+        self, board: chess.Board, moves: list[chess.Move], scores: list[int], best: chess.Move
+    ) -> chess.Move:
+        """Choose among root moves that all score a draw when the position is clearly won.
+
+        When the fifty-move rule or the 600-ply cap falls inside the horizon, every line ends in
+        the rule draw, every root move scores exactly ``DRAW_SCORE`` and the search would pick
+        one arbitrarily, move after move, until the draw arrives. If the static evaluation says
+        we are well ahead, the tied moves are told apart by the static evaluation of the position
+        each one reaches (a handful of ``evaluate`` calls), which keeps the mop-up progressing
+        towards the mate the shallow search cannot yet see. A move that stalemates the opponent
+        is never chosen this way.
+        """
+        tied = [move for move, score in zip(moves, scores, strict=True) if score == DRAW_SCORE]
+        if len(tied) < 2 or evaluate(board) < DRAW_TIEBREAK_MARGIN:
+            return best
+        best_static = -_INFINITY
+        for move in tied:
+            board.push(move)
+            # ``evaluate`` is from the opponent's view after the move; negate it. A position with
+            # no legal moves is never evaluated (it is stalemate here: a mate would not score 0).
+            static = -evaluate(board) if any(board.generate_legal_moves()) else -_INFINITY
+            board.pop()
+            if static > best_static:
+                best, best_static = move, static
+        return best
 
     # ------------------------------------------------------------------ main search
 
@@ -305,22 +384,37 @@ class Searcher:
 
         # (2) Repetition: a position already seen in the game, or earlier on the current line,
         # is a draw by the threefold rule as far as the engine is concerned. Treating the first
-        # repetition as the draw keeps the engine from drifting when it is ahead.
+        # repetition as the draw keeps the engine from drifting when it is ahead. A draw found
+        # on the current line only is flagged, because it is a fact about the line, not about
+        # the position (see _path_draw).
         key = board._transposition_key()
-        if key in self._game_history or key in self._path:
+        if key in self._game_history:
+            return DRAW_SCORE
+        if key in self._path:
+            self._path_draw = True
             return DRAW_SCORE
 
         # (3) Fifty-move rule, again with checkmate taking precedence.
         if board.halfmove_clock >= 100:
             return self._game_over_score(board, ply)
 
-        # (4) Transposition table probe. Stored mate scores are distances from the stored node;
+        # (4) Check extension: a side in check has few sensible replies and the position is
+        # tactically hot, so it is searched one ply deeper rather than handed to quiescence. It
+        # comes before the table probe so that the probe and the store below agree on the depth
+        # of this node; otherwise an in-check node would accept an entry one ply too shallow.
+        in_check = board.is_check()
+        if in_check:
+            depth += 1
+
+        # (5) Transposition table probe. Stored mate scores are distances from the stored node;
         # convert them to distances from the root before comparing with this node's window.
         tt = self._tt
         entry = tt.get(key)
         tt_move: chess.Move | None = None
         if entry is not None:
-            entry_depth, entry_score, entry_flag, tt_move = entry
+            entry_depth, entry_score, entry_flag, tt_code = entry
+            if tt_code != _NO_MOVE_CODE:
+                tt_move = _code_to_move(tt_code)
             if entry_depth >= depth:
                 if entry_score >= MATE_THRESHOLD:
                     entry_score -= ply
@@ -334,23 +428,20 @@ class Searcher:
                 elif entry_score <= alpha:
                     return entry_score
 
-        # (5) Check extension: a side in check has few sensible replies and the position is
-        # tactically hot, so it is searched one ply deeper rather than handed to quiescence.
-        in_check = board.is_check()
-        if in_check:
-            depth += 1
-
         # Safety net: never recurse past MAX_PLY, whatever the extensions did.
         if ply >= MAX_PLY:
             return self._static_score(board, ply, in_check)
 
         # (6) Horizon: resolve captures before evaluating.
         if depth <= 0:
-            return self._quiescence(board, alpha, beta, ply, in_check)
+            return self._quiescence(board, alpha, beta, ply, in_check, 0)
 
-        # (7) Interior node. Register the position on the current line for repetition checks.
+        # (7) Interior node. Register the position on the current line for repetition checks,
+        # and start a fresh path-draw flag for the subtree (the caller's is restored after).
         path = self._path
         path[key] = 1
+        outer_path_draw = self._path_draw
+        self._path_draw = False
 
         alpha_original = alpha
         best_score = -_INFINITY
@@ -376,6 +467,8 @@ class Searcher:
                     alpha = score
 
         del path[key]
+        tainted = self._path_draw
+        self._path_draw = outer_path_draw or tainted
 
         if best_move is None:
             # No legal move at all. In check that is checkmate; otherwise stalemate.
@@ -387,7 +480,7 @@ class Searcher:
             flag = UPPER
         else:
             flag = EXACT
-        self._store(key, depth, best_score, flag, best_move, ply)
+        self._store(key, depth, best_score, flag, _move_code(best_move), ply, tainted)
         return best_score
 
     def _staged_moves(
@@ -413,37 +506,44 @@ class Searcher:
     # ------------------------------------------------------------------ quiescence
 
     def _quiescence(
-        self, board: chess.Board, alpha: int, beta: int, ply: int, in_check: bool
+        self, board: chess.Board, alpha: int, beta: int, ply: int, in_check: bool, qs_ply: int
     ) -> int:
         """Captures-only search that settles tactics before the static evaluation is trusted.
 
         The caller has already counted this node and computed ``in_check`` (the main search does
         this at the horizon; the capture loop below does it for each capture it makes).
+        ``qs_ply`` counts how deep into the quiescence search this node is.
 
-        In check there is no standing pat, because doing nothing is not a legal option: every
-        legal evasion is searched, and a position without one is checkmate. Otherwise the side to
-        move may stand pat on the static evaluation or try captures and queen promotions, ordered
-        by MVV-LVA. A position with no legal move at all is stalemate and never evaluated.
+        In check, for the first ``QS_EVASION_PLIES`` quiescence plies, there is no standing pat,
+        because doing nothing is not a legal option: every legal evasion is searched, and a
+        position without one is checkmate. Otherwise the side to move may stand pat on the
+        static evaluation or try captures and queen promotions, ordered by MVV-LVA. The stand-pat
+        test comes before any move generation: it ends most quiescence nodes on its own, and
+        generating the captures first threw that work away at seven nodes in ten. A position
+        with no legal move at all is checkmate or stalemate and is scored as such, never on the
+        static evaluation.
         """
         if ply > self._seldepth:
             self._seldepth = ply
         if ply >= MAX_PLY:
             return self._static_score(board, ply, in_check)
 
-        if in_check:
+        if in_check and qs_ply < QS_EVASION_PLIES:
             moves = list(board.generate_legal_moves())
             if not moves:
                 return -(MATE_SCORE - ply)
             best_score = -_INFINITY
         else:
-            moves = list(board.generate_legal_captures())
-            if not moves and not any(board.generate_legal_moves()):
-                return DRAW_SCORE
             best_score = evaluate(board)  # stand pat
             if best_score >= beta:
-                return best_score
+                # The cutoff is real only if the side to move has a move at all; without one
+                # the position is over (a mate if in check, a stalemate otherwise).
+                if any(board.generate_legal_moves()):
+                    return best_score
+                return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
             if best_score > alpha:
                 alpha = best_score
+            moves = list(board.generate_legal_captures())
             turn = board.turn
             promoting = board.pawns & board.occupied_co[turn] & _PROMOTION_RANK[turn]
             if promoting:
@@ -451,6 +551,8 @@ class Searcher:
                     if move.promotion == chess.QUEEN:
                         moves.append(move)
             if not moves:
+                if not any(board.generate_legal_moves()):
+                    return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
                 return best_score
 
         if len(moves) > 1:
@@ -458,6 +560,7 @@ class Searcher:
 
         quiescence = self._quiescence
         child_ply = ply + 1
+        child_qs_ply = qs_ply + 1
         for move in moves:
             promotion = move.promotion
             if promotion is not None and promotion != chess.QUEEN:
@@ -468,7 +571,7 @@ class Searcher:
             if nodes % NODE_CHECK_INTERVAL == 0:
                 self._check_limits()
             child_in_check = board.is_check()
-            score = -quiescence(board, -beta, -alpha, child_ply, child_in_check)
+            score = -quiescence(board, -beta, -alpha, child_ply, child_in_check, child_qs_ply)
             board.pop()
             if score > best_score:
                 best_score = score
@@ -542,17 +645,28 @@ class Searcher:
     # ------------------------------------------------------------------ helpers
 
     def _store(
-        self, key: Key, depth: int, score: int, flag: int, move: chess.Move | None, ply: int
+        self, key: Key, depth: int, score: int, flag: int, move_code: int, ply: int, tainted: bool
     ) -> None:
-        """Write a TT entry with the score made independent of the node's distance from the root."""
-        if score >= MATE_THRESHOLD:
+        """Write a TT entry with the score made independent of the node's distance from the root.
+
+        A ``tainted`` score (one that depended on a repetition along the current line) is not
+        stored at all; only its move is kept, at ``_HINT_DEPTH``, as an ordering hint, and even
+        that does not displace an entry whose score was earned without the repetition.
+        """
+        tt = self._tt
+        if tainted:
+            existing = tt.get(key)
+            if existing is not None and existing[0] > _HINT_DEPTH:
+                return
+            depth, score, flag = _HINT_DEPTH, DRAW_SCORE, EXACT
+        elif score >= MATE_THRESHOLD:
             score += ply
         elif score <= -MATE_THRESHOLD:
             score -= ply
-        tt = self._tt
         if len(tt) >= self.tt_max_entries:
-            tt.clear()  # simplest possible bound on memory; Stage 1 replaces this with ageing
-        tt[key] = (depth, score, flag, move)
+            # The backstop: search() empties a table above TT_CLEAR_FRACTION between moves.
+            tt.clear()
+        tt[key] = (depth, score, flag, move_code)
 
     def _check_limits(self) -> None:
         """Every NODE_CHECK_INTERVAL nodes: abort past the node limit or the hard deadline."""
@@ -577,3 +691,26 @@ class Searcher:
         if not any(board.generate_legal_moves()):
             return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
         return evaluate(board)
+
+
+def _queen_promotion_first(ordered: list[chess.Move]) -> None:
+    """If the first root move is an under-promotion, search the queen promotion of the same pawn
+    to the same square before it.
+
+    The root keeps the first move that reaches the best score, so whichever promotion is searched
+    first wins an exact tie. Normally MVV-LVA puts the queen first, but the table move (the
+    previous iteration's or the previous search's choice) overrides the ordering, and once an
+    under-promotion has been chosen it would keep being chosen. Searching the queen first makes
+    the queen the tie winner without any comparison of scores that are only bounds.
+    """
+    first = ordered[0]
+    if first.promotion is None or first.promotion == chess.QUEEN:
+        return
+    for index, move in enumerate(ordered):
+        if (
+            move.promotion == chess.QUEEN
+            and move.from_square == first.from_square
+            and move.to_square == first.to_square
+        ):
+            ordered.insert(0, ordered.pop(index))
+            return

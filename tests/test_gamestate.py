@@ -160,3 +160,21 @@ def test_history_always_contains_the_current_root() -> None:
         else:
             assert state.observe(board) is True
             assert _key(board) in state.history
+
+
+def test_black_never_sees_the_start_position() -> None:
+    # Playing Black, the first FEN we receive is the position after White's first move: the
+    # game's start position is never observed, so its count stays one below the referee's.
+    # The searcher scores any earlier occurrence (count >= 1) as a draw, so being one short
+    # changes nothing; this test pins the gap so nobody "fixes" the count in the wrong place.
+    referee = chess.Board()  # the referee's board from the true start
+    state = GameState()
+    for san in ["Nf3", "Nf6", "Ng1", "Ng8", "Nf3", "Nf6", "Ng1", "Ng8"]:
+        referee.push_san(san)
+        if referee.turn == chess.BLACK:
+            assert state.observe(referee) is True  # White moved: we are handed the position
+        else:
+            state.record_own_move(referee)
+    assert referee.is_repetition(3)  # the referee would claim the draw here
+    assert state.history[_key(chess.Board())] == 2
+    assert state.desyncs == 0

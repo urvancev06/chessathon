@@ -17,7 +17,7 @@ One code change, in `agent.py`:
   (`docs/CALIBRATION.md`) reads those lines, so this mattered.
 
 Nothing else needed fixing. All five modules already matched the `docs/DESIGN.md` signatures:
-`agent.py` imports `Searcher`, `GameState`, `fallback_move`, `DEFAULT_PARAMS`, `budget` exactly as
+`agent.py` imports the search class, `GameState`, `fallback_move`, `DEFAULT_PARAMS`, `budget` exactly as
 the other modules export them, `tests/test_properties.py` ran (44 tests, not skipped) against the
 integrated engine, and `ruff check .` / `mypy` were clean before I touched anything.
 

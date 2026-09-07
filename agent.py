@@ -24,13 +24,13 @@ import chess  # noqa: E402
 from mikhail_letal import ENGINE_NAME, __version__  # noqa: E402
 from mikhail_letal.fallback import fallback_move  # noqa: E402
 from mikhail_letal.gamestate import GameState  # noqa: E402
-from mikhail_letal.search import Searcher  # noqa: E402
+from mikhail_letal.search import GAME_PLY_CAP, Engine  # noqa: E402
 from mikhail_letal.timing import DEFAULT_PARAMS, budget  # noqa: E402
 
 # Module state lives for one game: the platform starts a fresh process per game and keeps it alive
 # (suspended while the opponent thinks) between our moves.
 STATE = GameState()  # every position seen this game, so the search knows about repetitions
-SEARCHER = Searcher()  # iterative-deepening alpha-beta; its transposition table persists all game
+ENGINE = Engine()  # iterative-deepening alpha-beta; its transposition table persists all game
 PARAMS = DEFAULT_PARAMS  # every time-management constant, in one place (mikhail_letal/timing.py)
 
 
@@ -62,15 +62,24 @@ def get_move(fen: str, time_left_ms: int) -> str:
         board = chess.Board(fen)
         if not STATE.observe(board):
             _say("desync: position not reachable from our last move; history restarted")
+            ENGINE.new_game()  # its stored draws may rest on the history just discarded
         legal = list(board.legal_moves)
         if len(legal) == 1:
             move = legal[0]  # forced: nothing to think about (still validated below)
         elif time_left_ms < PARAMS.panic_ms:
             move = fallback_move(board, legal)  # almost out of time: a legal move, instantly
         elif legal:  # an empty list is impossible (the referee ends the game first)
-            plan = budget(time_left_ms, STATE.own_moves, PARAMS)
+            plan = budget(
+                time_left_ms,
+                STATE.own_moves,
+                PARAMS,
+                # A win must be forced before the referee's draws land: fewer moves to share
+                # the clock over when either deadline is close (mikhail_letal/timing.py).
+                plies_to_cap=GAME_PLY_CAP - board.ply(),
+                fifty_move_room=_fifty_move_room(board),
+            )
             soft_ms, hard_ms = plan.soft_ms, plan.hard_ms
-            result = SEARCHER.search(
+            result = ENGINE.search(
                 board,
                 STATE.history,
                 # Do not start another depth once this share of the soft budget has elapsed:
@@ -98,6 +107,18 @@ def get_move(fen: str, time_left_ms: int) -> str:
         f" s {soft_ms:.0f} h {hard_ms:.0f} c {time_left_ms}"
     )
     return uci
+
+
+def _fifty_move_room(board: chess.Board) -> int | None:
+    """Plies left before the fifty-move draw, but only in a mop-up (no pawns, one side a bare
+    king), where nothing but the mate itself can reset the halfmove clock. Elsewhere ``None``:
+    a capture or a pawn move resets the clock in the normal course of play."""
+    if board.pawns:
+        return None
+    kings = board.kings
+    if board.occupied_co[chess.WHITE] & ~kings and board.occupied_co[chess.BLACK] & ~kings:
+        return None
+    return 100 - board.halfmove_clock
 
 
 def _validated(fen: str, move: chess.Move | None) -> str:
@@ -133,14 +154,14 @@ def _warm_up() -> None:
         warm_state = GameState()
         warm_state.observe(board)
         now = perf_counter()
-        SEARCHER.search(
+        ENGINE.search(
             board,
             warm_state.history,
             soft_deadline=now + 5.0,
             hard_deadline=now + 10.0,
             max_depth=2,
         )
-        SEARCHER.new_game()
+        ENGINE.new_game()
     except Exception as exc:  # see the docstring
         _say(f"warm-up failed: {type(exc).__name__}: {exc}")
 

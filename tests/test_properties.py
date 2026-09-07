@@ -378,3 +378,11 @@ def test_fresh_game_state_is_not_confused_by_the_previous_game() -> None:
     if state is not None:
         assert own_moves_played() == 2, "module state leaked from the previous game"
         assert int(getattr(state, "desyncs", 0)) == 0
+
+
+def test_fifty_move_room_is_passed_only_in_a_mop_up() -> None:
+    # Queen against a bare king at halfmove 82: eighteen plies of room, and the budget must know.
+    assert agent._fifty_move_room(chess.Board("8/8/8/8/3k4/8/8/4KQ2 w - - 82 60")) == 18
+    # A pawn or any piece on the weaker side can reset the clock: no deadline is passed.
+    assert agent._fifty_move_room(chess.Board("8/8/8/8/3k4/8/4P3/4KQ2 w - - 82 60")) is None
+    assert agent._fifty_move_room(chess.Board("8/8/8/8/3kr3/8/8/4KQ2 w - - 82 60")) is None

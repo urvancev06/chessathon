@@ -16,6 +16,16 @@ platform's measurements. Updated after every upload from the validation log the 
 | `panic_ms` | 1650 | overhead_ms + floor_ms: below it the formula has no time to plan with (brief suggested ~1500) |
 | `next_iteration_fraction` | 0.45 | brief; to be replaced by the measured iteration-cost ratio |
 
+## Observations before the first validation log (dev box, 2026-09-07)
+
+- Iteration cost ratio `T(d) / T(d-1)`: median 4.3–5.2, maximum about 10, over middlegame
+  searches on the dev box. `next_iteration_fraction = 0.45` is therefore optimistic: an
+  iteration begun at 0.45 × soft usually runs to 2–2.5 × soft and is cut by the hard limit.
+- At clocks below about 20 s the hard limit (`hard_fraction` × clock) binds every move: moves
+  run to the hard limit, not the soft target.
+- The constants stay at the brief's values until the first validation log; both observations
+  are inputs to that calibration, not changes made ahead of it.
+
 ## Speed factor
 
 Platform node rate ÷ local node rate: **not yet measured** (needs the first validation log).

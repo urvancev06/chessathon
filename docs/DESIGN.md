@@ -121,8 +121,8 @@ class SearchResult:
     elapsed: float              # seconds, measured inside search()
     aborted: bool               # the hard deadline or the node limit stopped an iteration
 
-class Searcher:
-    def __init__(self, tt_max_entries: int = 400_000) -> None: ...
+class Engine:
+    def __init__(self, tt_max_entries: int = 250_000) -> None: ...
     def new_game(self) -> None: ...          # clear TT, killers, history heuristic
     def search(
         self,
@@ -141,33 +141,53 @@ Behaviour:
   `perf_counter() >= soft_deadline`, if the score is a mate score with the shortest mate already
   found at this depth, or if `depth >= max_depth`. The caller sets `soft_deadline` to
   `start + next_iteration_fraction * soft_ms` (see timing).
-- Inside the search every `NODE_CHECK_INTERVAL = 1024` nodes read the clock and raise
+- Inside the search every `NODE_CHECK_INTERVAL = 128` nodes read the clock and raise
   `SearchAborted` past `hard_deadline` or past `node_limit`. On abort, return the best move of the
   last completed iteration, or the current iteration's best if the previously-best move was
   searched first and a later move beat it before the abort.
-- Root: order moves by the previous iteration's best move first, then the ordering below. Track
-  `best_move` and `best_score` per iteration. Aspiration windows are Stage 1.
+- Root: order moves by the previous iteration's best move first, then the ordering below; if
+  that first move is an under-promotion, the queen promotion of the same pawn is searched before
+  it, so the queen wins an exact tie. Track `best_move` and `best_score` per iteration. When the
+  best score is exactly `DRAW_SCORE`, at least two root moves tie at it and the root static
+  evaluation is ≥ `DRAW_TIEBREAK_MARGIN` (300), the tied move whose child evaluates best (from
+  our side, stalemates excluded) is chosen: a rule draw inside the horizon must not stall a
+  mop-up. Aspiration windows are Stage 1.
 - Node: terminal checks in this order: (1) `board.ply() >= 600` → draw; (2) repetition: key in
   `history` or in the search path → `DRAW_SCORE`; (3) halfmove clock ≥ 100 → checkmate or draw;
-  (4) TT probe (depth-sufficient, mate scores adjusted by ply); (5) in check → depth += 1 (check
-  extension, capped by `MAX_PLY`); (6) depth ≤ 0 → quiescence; (7) generate legal moves; none →
-  mated or stalemate.
+  (4) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
+  probe and store see the same depth; (5) TT probe (depth-sufficient, mate scores adjusted by
+  ply); (6) depth ≤ 0 → quiescence; (7) generate legal moves; none → mated or stalemate.
 - Move ordering: TT move, then captures and promotions by MVV-LVA (victim value × 10 − attacker
   value; promotions count the promoted piece as the victim), then the two killers of this ply,
   then quiet moves by the history heuristic `history[colour][from][to]` (bonus `depth * depth` on
   beta cutoffs).
-- Quiescence: stand pat with `evaluate`; captures via `board.generate_legal_captures()` plus
-  queen promotions, MVV-LVA ordered; delta pruning skipped in Stage 0 (correctness first);
-  `seldepth` tracked; quiescence depth capped at `MAX_PLY`.
-- Transposition table: `dict[Key, TTEntry]` where `TTEntry = (depth, score, flag, move)` and
-  `flag ∈ {EXACT, LOWER, UPPER}`. Stored scores are made ply-independent (`score + ply` for positive
-  mate scores, `score - ply` for negative, reversed on probe). Hard cap: when
-  `len(tt) >= tt_max_entries` the table is cleared before the next store. The TT persists across
-  moves within a game (`new_game` clears it).
+- Quiescence: stand pat with `evaluate`, tested against beta *before* any move generation (a
+  stand-pat cutoff ends most quiescence nodes; a position with no legal move is still scored as
+  mate or stalemate, never evaluated); then captures via `board.generate_legal_captures()` plus
+  queen promotions, MVV-LVA ordered. In check, every evasion is searched for the first
+  `QS_EVASION_PLIES = 4` quiescence plies; deeper checks are handled like any other node so dense
+  positions cannot explode. Delta pruning skipped in Stage 0 (correctness first); `seldepth`
+  tracked; quiescence depth capped at `MAX_PLY`.
+- Transposition table: `dict[Key, TTEntry]` where `TTEntry = (depth, score, flag, move_code)`,
+  every field an int (`move_code = from | to << 6 | promotion << 12`, `-1` for none; the
+  `chess.Move` is rebuilt at the probe), and `flag ∈ {EXACT, LOWER, UPPER}`. Int-only entries keep
+  CPython's generation-2 garbage collections to milliseconds; a table of `chess.Move` objects
+  stalled single nodes for 100–175 ms. Stored scores are made ply-independent (`score + ply` for
+  positive mate scores, `score - ply` for negative, reversed on probe). Cap: 250 000 entries; at
+  the start of every `search` the table is emptied if it holds more than `TT_CLEAR_FRACTION`
+  (60 %) of the cap, and when the cap is hit mid-search it is cleared before the next store (the
+  backstop). The TT persists across moves within a game (`new_game` clears it; `agent.py` also
+  calls it after a desync, because stored draws may rest on the discarded history).
 - Path repetition: the searcher keeps a `dict[Key, int]` of counts along the current path; a node
   whose key is already present in `history` or in the path is a draw. The root position's key is
   in `history` by construction (the caller includes it), so any return to the root position is a
   draw in search.
+- Graph-history mitigation: a draw found through the *path* is a fact about the line, not the
+  position, so a node whose value depended on one (a child returned the path draw, or a child was
+  itself so flagged) is not stored with its score; only its move is kept as an ordering hint at
+  depth −1, and never over an entry earned without the repetition. Draws from the game history
+  are permanent within the game and are stored normally. Implemented as one instance flag saved
+  and restored around the child loop (measured cost 0.15 % of the node rate).
 - Killers: two per ply, updated on quiet beta cutoffs. Never store captures as killers.
 - No null-move pruning, no LMR, no futility in Stage 0 (Stage 1 adds them under measurement).
 - The searcher never calls `evaluate` on a position with no legal moves; mates and stalemates are
@@ -197,11 +217,19 @@ class Budget:
 
 DEFAULT_PARAMS: TimeParams
 
-def budget(time_left_ms: int, own_moves_so_far: int, params: TimeParams = DEFAULT_PARAMS) -> Budget
+def budget(
+    time_left_ms: int,
+    own_moves_so_far: int,
+    params: TimeParams = DEFAULT_PARAMS,
+    plies_to_cap: int | None = None,      # 600 - board.ply(), always passed by agent.py
+    fifty_move_room: int | None = None,   # 100 - halfmove_clock, passed only in a mop-up
+) -> Budget
 ```
 
 ```
 moves_to_go = clamp(moves_to_go_max - own_moves_so_far // 2, moves_to_go_min, moves_to_go_max)
+moves_to_go = min(moves_to_go, max(1, (plies_to_cap + 1) // 2))        # if given
+moves_to_go = min(moves_to_go, max(1, (fifty_move_room + 1) // 2))     # if given
 soft = (time_left_ms - overhead_ms) / moves_to_go + increment_fraction * increment_ms
 hard = min(hard_multiplier * soft, hard_fraction * time_left_ms)
 floor = max(floor_ms, floor_fraction * time_left_ms)
@@ -235,6 +263,13 @@ Reconstructing the opponent's move is done by pushing each legal move on a copy 
 board and comparing `_transposition_key()`; `board.fen()` equality is not used because the
 halfmove clock and move number are not part of repetition identity.
 
+Known gap, benign by design: we only receive positions with our colour to move, so when we play
+Black the game's true start position (White to move) is never observed and its count stays one
+below the referee's (after Nf3 Nf6 Ng1 Ng8 Nf3 Nf6 Ng1 Ng8 the referee's `is_repetition(3)` is
+true while our count is 2). The searcher scores *any* earlier occurrence as a draw, so a count
+one short changes nothing; `tests/test_gamestate.py::test_black_never_sees_the_start_position`
+pins it.
+
 ## `mikhail_letal/fallback.py`
 
 ```python
@@ -252,7 +287,7 @@ the referee ends the game first) it raises `ValueError`, and `agent.py` guards f
 ```
 os.environ.setdefault("OMP_NUM_THREADS", "1"); os.environ.setdefault("NUMBA_NUM_THREADS", "1")
 import chess; from mikhail_letal import ...
-STATE = GameState(); SEARCHER = Searcher(); PARAMS = DEFAULT_PARAMS
+STATE = GameState(); ENGINE = Engine(); PARAMS = DEFAULT_PARAMS
 
 def get_move(fen, time_left_ms) -> str:
     t0 = perf_counter()
@@ -264,8 +299,9 @@ def get_move(fen, time_left_ms) -> str:
         if not legal: return "0000"                  # unreachable, referee ends the game first
         if time_left_ms < PARAMS.panic_ms: move = fallback_move(board, legal)
         else:
-            b = budget(time_left_ms, STATE.own_moves)
-            result = SEARCHER.search(board, STATE.history,
+            b = budget(time_left_ms, STATE.own_moves, PARAMS,
+                       plies_to_cap=600 - board.ply(), fifty_move_room=<100 - halfmove_clock in a mop-up, else None>)
+            result = ENGINE.search(board, STATE.history,
                                      soft_deadline = t0 + PARAMS.next_iteration_fraction * b.soft_ms / 1000,
                                      hard_deadline = t0 + b.hard_ms / 1000)
             move = result.move if result.move in legal else fallback_move(board, legal)

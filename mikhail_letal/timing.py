@@ -8,6 +8,8 @@ against the platform's own timing (docs/CALIBRATION.md) changes one dataclass an
 The formula, from ``docs/DESIGN.md``::
 
     moves_to_go = clamp(moves_to_go_max - own_moves_so_far // 2, moves_to_go_min, moves_to_go_max)
+    moves_to_go = min(moves_to_go, moves left before the 600-ply cap and, in a mop-up, before
+                      the fifty-move draw)
     soft  = (time_left_ms - overhead_ms) / moves_to_go + increment_fraction * increment_ms
     hard  = min(hard_multiplier * soft, hard_fraction * time_left_ms)
     floor = max(floor_ms, floor_fraction * time_left_ms)
@@ -56,8 +58,21 @@ class Budget:
 DEFAULT_PARAMS = TimeParams()
 
 
-def budget(time_left_ms: int, own_moves_so_far: int, params: TimeParams = DEFAULT_PARAMS) -> Budget:
+def budget(
+    time_left_ms: int,
+    own_moves_so_far: int,
+    params: TimeParams = DEFAULT_PARAMS,
+    plies_to_cap: int | None = None,
+    fifty_move_room: int | None = None,
+) -> Budget:
     """Return the soft and hard budgets for the next move.
+
+    ``plies_to_cap`` is how many plies remain before the referee's 600-ply draw and
+    ``fifty_move_room`` how many before the fifty-move draw (100 minus the halfmove clock). Either
+    one, when given, caps the number of moves the clock is shared over, so a win that has to be
+    forced before a rule draw gets the time it needs. The caller passes ``fifty_move_room`` only
+    when the game is a mop-up (no pawns, one side a bare king): elsewhere a capture or pawn move
+    resets the clock in the normal course of play and the deadline is not real.
 
     Guarantees, for any inputs (including negative or tiny clocks):
 
@@ -71,6 +86,14 @@ def budget(time_left_ms: int, own_moves_so_far: int, params: TimeParams = DEFAUL
     # 56 of our moves the divisor has reached its minimum and stays there.
     moves_to_go = params.moves_to_go_max - own_moves_so_far // 2
     moves_to_go = max(params.moves_to_go_min, min(params.moves_to_go_max, moves_to_go))
+
+    # Urgency near a rule draw: with n plies left, we get at most (n + 1) // 2 more moves, and
+    # the clock is worth nothing after the draw. Both engines drew won queen endings at the
+    # normal pace before this clamp existed (docs/DECISIONS.md, 2026-09-07).
+    if plies_to_cap is not None:
+        moves_to_go = min(moves_to_go, max(1, (plies_to_cap + 1) // 2))
+    if fifty_move_room is not None:
+        moves_to_go = min(moves_to_go, max(1, (fifty_move_room + 1) // 2))
 
     # Share the clock (less the fixed per-move overhead) evenly over the remaining moves, and add
     # most of the increment, because it arrives after the move whatever we spend now.

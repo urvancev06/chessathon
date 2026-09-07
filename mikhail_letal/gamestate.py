@@ -11,6 +11,12 @@ Positions are identified by ``board._transposition_key()``, python-chess's own r
 ``Board.is_repetition`` uses, so what we count as a repetition is exactly what the referee counts.
 FEN strings are not compared, because the halfmove clock and move number in a FEN are not part of
 repetition identity.
+
+One known, harmless gap: we only ever see positions with our own colour to move, so when we play
+Black the game's true start position (White to move) is never observed and its count here stays
+one lower than the referee's. Because the searcher treats *any* earlier occurrence as a draw
+(``count >= 1``, not the referee's ``>= 3``), a count that is one short changes nothing:
+``tests/test_gamestate.py::test_black_never_sees_the_start_position`` pins this.
 """
 
 from collections.abc import Hashable, Mapping

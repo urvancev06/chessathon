@@ -107,3 +107,48 @@ def test_default_params_match_design() -> None:
     assert (p.increment_fraction, p.hard_multiplier, p.hard_fraction) == (0.8, 3.0, 0.25)
     assert (p.floor_ms, p.floor_fraction, p.panic_ms) == (1500, 0.05, 1650)
     assert p.next_iteration_fraction == 0.45
+
+
+# ----------------------------------------------------------------------------- draw deadlines (C)
+
+
+def test_ply_cap_room_caps_moves_to_go() -> None:
+    # Nine plies before the 600-ply draw: at most five more moves of ours, so the clock is
+    # shared over five instead of forty. (Two won queen endings were drawn at the cap before.)
+    urgent = budget(120_000, 0, plies_to_cap=9)
+    assert urgent.soft_ms == pytest.approx(119_850 / 5 + 400)
+    assert urgent.soft_ms > budget(120_000, 0).soft_ms
+    # An even number of plies: 12 plies -> 6 moves.
+    assert budget(120_000, 0, plies_to_cap=12).soft_ms == pytest.approx(119_850 / 6 + 400)
+    # The hard cap (a quarter of the clock) still binds however urgent the situation is.
+    assert budget(120_000, 0, plies_to_cap=2).hard_ms == pytest.approx(30_000)
+    # Never below one move, and never above the ordinary estimate.
+    assert budget(120_000, 0, plies_to_cap=0) == budget(120_000, 0, plies_to_cap=1)
+    # ... and one move's share (120 250 ms) is capped by the hard limit, so soft == hard there.
+    assert budget(120_000, 0, plies_to_cap=1).soft_ms == pytest.approx(30_000)
+    assert budget(120_000, 0, plies_to_cap=500) == budget(120_000, 0)
+
+
+def test_fifty_move_room_caps_moves_to_go() -> None:
+    # Eighteen plies of fifty-move room (halfmove clock 82): nine moves to force the mate in.
+    urgent = budget(120_000, 0, fifty_move_room=18)
+    assert urgent.soft_ms == pytest.approx(119_850 / 9 + 400)
+    assert budget(120_000, 0, fifty_move_room=100) == budget(120_000, 0)
+    # The tighter of the two deadlines wins.
+    both = budget(120_000, 0, plies_to_cap=9, fifty_move_room=18)
+    assert both == budget(120_000, 0, plies_to_cap=9)
+
+
+@pytest.mark.parametrize(("time_left_ms", "own_moves"), CASES)
+def test_urgent_budgets_keep_the_invariants(time_left_ms: int, own_moves: int) -> None:
+    # Urgency raises the soft target but never the caps: the hard limit still respects the
+    # fixed share of the clock and the reserve, so a mop-up cannot flag us.
+    p = DEFAULT_PARAMS
+    for b in (
+        budget(time_left_ms, own_moves, plies_to_cap=1),
+        budget(time_left_ms, own_moves, fifty_move_room=3),
+    ):
+        assert 0 <= b.soft_ms <= b.hard_ms
+        assert b.hard_ms <= max(0.0, p.hard_fraction * time_left_ms)
+        reserve_room = time_left_ms - p.overhead_ms - _floor(time_left_ms, p)
+        assert b.hard_ms <= max(0.0, reserve_room)

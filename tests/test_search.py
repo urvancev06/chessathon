@@ -11,8 +11,9 @@ from collections.abc import Mapping
 import chess
 import pytest
 
-from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, is_mate_score
-from mikhail_letal.search import NODE_CHECK_INTERVAL, Searcher, SearchResult
+import mikhail_letal.search as search_module
+from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, evaluate, is_mate_score
+from mikhail_letal.search import NODE_CHECK_INTERVAL, Engine, SearchResult
 
 # Mate in one: a rook to the back rank against a king boxed in by its own pawns.
 MATE_IN_ONE_WHITE = "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
@@ -41,13 +42,13 @@ def run_search(
     history: Mapping[object, int] | None = None,
     max_depth: int = 64,
     node_limit: int | None = None,
-    searcher: Searcher | None = None,
+    engine: Engine | None = None,
 ) -> SearchResult:
     """Search ``fen`` with no time pressure; the root key is in the history unless given."""
     board = chess.Board(fen)
     if history is None:
         history = {board._transposition_key(): 1}
-    engine = searcher if searcher is not None else Searcher()
+    engine = engine if engine is not None else Engine()
     deadline = far_future()
     return engine.search(
         board, history, deadline, deadline, max_depth=max_depth, node_limit=node_limit
@@ -170,7 +171,7 @@ def test_hard_deadline_in_the_past_returns_legal_move_quickly() -> None:
     board = chess.Board()
     past = time.perf_counter() - 1.0
     started = time.perf_counter()
-    result = Searcher().search(board, {board._transposition_key(): 1}, past, past)
+    result = Engine().search(board, {board._transposition_key(): 1}, past, past)
     assert time.perf_counter() - started < 0.5
     assert result.move is not None and result.move in board.legal_moves
     assert result.aborted or result.depth >= 1
@@ -230,11 +231,11 @@ def test_identical_searches_give_identical_results() -> None:
 
 
 def test_new_game_restores_a_fresh_searcher() -> None:
-    engine = Searcher()
-    fresh = run_search(HANGING_QUEEN, node_limit=5_000, searcher=engine)
-    warm = run_search(HANGING_QUEEN, node_limit=5_000, searcher=engine)
+    engine = Engine()
+    fresh = run_search(HANGING_QUEEN, node_limit=5_000, engine=engine)
+    warm = run_search(HANGING_QUEEN, node_limit=5_000, engine=engine)
     engine.new_game()
-    reset = run_search(HANGING_QUEEN, node_limit=5_000, searcher=engine)
+    reset = run_search(HANGING_QUEEN, node_limit=5_000, engine=engine)
     # A warm table changes the node count; new_game() brings it back to the fresh figure.
     assert (reset.move, reset.nodes, reset.score) == (fresh.move, fresh.nodes, fresh.score)
     assert warm.move == fresh.move
@@ -264,7 +265,7 @@ def test_ply_cap_scores_draw(fen: str) -> None:
 def test_search_does_not_mutate_the_callers_board() -> None:
     board = chess.Board(BUSY_MIDDLEGAME)
     before = board.fen()
-    Searcher().search(board, {board._transposition_key(): 1}, far_future(), far_future(), 3)
+    Engine().search(board, {board._transposition_key(): 1}, far_future(), far_future(), 3)
     assert board.fen() == before
     assert not board.move_stack
 
@@ -276,3 +277,149 @@ def test_result_fields_are_consistent() -> None:
     assert result.nodes > 0
     assert result.elapsed >= 0.0
     assert not result.aborted
+
+
+# ----------------------------------------------------------------------------- review fixes
+# One test per item of the Stage 0 review (docs/DECISIONS.md, 2026-09-07). Letters match there.
+
+
+def test_clock_is_read_every_128_nodes() -> None:
+    # (A) 1024 nodes let the search overshoot the hard deadline by 25 ms on average and 65 ms at
+    # worst on the dev box; a clock read costs ~60 ns, so 128 is free and bounds the overshoot.
+    assert NODE_CHECK_INTERVAL == 128
+
+
+def test_table_entries_are_int_only_and_the_move_is_rebuilt() -> None:
+    # (B) chess.Move objects in the table made gen-2 garbage collections stall a node for 100+ ms.
+    engine = Engine()
+    result = run_search(HANGING_QUEEN, max_depth=3, engine=engine)
+    assert engine._tt, "the search stored nothing"
+    for entry in engine._tt.values():
+        assert len(entry) == 4
+        assert all(type(field) is int for field in entry)
+    # The root's stored move code decodes back to the move the search chose.
+    root_entry = engine._tt[chess.Board(HANGING_QUEEN)._transposition_key()]
+    rebuilt = search_module._code_to_move(root_entry[3])
+    assert rebuilt == result.move
+    # A promotion survives the round trip too.
+    promotion = chess.Move.from_uci("b7b8n")
+    assert search_module._code_to_move(search_module._move_code(promotion)) == promotion
+
+
+def test_table_is_emptied_between_moves_above_sixty_percent() -> None:
+    # (B) A table well on its way to the cap is cleared at the start of a search, so the cap-hit
+    # clear inside the search (kept as the backstop) almost never lands mid-iteration.
+    engine = Engine(tt_max_entries=1000)
+    assert Engine().tt_max_entries == 250_000
+    for filler in range(601):
+        engine._tt[("filler", filler)] = (1, 0, 0, -1)
+    run_search(HANGING_QUEEN, max_depth=2, engine=engine)
+    assert ("filler", 0) not in engine._tt
+    engine._tt.clear()
+    for filler in range(600):
+        engine._tt[("filler", filler)] = (1, 0, 0, -1)
+    run_search(HANGING_QUEEN, max_depth=2, engine=engine)
+    assert ("filler", 0) in engine._tt  # exactly 60 % is kept
+
+
+def test_rule_draw_inside_the_horizon_prefers_the_best_static_child() -> None:
+    # (D) Queen against a bare king with the fifty-move draw four plies away: every root move
+    # scores exactly 0 at depth 4, and the engine must not pick one arbitrarily (it did, and
+    # shuffled won positions into the draw). It picks the move whose child evaluates best.
+    fen = "8/8/8/8/3k4/8/8/4KQ2 w - - 96 60"
+    result = run_search(fen, max_depth=4)
+    assert result.score == DRAW_SCORE and result.depth == 4
+    board = chess.Board(fen)
+    assert evaluate(board) >= search_module.DRAW_TIEBREAK_MARGIN
+
+    def child_static(move: chess.Move) -> int:
+        board.push(move)
+        value = -evaluate(board) if any(board.generate_legal_moves()) else -MATE_SCORE
+        board.pop()
+        return value
+
+    assert result.move is not None
+    assert child_static(result.move) == max(child_static(m) for m in board.legal_moves)
+    # Without the material edge (a drawn rook ending) the tie-break stays out of the way.
+    assert evaluate(chess.Board("8/8/8/8/3k4/8/8/4KR2 w - - 96 60")) < 1000
+
+
+def test_path_repetition_draws_are_not_stored_as_position_values() -> None:
+    # (E) With an empty game history the root is only on the search path, so the black position
+    # reached by 1.Ke2 Ke4 2.Ke1 Ke5 (back to the root) is a draw *along that line only*. The
+    # table used to record it as "black is at least level" (depth 4+, LOWER 0) although a fresh
+    # search of the position gives about -628 for black.
+    root = chess.Board("8/8/8/4k3/8/8/8/R3K3 w - - 0 1")
+    engine = Engine()
+    engine.search(root, {}, far_future(), far_future(), max_depth=7)
+    key = chess.Board("8/8/8/8/4k3/8/8/R3K3 b - - 0 1")._transposition_key()
+    entry = engine._tt.get(key)
+    assert entry is None or entry[0] < 0, entry  # absent, or an ordering hint without a score
+    fresh = run_search("8/8/8/8/4k3/8/8/R3K3 b - - 0 1", max_depth=4)
+    assert fresh.score < -300
+    # A repetition seen inside the tree with the root in the history taints the same way: the
+    # position after 1.Ke2 Kd4 2.Ke1 Ke4 3.Ke2 can only claim a draw for black by 3...Kd4
+    # repeating the line, and its stored value must not say so.
+    engine = Engine()
+    engine.search(root, {root._transposition_key(): 1}, far_future(), far_future(), max_depth=7)
+    inside = engine._tt.get(chess.Board("8/8/8/8/4k3/8/4K3/R7 b - - 0 1")._transposition_key())
+    assert inside is None or inside[0] < 0 or inside[1] < 0
+
+
+def test_queen_promotion_wins_an_exact_tie_over_an_under_promotion() -> None:
+    # (H) b8=Q and b8=R both mate in one. If the table remembers b8=R as the move to try first
+    # (as it did once an under-promotion was chosen), the queen must still be preferred.
+    fen = "6k1/1P3ppp/8/8/8/8/8/6K1 w - - 0 1"
+    board = chess.Board(fen)
+    engine = Engine()
+    rook_first = search_module._move_code(chess.Move.from_uci("b7b8r"))
+    engine._tt[board._transposition_key()] = (1, MATE_SCORE - 1, search_module.EXACT, rook_first)
+    result = run_search(fen, max_depth=2, engine=engine)
+    assert result.move == chess.Move.from_uci("b7b8q")
+    assert result.score == MATE_SCORE - 1
+
+
+def test_stand_pat_cutoff_never_trusts_a_position_without_moves() -> None:
+    # (K) Stand pat is tested before captures are generated (most quiescence nodes end there).
+    # A stalemated or mated side may evaluate above beta; the position is still over.
+    engine = Engine()
+    engine.search(chess.Board(), {}, far_future(), far_future(), max_depth=1)  # primes state
+    stalemate = chess.Board(STALEMATE_ROOT)
+    assert stalemate.is_stalemate()
+    low_beta = -50_000  # far below any static evaluation: the stand pat would cut off
+    assert engine._quiescence(stalemate, -MATE_SCORE, low_beta, 1, False, 0) == DRAW_SCORE
+    mate = chess.Board(CHECKMATE_ROOT)
+    assert mate.is_checkmate()
+    # (M) Beyond QS_EVASION_PLIES a check is handled like any other node: still a mate here.
+    deep = search_module.QS_EVASION_PLIES
+    assert engine._quiescence(mate, -MATE_SCORE, low_beta, 1, True, deep) == -(MATE_SCORE - 1)
+    assert engine._quiescence(mate, -MATE_SCORE, MATE_SCORE, 1, True, 0) == -(MATE_SCORE - 1)
+
+
+def test_check_extension_is_applied_before_the_table_probe() -> None:
+    # (L) The probe used the unextended depth while the store recorded the extended one, so an
+    # in-check node accepted an entry one ply too shallow. Now both use the extended depth.
+    board = chess.Board("rnb1kbnr/pppp1ppp/8/4p3/4P3/8/PPPPqPPP/RNBQKBNR w KQkq - 0 3")
+    assert board.is_check()
+    engine = Engine()
+    engine.search(board, {}, far_future(), far_future(), max_depth=1)  # primes deadlines etc.
+    engine._path = {}
+    engine._tt.clear()
+    key = board._transposition_key()
+    engine._negamax(board.copy(stack=False), 3, -MATE_SCORE, MATE_SCORE, 1)
+    assert engine._tt[key][0] == 4  # stored at the extended depth
+    before = engine._nodes
+    engine._negamax(board.copy(stack=False), 4, -MATE_SCORE, MATE_SCORE, 1)
+    assert engine._nodes - before > 1  # not a table hit: this node is depth 5 once extended
+    assert engine._tt[key][0] == 5
+
+
+def test_dense_position_keeps_the_first_iteration_small() -> None:
+    # (M) Eight queens a side: with every check searched in full, a depth-1 iteration cost
+    # hundreds of thousands of nodes. Evasions are searched in full for four quiescence plies
+    # only; deeper checks stand pat like any other node.
+    board = chess.Board("7k/8/qqqqqqqq/8/8/QQQQQQQQ/8/K7 w - - 0 1")
+    assert board.is_valid()
+    result = run_search(board.fen(), max_depth=1)
+    assert result.depth == 1 and result.move is not None
+    assert result.nodes < 100_000
