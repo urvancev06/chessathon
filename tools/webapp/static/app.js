@@ -75,8 +75,10 @@
       if (hours > 0) {
         return `${hours}:${String(minutes).padStart(2, '0')}:${String(Math.floor(seconds)).padStart(2, '0')}`;
       }
-      if (minutes === 0 && seconds < 10) {
-        return `0:${seconds.toFixed(1).padStart(4, '0')}`;
+      // Tenths are floored, not rounded, so 9.96 s reads 0:09.9 rather than 0:10.0.
+      const tenths = Math.floor(seconds * 10) / 10;
+      if (minutes === 0 && tenths < 10) {
+        return `0:${tenths.toFixed(1).padStart(4, '0')}`;
       }
       return `${minutes}:${String(Math.floor(seconds)).padStart(2, '0')}`;
     },
@@ -289,7 +291,8 @@
       if (ev.mate === 0) return '#';
       return `${ev.mate < 0 ? '-' : ''}M${Math.abs(ev.mate)}`;
     }
-    const pawns = (Number(ev.cp) || 0) / 100;
+    // Rounded to tenths before the sign is chosen, so -3 cp reads "0.0", not "-0.0".
+    const pawns = Math.round((Number(ev.cp) || 0) / 10) / 10;
     const sign = pawns > 0 ? '+' : pawns < 0 ? '-' : '';
     return `${sign}${Math.abs(pawns).toFixed(1)}`;
   }
@@ -1923,6 +1926,15 @@
     return Math.max(-GRAPH_CAP_PAWNS, Math.min(GRAPH_CAP_PAWNS, pawns));
   }
 
+  /**
+   * A ply's evaluation after the move. The wire carries a checkmate on the board as ±1000 cp
+   * (a "mate 0" has no sign of its own); here it becomes a mate 0 so the bar and the texts show
+   * "#" and the side to move in fen_after, the mated side, settles the sign.
+   */
+  function evalAfter(ply) {
+    return /#$/.test(ply.san) ? { cp: null, mate: 0, pov: 'white' } : ply.eval_after;
+  }
+
   class AnalysisView {
     constructor() {
       this.result = null;
@@ -1996,7 +2008,7 @@
       const plies = this.plies();
       const ply = this.index > 0 ? plies[this.index - 1] : null;
       const fen = ply ? ply.fen_after : this.result.start_fen;
-      const ev = ply ? ply.eval_after : (plies.length ? plies[0].eval_before : null);
+      const ev = ply ? evalAfter(ply) : (plies.length ? plies[0].eval_before : null);
       return { ply, fen, ev, next: this.index < plies.length ? plies[this.index] : null };
     }
 
@@ -2041,7 +2053,7 @@
         h('span', { class: 'muted', text: rankText(ply.rank, multipv) })));
       const facts = h('div', { class: 'facts' });
       const fact = (name, value) => facts.append(h('span', {}, `${name} `, h('b', { text: value })));
-      fact('eval', `${evalText(ply.eval_before, ply.fen_before)} → ${evalText(ply.eval_after, ply.fen_after)}`);
+      fact('eval', `${evalText(ply.eval_before, ply.fen_before)} → ${evalText(evalAfter(ply), ply.fen_after)}`);
       fact(`win% for ${ply.mover}`, `${ply.win_before.toFixed(1)} → ${ply.win_after.toFixed(1)}`);
       fact('cp loss', String(ply.cp_loss));
       fact('accuracy', `${ply.accuracy.toFixed(0)}%`);
@@ -2102,7 +2114,7 @@
       const innerWidth = width - pad.left - pad.right;
       const innerHeight = height - pad.top - pad.bottom;
       const zeroY = pad.top + innerHeight / 2;
-      const values = [graphValue(plies[0].eval_before, plies[0].fen_before)].concat(plies.map((ply) => graphValue(ply.eval_after, ply.fen_after)));
+      const values = [graphValue(plies[0].eval_before, plies[0].fen_before)].concat(plies.map((ply) => graphValue(evalAfter(ply), ply.fen_after)));
       const step = innerWidth / Math.max(1, values.length - 1);
       const x = (index) => pad.left + index * step;
       const y = (value) => zeroY - (value / GRAPH_CAP_PAWNS) * (innerHeight / 2);
@@ -2133,7 +2145,7 @@
       this.cursorDot = svg('circle', { class: 'cursor-dot', r: 3 });
       graph.append(this.cursorLine, this.cursorDot);
       values.forEach((value, index) => {
-        const label = index === 0 ? 'start' : `ply ${index}, ${plies[index - 1].san}, ${evalText(plies[index - 1].eval_after, plies[index - 1].fen_after)}`;
+        const label = index === 0 ? 'start' : `ply ${index}, ${plies[index - 1].san}, ${evalText(evalAfter(plies[index - 1]), plies[index - 1].fen_after)}`;
         const hit = svg('rect', {
           class: 'hit', x: (x(index) - step / 2).toFixed(1), y: pad.top, width: step.toFixed(2), height: innerHeight,
         }, svg('title', {}, label));
@@ -2172,7 +2184,7 @@
         },
         h('span', {}, ply.san, annotation ? h('span', { class: 'ann', text: annotation }) : null),
         ply.rank === 1 ? h('span', { class: 'ann best', title: 'engine\'s first choice', text: '✓' }) : null,
-        h('span', { class: 'ev', text: evalText(ply.eval_after, ply.fen_after) }));
+        h('span', { class: 'ev', text: evalText(evalAfter(ply), ply.fen_after) }));
         this.moveButtons[ply.ply] = button;
         return h('td', {}, button);
       };
