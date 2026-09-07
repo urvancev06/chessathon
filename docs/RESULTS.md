@@ -52,3 +52,20 @@ Probed with the reviewer's driver (`endgame_probe.py`, 5 000 ms per move, so the
 | fuzz-random-v0.1 | . | baselines/random | 3+0.05 s | 300 | +300 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 300 | 12 | 0.10 0.27 0.22 / 7.45 2.31 0.93 | data/openings.txt |
 | fuzz-greedy-v0.1 | . | baselines/greedy | 10+0.1 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 12 | 7.45 2.31 0.93 / 10.55 5.77 2.43 | data/openings.txt |
 | v0.1-vs-minimax-real-clock | . | baselines/minimax | 120+0.5 s | 40 | +39 =1 -0 | 98.8% | ±2.4% | - | 2.5% | checkmate 39, threefold_repetition 1 | 4 | 1.48 3.05 2.04 / 2.66 3.91 3.34 | data/openings.txt |
+
+### 2026-09-07 — v0.1 solo real-clock pass (nothing else running; harness.play, engine log captured)
+
+| measurement | value | how |
+|---|---|---|
+| games | 3 vs `baselines/minimax` at 120 s + 0.5 s (2 as White, 1 as Black), all won by checkmate | `harness.play`, openings 37/74/101 of `data/openings.txt` |
+| engine moves logged | 71 | `m … t … h … c …` lines |
+| moves over their hard cap | 1, by 2 ms (clock read every 128 nodes) | `t − h` per line |
+| slowest move | 8 429 ms (hard cap ≈ 10 s) | max `t` |
+| minimum clock before a move | 42 958 ms | min `c` |
+| mean time per move / mean soft budget | 2 526 ms / 2 925 ms | mean `t`, mean `s` |
+| depth min / median / max | 1 / 5 / 7 | `d` |
+| node rate (moves > 200 ms) | median 64 270 nps | `nps` |
+| init time | 31–34 ms | `init` line |
+
+The 40-game run above (4 workers, load ≈ 3 on 16 cores) is the strength number; this solo pass is
+the time-management check the brief's §7.4 asks for. Both are on the dev box, not the platform core.

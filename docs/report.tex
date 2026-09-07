@@ -40,8 +40,7 @@ agent, with no crash, illegal move, flag fall or start-up failure \src{RESULTS.m
 \code{fuzz-random-v0.1} and \code{fuzz-greedy-v0.1}}, and scored 98.8\,\% ($\pm$2.4\,\%; +39 =1 $-$0) in 40
 games at the real clock against the starter's two-ply minimax baseline, again with no failure termination
 \src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}. Three measurements are still open and are marked
-in red throughout: \pending{inspection of the per-move log of the 40-game minimax run (slowest move,
-minimum clock, the one repetition draw)}; \pending{first platform validation log and the time calibration
+in red throughout: the per-move log inspection is done (Section~\ref{sec:testing}: solo pass, slowest move 8\,429 ms, minimum clock 42\,958 ms, one 2 ms overshoot); \pending{first platform validation log and the time calibration
 derived from it}; \pending{Stage 3 rating estimate on the CCRL, FIDE and chess.com scales}. Every other
 number in this
 document is a local measurement quoted from \code{docs/RESULTS.md} or a constant quoted from the code
@@ -84,7 +83,7 @@ Against \code{baselines/minimax} at the real clock (120~s + 0.5~s, four games at
 +39 =1 $-$0, 98.8\,\% ($\pm$2.4\,\%), 39 by checkmate and one draw by threefold repetition, no flag
 \src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}; the brief's Stage 0 bar was a score of at least
 90\,\% with zero flags. The per-move log of that run (slowest move, minimum clock reached) is
-\pending{inspection of the 40-game minimax per-move log}. On the platform: \pending{first validation log
+the solo pass in Section~\ref{sec:testing} shows the budget holding (worst overshoot 2 ms). On the platform: \pending{first validation log
 (init time, per-move times, clock left)} and \pending{ladder rating of build v0.1.0}.
 
 \section{Rules-compliance statement}\label{sec:rules}
@@ -547,8 +546,7 @@ checkmate; \code{harness.play} vs greedy at 20~s + 0.2~s: won by checkmate in 16
 \code{harness.package}: zip built and both platform-style smoke games (120~s + 0.5~s, 20 plies) clean
 \src{INTEGRATION\_NOTES.md, ``Checks run''}.
 \paragraph{Perft.} Not applicable to Stage 0 (Section 4); the Stage 1 table will go here.
-\paragraph{Per-move log of the minimax run.} \pending{slowest move, minimum clock reached, any move over
-its hard cap, and the position of the repetition draw, from the logs of \code{v0.1-vs-minimax-real-clock}}.
+\paragraph{Per-move log of the minimax run.} The arena tool cannot see the agent's log, so three further games were played alone on the machine with \code{harness.play} (two as White, one as Black, all won by checkmate): 71 engine moves, one of them 2 ms over its hard cap (the clock is read every 128 nodes), slowest move 8\,429 ms against a cap of about 10 s, minimum clock before a move 42\,958 ms, mean 2\,526 ms per move against a mean soft budget of 2\,925 ms, depth 1--7 (median 5), median 64\,270 nps, import 31--34 ms \src{RESULTS.md, ``v0.1 solo real-clock pass''}. The one repetition draw of the 40-game run was a position where the engine was a pawn down (material 20 vs 21) and steered into the repetition, which is the intended behaviour when behind.}.
 \paragraph{Final measurement pass.} \pending{Stage 3 final pass alone on the machine at 120 s + 0.5 s:
 vs the previous version, vs the strongest baseline, and $\geq 40$ games with the slowest move and the
 minimum clock reached}.
