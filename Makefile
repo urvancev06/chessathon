@@ -32,5 +32,5 @@ test:
 	uv run python -m pytest -q
 
 fuzz:
-	uv run python tools/arena_openings.py --opponent baselines/random --games 300 --base-ms 3000 --increment-ms 50 --workers 12 --label fuzz-random --results docs/RESULTS.md
-	uv run python tools/arena_openings.py --opponent baselines/greedy --games 200 --base-ms 10000 --increment-ms 100 --workers 12 --label fuzz-greedy --results docs/RESULTS.md
+	uv run python -m tools.arena_openings --opponent baselines/random --games 300 --base-ms 3000 --increment-ms 50 --workers 12 --label fuzz-random --results docs/RESULTS.md
+	uv run python -m tools.arena_openings --opponent baselines/greedy --games 200 --base-ms 10000 --increment-ms 100 --workers 12 --label fuzz-greedy --results docs/RESULTS.md
