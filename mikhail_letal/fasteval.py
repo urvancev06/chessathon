@@ -506,6 +506,9 @@ def evaluate_board(board: chess.Board) -> int:
 WARM_UP_SECONDS: float = 0.0
 """How long `warm_up()` spent compiling, filled in by the call below."""
 
+JITTED: Final = ("evaluate", "_has_insufficient_material", "_structure", "_mopup")
+"""Every jitted function here; see `fastboard.JITTED`."""
+
 _WARM_UP_FENS: Final = (
     chess.STARTING_FEN,
     # A middlegame with passers, doubled and isolated pawns, rooks on open and semi-open files.

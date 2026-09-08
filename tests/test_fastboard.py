@@ -193,18 +193,8 @@ def sample_boards(count: int, seed: int) -> Iterator[chess.Board]:
 # ----------------------------------------------------------------------------- gate 1: perft
 
 
-JITTED = [
-    "attacked",
-    "in_check",
-    "_remove_piece",
-    "_restore_piece",
-    "gen_pseudo",
-    "gen_legal",
-    "make_move",
-    "unmake_move",
-    "perft",
-    "has_legal_move",
-]
+# The module's own list, which `agent.py` reads too, so there is one place to keep up to date.
+JITTED = list(fb.JITTED)
 
 
 def test_warm_up_compiled_at_import() -> None:
@@ -237,6 +227,7 @@ def test_nothing_compiles_after_import() -> None:
         fb.has_legal_move(pos, buffer)
         fb.in_check(pos)
         fb.attacked(pos.board, fb.E1, fb.BLACK)
+        fb.hash_position(pos, fb.ZOBRIST)
         fb.to_fen(pos)
         for move in fb.legal_moves(pos)[:4]:
             fb.make_move(pos, move)

@@ -996,6 +996,22 @@ def check_invariants(pos: Position) -> None:
 WARM_UP_SECONDS: float = 0.0
 """How long `warm_up()` spent compiling, filled in by the call below."""
 
+JITTED: Final = (
+    "attacked",
+    "in_check",
+    "_remove_piece",
+    "_restore_piece",
+    "gen_pseudo",
+    "gen_legal",
+    "make_move",
+    "unmake_move",
+    "perft",
+    "has_legal_move",
+    "hash_position",
+)
+"""Every jitted function here, so `agent.py` and the tests can check that all of them were
+compiled by `warm_up()` and that none gains a second specialisation during a game."""
+
 WARM_UP_FEN: Final = "r3k2r/1P6/8/1Pp5/8/3p4/4P3/R3K2R w KQkq c6 0 1"
 """White to move with every irregular move available at once: O-O, O-O-O, b5xc6 en passant,
 b7xa8 and b7b8 promotions, e2e4, and e2xd3."""
