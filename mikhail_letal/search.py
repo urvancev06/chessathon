@@ -56,6 +56,7 @@ import operator
 import time
 from collections.abc import Hashable, Iterator, Mapping
 from dataclasses import dataclass
+from math import log
 
 import chess
 
@@ -101,7 +102,52 @@ NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remainin
 LATE_MOVE_REDUCTIONS = True  # switch for bisection in development; the shipped value is True
 LMR_MIN_DEPTH = 3  # reduce only where a ply of depth is worth saving
 LMR_FULL_DEPTH_MOVES = 3  # this many moves of the node are searched at full depth first
-LMR_REDUCTION = 1  # plies taken off the late quiet moves
+
+# How many plies come off a late quiet move. A flat one ply treats the fortieth move of a
+# twenty-ply node exactly like the fourth move of a three-ply node, and those are not the same
+# bet: the deeper the node the more a ply is worth skipping, and the later a move sorts the less
+# the ordering believes in it. The reduction therefore grows with both, logarithmically in each,
+# which is the usual shape and the one every derivation of it argues for -- the ordering's
+# confidence decays like the logarithm of the move number, not linearly.
+#
+#     reduction(depth, move) = trunc(LMR_BASE + log(depth) * log(move) / LMR_DIVISOR)
+#
+# floored at one ply (a reduction of zero is not a reduction) and capped at `depth - 2` so the
+# reduced search is never shallower than depth 1: a reduced search that lands in quiescence
+# proves nothing about a quiet move. The two parameters are textbook magnitudes, taken as they
+# stand rather than tuned, and the table is generated from the formula below so that its origin
+# is in the source rather than in a list of numbers (docs/PROVENANCE.md, weights/PROVENANCE.json).
+LMR_BASE = 0.75  # what a shallow node with few moves behind it reduces by, before the log term
+LMR_DIVISOR = 2.25  # how slowly the reduction grows with depth and move number
+LMR_TABLE_DEPTHS = 64  # rows; a deeper node reuses the last row
+LMR_TABLE_MOVES = 64  # columns; a later move reuses the last column
+
+
+def _lmr_table() -> tuple[tuple[int, ...], ...]:
+    """The reduction for every (remaining depth, moves already searched) the table covers.
+
+    Row and column zero exist only so the table can be indexed without a special case; the search
+    never reads them, because it reduces nothing below `LMR_MIN_DEPTH` or before
+    `LMR_FULL_DEPTH_MOVES` moves have been searched at full depth.
+    """
+    rows = []
+    for depth in range(LMR_TABLE_DEPTHS):
+        row = []
+        for move in range(LMR_TABLE_MOVES):
+            raw = LMR_BASE + log(max(depth, 1)) * log(max(move, 1)) / LMR_DIVISOR
+            row.append(min(max(int(raw), 1), max(depth - 2, 0)))
+        rows.append(tuple(row))
+    return tuple(rows)
+
+
+LMR_TABLE = _lmr_table()
+
+
+def lmr_reduction(depth: int, searched: int) -> int:
+    """Plies to take off a late quiet move, from the table, with both indices clamped to it."""
+    row = LMR_TABLE[depth if depth < LMR_TABLE_DEPTHS else LMR_TABLE_DEPTHS - 1]
+    return row[searched if searched < LMR_TABLE_MOVES else LMR_TABLE_MOVES - 1]
+
 
 # Aspiration windows: from this root depth on, the iteration is searched with a narrow window
 # around the previous iteration's score rather than the full one, which prunes far more. A score
@@ -729,7 +775,7 @@ class Engine:
                 # Skipping the middle step would spend full depth *and* the full window on a
                 # move the shallow search only hinted at.
                 reduction = (
-                    LMR_REDUCTION
+                    lmr_reduction(depth, searched)
                     if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES
                     else 0
                 )

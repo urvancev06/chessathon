@@ -126,5 +126,29 @@
     "data": "none: parametric prior",
     "run_id": "2026-09-06",
     "note": "drive the bare king to the edge, bring ours close; close beats one king ring"
+  },
+  {
+    "parameter": "LMR_TABLE",
+    "value_or_shape": "64 x 64 ints (remaining depth x moves already searched), min 0, max 8",
+    "produced_by": "mikhail_letal/search.py::_lmr_table, at import: trunc(LMR_BASE + log(depth) * log(move) / LMR_DIVISOR), floored at 1, capped at depth - 2 so a reduced search is never shallower than depth 1",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-08",
+    "note": "textbook-magnitude late-move reduction, untuned; generated from the formula at import rather than stored, so no table of numbers is shipped and its origin is the source. Replaces the flat LMR_REDUCTION = 1 of v1.0"
+  },
+  {
+    "parameter": "LMR_BASE, LMR_DIVISOR",
+    "value_or_shape": "0.75, 2.25",
+    "produced_by": "code",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-08",
+    "note": "the two parameters of LMR_TABLE, textbook magnitudes taken as they stand and not tuned; no search was run to choose them"
+  },
+  {
+    "parameter": "LMR_MIN_DEPTH, LMR_FULL_DEPTH_MOVES",
+    "value_or_shape": "3, 3",
+    "produced_by": "code",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-07",
+    "note": "reduce only from depth 3, and only after three moves of the node have been searched at full depth; textbook magnitudes, untuned"
   }
 ]

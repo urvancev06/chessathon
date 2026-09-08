@@ -816,3 +816,41 @@ that it is taken twice at any of them.
 **Rejected: skipping the test when the side to move has little material.** There is no material
 bound on stalemate: the six named stalemates in `tests/test_fastsearch.py` run from a bare king to
 a side with every piece still on the board and none of it mobile.
+
+## 2026-09-08 — Late-move reductions become depth- and move-aware
+
+`LMR_REDUCTION = 1` took one ply off every late quiet move, so the fortieth move of a twenty-ply
+node was reduced exactly as much as the fourth move of a three-ply node. Those are not the same
+bet. The deeper the node, the more a ply is worth skipping; the later a move sorts, the less the
+ordering believes in it, and that belief decays like the logarithm of the move number rather than
+linearly. The reduction is now a table, generated at import in `search._lmr_table` from
+
+    trunc(LMR_BASE + log(depth) * log(move) / LMR_DIVISOR)   with 0.75 and 2.25
+
+floored at one ply (a reduction of zero is not a reduction) and capped at `depth - 2`, so the
+reduced search is never shallower than depth 1: a reduced search that lands in quiescence proves
+nothing about a *quiet* move. It runs from 1 at (depth 3, move 3), the old flat value, to 8 at the
+table's far corner. Both engines read the same table; the compiled one indexes a numpy view of it
+and clamps both indices to its 64 × 64 edges.
+
+**Measured, compiled engine, nodes to depth 10** (the pairs taken back to back on a busy box).
+Standard start 199 510 → 141 701 (−29 %, 0.253 s → 0.193 s); Kiwipete middlegame
+3 193 943 → 1 657 996 (**−48 %**, 4.801 s → 2.450 s); rook ending 165 683 → 94 970 (−43 %,
+0.185 s → 0.113 s).
+
+**What that number is and is not.** It is a much smaller tree to the same nominal depth, which is
+what late-move reductions are for. It is not, on its own, a stronger engine: a reduction is a bet
+that a late quiet move is not the best one, and a bigger reduction is a bigger bet. All three
+positions answer differently at depth 10 than the flat version did (the rook ending plays e2e3
+where it played b4f4), so the verdict is the strength screen at the real time control, not this
+table. Recorded here as a measurement of the tree, with the games still to come.
+
+**Where the numbers are recorded.** `docs/PROVENANCE.md` and, for the first time for a search
+constant, `weights/PROVENANCE.json` — the only provenance file inside the zip, which until now
+covered the evaluation tables alone. The table ships as the formula that generates it, not as a
+list of numbers, which is the same argument `tools/gen_pst.py` makes for the piece-square tables:
+its origin is provable from the source.
+
+**Rejected: tuning `LMR_BASE` and `LMR_DIVISOR`.** They are textbook magnitudes taken as they
+stand. Tuning them against anything other than games would be fitting to the wrong objective, and
+tuning them against games costs the arena time the strength screen needs first.

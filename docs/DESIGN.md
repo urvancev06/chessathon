@@ -252,7 +252,11 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   bound ≤ alpha, and a node that pruned something is never mistaken for mate or stalemate.
 - Late-move reductions (`LATE_MOVE_REDUCTIONS`): at `depth >= LMR_MIN_DEPTH (3)`, not in check,
   moves from the quiet (history) stage after the first `LMR_FULL_DEPTH_MOVES (3)` searched moves
-  are searched at `depth - 1 - LMR_REDUCTION (1)`; a reduced result above alpha is re-searched at
+  are searched at `depth - 1 - lmr_reduction(depth, searched)`. The reduction is
+  `LMR_TABLE[depth][searched]`, generated at import from
+  `trunc(0.75 + log(depth) · log(move) / 2.25)`, floored at one ply and capped at `depth - 2` so
+  the reduced search never falls into quiescence; both indices are clamped to the table's 64 × 64.
+  A reduced result above alpha is re-searched at
   full depth before it is believed. Table move, captures, promotions and killers are never
   reduced.
 - Staged move generation (`_staged_moves`, exact: the order equals the sorted full list, verified

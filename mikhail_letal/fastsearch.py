@@ -139,7 +139,9 @@ from mikhail_letal.search import (
     LATE_MOVE_REDUCTIONS,
     LMR_FULL_DEPTH_MOVES,
     LMR_MIN_DEPTH,
-    LMR_REDUCTION,
+    LMR_TABLE,
+    LMR_TABLE_DEPTHS,
+    LMR_TABLE_MOVES,
     LOWER,
     MAX_PLY,
     NULL_MOVE_BASE_REDUCTION,
@@ -155,6 +157,10 @@ from mikhail_letal.search import (
 # with a constant one.
 _FUTILITY = np.array(FUTILITY_MARGINS, dtype=np.int32)
 _FUTILITY_DEPTHS: Final = len(FUTILITY_MARGINS)
+
+# The late-move reduction table, as an array so the compiled code can index it with two runtime
+# integers. `search.LMR_TABLE` is the definition; nothing is recomputed here.
+_LMR = np.array(LMR_TABLE, dtype=np.int32)
 
 # How often the search reads the clock and the node cap. Compiled nodes are some twenty times
 # cheaper than interpreted ones, so the Python engine's 128 would read the clock twenty times as
@@ -1011,7 +1017,14 @@ def negamax(
             # in a fixed order: reduced null window, then full-depth null window, then full
             # window. Skipping the middle step would pay full depth *and* the full window for a
             # move that the shallow search only hinted at, which is where the classic bug is.
-            reduction = LMR_REDUCTION if late else 0
+            reduction = 0
+            if late:
+                # The table is `search.LMR_TABLE`, generated there from the formula that defines
+                # it; both indices are clamped to its edges, which is where a very deep node or a
+                # position with more than sixty-four moves lands.
+                row = depth if depth < LMR_TABLE_DEPTHS else LMR_TABLE_DEPTHS - 1
+                column = searched if searched < LMR_TABLE_MOVES else LMR_TABLE_MOVES - 1
+                reduction = _LMR[row, column]
             score = -negamax(pos, st, ev, child_depth - reduction, -alpha - 1, -alpha, child_ply, 1)
             if reduction != 0 and score > alpha and ints[I_ABORT] == 0:
                 # The reduced search surprised us; repeat it at full depth, still null window.

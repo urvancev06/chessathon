@@ -505,6 +505,27 @@ def test_late_move_reductions_save_nodes() -> None:
     )
 
 
+def test_the_late_move_reduction_table_stays_inside_its_two_bounds() -> None:
+    """The table is generated from a formula, so what has to be pinned is the two clamps it is
+    generated through, over every (depth, move) the search can reach.
+
+    A reduction of zero is not a reduction, and a reduction that takes the child below depth 1
+    drops the move into quiescence, where a quiet move proves nothing. Everywhere the search
+    actually reads the table -- from `LMR_MIN_DEPTH` up, from `LMR_FULL_DEPTH_MOVES` on -- both
+    hold, and the reduction never falls as depth or move number rises."""
+    reduction = search_module.lmr_reduction
+    for depth in range(search_module.LMR_MIN_DEPTH, 200):
+        previous = 0
+        for searched in range(search_module.LMR_FULL_DEPTH_MOVES, 250):
+            r = reduction(depth, searched)
+            assert 1 <= r <= depth - 2, (depth, searched, r)
+            assert r >= previous, (depth, searched, r)  # later moves are never reduced less
+            previous = r
+            assert r >= reduction(depth - 1, searched)  # nor are deeper nodes
+    # The flat reduction v1.0 shipped is what a shallow node with few moves behind it still gets.
+    assert reduction(search_module.LMR_MIN_DEPTH, search_module.LMR_FULL_DEPTH_MOVES) == 1
+
+
 def test_aspiration_windows_start_at_depth_four_and_keep_the_answer() -> None:
     # Depths 1-3 are always searched with the full window, so the trees are identical.
     assert nodes_with("ASPIRATION_WINDOWS", True, OPENING_MIDDLEGAME, 3) == nodes_with(
