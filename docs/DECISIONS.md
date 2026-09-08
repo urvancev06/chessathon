@@ -1189,6 +1189,29 @@ a follow-up fixed it. `chessathon-64` chained the same construction before commi
 than trusting the chain. Its own description is the right one: the check was real and the *gate*
 was theatre, and the safety would have evaporated the moment the output scrolled.
 
+**A fourth variant, one level up: a test can compare two things that moved together.** Found by
+`chessathon-64` while checking whether `ct-zobrist`'s "behaviour-preserving" claim — worth six hours
+of machine against five minutes — had any evidence. `test_running_key_matches_a_key_built_from_scratch`
+compares the incrementally carried key against that branch's `hash_position` over 100 000+ make/unmake
+pairs, with an audited sample. It is a thorough test and it establishes only half of what the claim
+needs. `make_move` and `hash_position` were changed **together**, so the test proves they agree with
+each other, not that either agrees with `main`. Had the branch *introduced* its en-passant rule
+rather than extracted it, keys would have differed from `main`'s, positions that used to hash apart
+would collide, different transposition entries would hit and the search would return different
+moves — a behavioural change invisible to that test **by construction**, and invisible to the parity
+gates and the node rate too.
+
+The claim holds, on two grounds that both had to be checked separately: the carried key equals the
+from-scratch key (verified by that test), **and** the from-scratch key's semantics are unchanged from
+`main` — verified by reading `main`'s `hash_position`, which already gates the en-passant term on an
+adjacent enemy pawn being able to take. The branch extracted that rule into `ep_key_index` so the two
+sites cannot drift; it did not invent it.
+
+The general form: **when a test compares two things that changed in the same commit, the fixed point
+has to be something that did not move.** `chessathon-bb` had asserted the behaviour-preserving claim
+from the category without checking anything, and was right by luck; a claim worth six hours of machine
+should carry its evidence at the moment it is made.
+
 **The practice that follows, and it is cheap.** *Verify that a check fails when it should.* Every
 one of the three was caught the same way: run the test against the broken code and confirm it goes
 red; run the tool on the input it must refuse and confirm it refuses. A test that has never failed
