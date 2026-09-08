@@ -82,6 +82,33 @@ available" costs the row a sentence; a fabricated one costs it its credibility.
   say so rather than leaving it to inference, because at 04:00 the temptation is to let a promotion
   look like it answered the loss everyone remembers.
 
+### 4a. The platform-side safety evidence, already derived — quote it, do not recompute it
+
+Parsed first-hand from the four rated-game logs in `handoff/` (the `m … t … s … h …` lines), not
+from anyone's summary:
+
+```
+round            moves  past soft  hard hits  overshoot  median t/s
+71-ai-human        105         16          2        +1 ms       0.66
+73-aggiequant       68         15          4        +1 ms       0.71
+74-zagreus          70         19          2        +1 ms       0.66
+75-saucybeans       54         12          1        +2 ms       0.66
+TOTAL              297         62          9
+```
+
+**The claim the row may make: the hard-deadline abort path held to one or two check intervals in
+every one of nine occurrences across four rated games on the competition core.** 512 nodes at the
+measured ~505 k nodes/s is 1.01 ms, so these are granularity, not failure. **Do not write "1 ms
+every time"** — round 75 overshot by 2 ms, on `g2h2`, a 4.88 M-node search to depth 16/29 that ran
+8.1 s against a 2.7 s soft budget. That is the heaviest load observed in any rated game, which makes
+it the *best* of the nine cases rather than the worst.
+
+Two further facts the same parse establishes, both bearing on the timing refit: **21 % of moves
+(62 of 297) ran past the soft budget**, and the **median spend is 0.66–0.71 of soft**. The second
+corroborates the 0.70 figure `moves_to_go` was fitted to, from platform data rather than local
+measurement. Both independently refute the "nearly every move spends 45–60 % of its soft budget"
+claim in the operator documents — do not repeat it.
+
 ## 5. If it promotes
 
 `weights/`, `agent.py` and `mikhail_letal/` are frozen only while the match runs. Once the last
