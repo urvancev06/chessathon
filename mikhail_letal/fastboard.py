@@ -59,6 +59,8 @@ import numpy as np
 import numpy.typing as npt
 from numba import njit
 
+from mikhail_letal import warmup
+
 # ----------------------------------------------------------------------------- piece encoding
 
 EMPTY: Final = 0
@@ -1017,45 +1019,67 @@ WARM_UP_FEN: Final = "r3k2r/1P6/8/1Pp5/8/3p4/4P3/R3K2R w KQkq c6 0 1"
 b7xa8 and b7b8 promotions, e2e4, and e2xd3."""
 
 
-def warm_up() -> float:
+def warm_up(deadline: float | None = None) -> float:
     """Compile every jitted entry point with the exact argument types it sees at runtime.
 
     Called at import so that the cost lands in the platform's 90-second start-up budget. `/tmp`
     is wiped between games on the platform, so `cache=True` would never hit and is not used.
     Returns the seconds spent.
+
+    The work is cut into four phases, most important first, and each is skipped if the shared
+    `warmup` budget says it would not finish by `deadline` (`None`, the default, means the
+    budget's own deadline, which is unset outside `agent.py` and so imposes no limit). Anything
+    skipped compiles on the first move instead; see `mikhail_letal/warmup.py` for why that trade
+    is the right way round. `perft` is last because the game never calls it -- only the tests do.
     """
     started = time.perf_counter()
+    limit = warmup.budget()
+    if deadline is not None:
+        limit.deadline = deadline
 
     pos = from_board(chess.Board())
     buffer = new_move_buffer()
     stack = new_move_stack(8)
-
-    attacked(pos.board, E1, BLACK)
-    in_check(pos)
-    gen_pseudo(pos, buffer)
-    gen_legal(pos, buffer)
-    has_legal_move(pos, buffer)
-
-    # A position built to exercise every make/unmake branch at least once: castling both ways, an
-    # en passant capture, a capture-promotion, a quiet promotion, a double push, an ordinary
-    # capture, and a rook move that gives up a castling right.
     drill = from_fen(WARM_UP_FEN)
-    for uci in ("e1g1", "e1c1", "b5c6", "b7a8q", "b7b8n", "e2e4", "e2d3", "a1b1"):
-        move = move_from_chess(drill, chess.Move.from_uci(uci))
-        make_move(drill, move)
-        unmake_move(drill)
-    # One nested make/unmake so that the Black branches (the fullmove counter, the other pawn
-    # direction) are compiled too.
-    make_move(drill, move_from_chess(drill, chess.Move.from_uci("e2e4")))
-    make_move(drill, move_from_chess(drill, chess.Move.from_uci("d3e2")))
-    unmake_move(drill)
-    unmake_move(drill)
-    slot = _remove_piece(drill, WHITE, E1)
-    _restore_piece(drill, WHITE, E1, slot)
 
-    perft(pos, stack, 2, 0)
-    hash_position(pos, ZOBRIST)
-    hash_position(drill, ZOBRIST)  # a position with an en passant square, for the other branch
+    def generate() -> None:
+        attacked(pos.board, E1, BLACK)
+        in_check(pos)
+        gen_pseudo(pos, buffer)
+        gen_legal(pos, buffer)
+        has_legal_move(pos, buffer)
+
+    def make_unmake() -> None:
+        # A position built to exercise every make/unmake branch at least once: castling both
+        # ways, an en passant capture, a capture-promotion, a quiet promotion, a double push, an
+        # ordinary capture, and a rook move that gives up a castling right.
+        for uci in ("e1g1", "e1c1", "b5c6", "b7a8q", "b7b8n", "e2e4", "e2d3", "a1b1"):
+            move = move_from_chess(drill, chess.Move.from_uci(uci))
+            make_move(drill, move)
+            unmake_move(drill)
+        # One nested make/unmake so that the Black branches (the fullmove counter, the other pawn
+        # direction) are compiled too.
+        make_move(drill, move_from_chess(drill, chess.Move.from_uci("e2e4")))
+        make_move(drill, move_from_chess(drill, chess.Move.from_uci("d3e2")))
+        unmake_move(drill)
+        unmake_move(drill)
+        slot = _remove_piece(drill, WHITE, E1)
+        _restore_piece(drill, WHITE, E1, slot)
+
+    def hashing() -> None:
+        hash_position(pos, ZOBRIST)
+        hash_position(drill, ZOBRIST)  # a position with an en passant square, the other branch
+
+    def counting() -> None:
+        perft(pos, stack, 2, 0)
+
+    # The reference seconds are what each phase costs on the development machine, measured
+    # 2026-09-08 and recorded in docs/PROVENANCE.md; the budget scales them by this machine's
+    # observed slowdown to decide whether the next phase still fits.
+    limit.run("fastboard.generate", 2.6, generate)
+    limit.run("fastboard.make_unmake", 0.4, make_unmake)
+    limit.run("fastboard.hash", 0.2, hashing)
+    limit.run("fastboard.perft", 0.5, counting)
 
     global WARM_UP_SECONDS
     WARM_UP_SECONDS = time.perf_counter() - started

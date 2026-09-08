@@ -62,6 +62,7 @@ import numpy as np
 import numpy.typing as npt
 from numba import njit, objmode
 
+from mikhail_letal import warmup
 from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, MATE_THRESHOLD
 from mikhail_letal.fastboard import (
     _KING_DIRS,
@@ -167,6 +168,15 @@ NODE_CHECK_INTERVAL: Final = 512
 # search fills.
 TT_BITS: Final = 21
 EVAL_BITS: Final = 18
+
+# The node rate a fresh engine assumes before any search has been timed. The warm-up replaces it
+# with a measurement, and every real search refines it, but it has to start somewhere and it must
+# never be zero or unset: `FastEngine.search` derives the node cap that backs up the clock from
+# it. 400 000 is deliberately above anything measured (about 500 000 nodes/s here, so roughly
+# 220 000 on the platform) and the cap doubles it again, so the assumed rate errs towards a cap
+# that never binds. That is the safe direction: the clock is the real limit, and the cap only has
+# to catch a clock read that has stopped working.
+DEFAULT_NODE_RATE: Final = 400_000.0
 
 # ----------------------------------------------------------------------------- state layout
 
@@ -1007,8 +1017,10 @@ class FastEngine:
         self.state = new_state(tt_bits, eval_bits)
         self.position = new_position()
         # Nodes per second, kept as a running estimate so the node cap that backs up the clock is
-        # a measurement rather than a guess. Replaced by the warm-up search at import.
-        self.node_rate = 400_000.0
+        # a measurement rather than a guess. Replaced by the warm-up search at import, unless the
+        # import ran out of budget before reaching it (mikhail_letal/warmup.py), in which case
+        # this constant stands until the first real search measures a rate.
+        self.node_rate = DEFAULT_NODE_RATE
         # Progress of the root iteration in flight, used to salvage a move after an abort.
         self._partial_move = NO_MOVE
         self._partial_score = 0
@@ -1332,14 +1344,27 @@ JITTED: Final = (
 )
 
 
-def warm_up(engine: FastEngine) -> float:
+def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
     """Compile every jitted entry point with the exact argument types a game will pass.
 
     Each function is called directly first, so that none is left to be compiled on the clock by a
     branch the sample searches happen not to take; then real searches compile what only a search
     reaches -- the aspiration re-search, the null move, the reductions and the abort path.
+
+    The work is cut into six phases in the order the search needs them: the helper functions and
+    `quiescence` and `negamax`, without which no search runs at all; the root tie-break, which
+    only a drawn root reaches; the sample searches, which cost almost nothing now that `negamax`
+    is compiled and are pure insurance; and last the search that measures this machine's node
+    rate. Each phase is skipped if the shared `warmup` budget says it would not finish by
+    `deadline` (`None`, the default, means no limit outside `agent.py`); the sample and node-rate
+    phases are skipped outright if `negamax` was, since running them would compile it anyway.
+    Reference seconds are development-machine measurements, recorded in docs/PROVENANCE.md.
     """
     started = time.perf_counter()
+    limit = warmup.budget()
+    if deadline is not None:
+        limit.deadline = deadline
+
     st = engine.state
     ev = EVAL_TABLES
     pos = engine.position
@@ -1347,49 +1372,68 @@ def warm_up(engine: FastEngine) -> float:
     st.flt[F_HARD] = time.perf_counter() + 3600.0
     st.ints[I_NODE_LIMIT] = 0
 
-    _clock()
-    _check_limits(st)
-    _tt_store(st, 1, 1, 0, EXACT, NO_MOVE)
-    _tt_probe(st, 1)
-    _store(st, 1, 1, 0, EXACT, NO_MOVE, 1, 0)
-    _store(st, 1, 1, 0, EXACT, NO_MOVE, 1, 1)
-    _in_history(st, 1)
-    key = int(hash_position(pos, st.zobrist))
-    _cached_eval(pos, st, ev, key)
-    _unmake_null(pos, *_make_null(pos))
-    _has_non_pawn_material(pos, WHITE)
-    count = int(gen_pseudo(pos, st.moves[1]))
-    gen_captures(pos, st.moves[1])
-    _victim(pos, st.moves[1, 0])
-    _score_moves(pos, st, 1, count, NO_MOVE)
-    _pick_best(st, 1, 0, count)
-    _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)
-    _has_legal(pos, st, 1)
-    _game_over_score(pos, st, 1, 0)
-    _static_score(pos, st, ev, 1, 0)
-    quiescence(pos, st, ev, -_INFINITY, _INFINITY, 1, 0, 0)
-    negamax(pos, st, ev, 2, -_INFINITY, _INFINITY, 1, 1)
-    st.root_scores[:] = DRAW_SCORE
-    _break_draw_tie(pos, st, ev, 1, int(st.moves[0, 0]))
-    engine.new_game()
+    def helpers() -> None:
+        _clock()
+        _check_limits(st)
+        _tt_store(st, 1, 1, 0, EXACT, NO_MOVE)
+        _tt_probe(st, 1)
+        _store(st, 1, 1, 0, EXACT, NO_MOVE, 1, 0)
+        _store(st, 1, 1, 0, EXACT, NO_MOVE, 1, 1)
+        _in_history(st, 1)
+        key = int(hash_position(pos, st.zobrist))
+        _cached_eval(pos, st, ev, key)
+        _unmake_null(pos, *_make_null(pos))
+        _has_non_pawn_material(pos, WHITE)
+        count = int(gen_pseudo(pos, st.moves[1]))
+        gen_captures(pos, st.moves[1])
+        _victim(pos, st.moves[1, 0])
+        _score_moves(pos, st, 1, count, NO_MOVE)
+        _pick_best(st, 1, 0, count)
+        _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)
+        _has_legal(pos, st, 1)
+        _game_over_score(pos, st, 1, 0)
+        _static_score(pos, st, ev, 1, 0)
 
-    now = time.perf_counter()
-    for fen in _WARM_UP_FENS:
-        board = chess.Board(fen)
-        engine.search(board, [position_key(board)], now + 3600.0, now + 3600.0, max_depth=4)
-    # The abort path, with a node cap small enough to fire in the middle of an iteration.
-    board = chess.Board(_WARM_UP_FENS[1])
-    engine.search(board, [position_key(board)], now + 3600.0, now + 3600.0, node_limit=5_000)
-    engine.new_game()
+    def compile_quiescence() -> None:
+        quiescence(pos, st, ev, -_INFINITY, _INFINITY, 1, 0, 0)
 
-    # Seed the node-rate estimate that backs up the clock, from a real search of a fixed size.
-    board = chess.Board(_WARM_UP_FENS[1])
-    now = time.perf_counter()
-    result = engine.search(
-        board, [position_key(board)], now + 3600.0, now + 3600.0, node_limit=400_000
-    )
-    if result.elapsed > 0:
-        engine.node_rate = result.nodes / result.elapsed
+    def compile_negamax() -> None:
+        negamax(pos, st, ev, 2, -_INFINITY, _INFINITY, 1, 1)
+
+    def tie_break() -> None:
+        st.root_scores[:] = DRAW_SCORE
+        _break_draw_tie(pos, st, ev, 1, int(st.moves[0, 0]))
+
+    def samples() -> None:
+        now = time.perf_counter()
+        for fen in _WARM_UP_FENS:
+            board = chess.Board(fen)
+            engine.search(board, [position_key(board)], now + 3600.0, now + 3600.0, max_depth=4)
+        # The abort path, with a node cap small enough to fire in the middle of an iteration.
+        board = chess.Board(_WARM_UP_FENS[1])
+        engine.search(board, [position_key(board)], now + 3600.0, now + 3600.0, node_limit=5_000)
+
+    def measure_node_rate() -> None:
+        # Seed the node-rate estimate that backs up the clock, from a real search of a fixed
+        # size. Skipped, `engine.node_rate` keeps DEFAULT_NODE_RATE, which is deliberately high:
+        # the node cap only has to catch a clock that has stopped working, and a cap that never
+        # binds is safe where one that binds early would cut a search short.
+        board = chess.Board(_WARM_UP_FENS[1])
+        now = time.perf_counter()
+        result = engine.search(
+            board, [position_key(board)], now + 3600.0, now + 3600.0, node_limit=400_000
+        )
+        if result.elapsed > 0:
+            engine.node_rate = result.nodes / result.elapsed
+
+    limit.run("fastsearch.helpers", 5.3, helpers)
+    limit.run("fastsearch.quiescence", 2.1, compile_quiescence)
+    searchable = limit.run("fastsearch.negamax", 12.5, compile_negamax)
+    limit.run("fastsearch.tie_break", 1.6, tie_break)
+    engine.new_game()
+    limit.run("fastsearch.samples", 0.1, samples, ready=searchable)
+    engine.new_game()
+    limit.run("fastsearch.node_rate", 0.9, measure_node_rate, ready=searchable)
     engine.new_game()
 
     global WARM_UP_SECONDS

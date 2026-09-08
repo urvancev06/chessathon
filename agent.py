@@ -25,6 +25,16 @@ _IMPORT_STARTED = perf_counter()
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("NUMBA_NUM_THREADS", "1")
 
+# The compilation budget is armed before the first jitted module is imported, because
+# `fastboard` and `fasteval` warm up as they are imported and have to see it. Importing this one
+# module is cheap: it pulls in nothing but the clock. See `mikhail_letal/warmup.py` for why the
+# warm-up is bounded at all -- an import that overruns the platform's 90-second budget loses
+# every game, where an engine that arrives half-compiled loses at most one slow move.
+from mikhail_letal import warmup  # noqa: E402
+
+_WARM_UP_DEADLINE = _IMPORT_STARTED + warmup.WARM_UP_BUDGET_S
+warmup.arm(_WARM_UP_DEADLINE)
+
 # These imports follow the timer and the environment settings on purpose, so the load time we
 # print includes them; hence the E402 waivers.
 import chess  # noqa: E402
@@ -84,8 +94,10 @@ def get_move(fen: str, time_left_ms: int) -> str:
         elif time_left_ms < PARAMS.panic_ms:
             move = fallback_move(board, legal)  # almost out of time: a legal move, instantly
         elif legal:  # an empty list is impossible (the referee ends the game first)
+            # Normally zero: only a warm-up that ran out of budget at import leaves work here.
+            warm_ms = _finish_warm_up(t0, time_left_ms) if _COLD else 0.0
             plan = budget(
-                time_left_ms,
+                max(0, time_left_ms - int(warm_ms)),
                 STATE.own_moves,
                 PARAMS,
                 # A win must be forced before the referee's draws land: fewer moves to share
@@ -99,9 +111,9 @@ def get_move(fen: str, time_left_ms: int) -> str:
                 STATE.fast_history,
                 # Do not start another depth once this share of the soft budget has elapsed:
                 # the next iteration costs several times the previous one.
-                soft_deadline=t0 + PARAMS.next_iteration_fraction * soft_ms / 1000.0,
+                soft_deadline=t0 + (warm_ms + PARAMS.next_iteration_fraction * soft_ms) / 1000.0,
                 # Abort mid-iteration here, whatever the state of the search.
-                hard_deadline=t0 + hard_ms / 1000.0,
+                hard_deadline=t0 + (warm_ms + hard_ms) / 1000.0,
             )
             depth, seldepth, nodes = result.depth, result.seldepth, result.nodes
             # Node rate over the search's own clock: the number calibration compares.
@@ -186,10 +198,19 @@ def _warm_up() -> dict[str, int]:
     Wrapped, because a failure here must not break the import: an engine that has not warmed up
     is slow, an agent that fails to import loses every game. The table is cleared afterwards, so
     the real game begins from a fresh searcher.
+
+    The same reasoning is why the warm-up carries a wall-clock deadline. It is not allowed to run
+    until it is done; it runs until `_WARM_UP_DEADLINE`, in phases ordered by how much the search
+    needs them, and stops. Whatever is left compiles inside the first `get_move` instead, where
+    it costs part of one move's budget out of a 120-second clock. The two log lines below are how
+    that shows up afterwards in the platform's log.
     """
     try:
-        fastsearch.warm_up(ENGINE)
+        fastsearch.warm_up(ENGINE, _WARM_UP_DEADLINE)
         ENGINE.new_game()
+        skipped = warmup.budget().skipped
+        if skipped:  # out of budget: the rest compiles on the clock, one slow move
+            _say(f"warm-up out of time after {len(skipped)} phases skipped, from {skipped[0]}")
         missing = [name for name, count in _signatures().items() if count == 0]
         if missing:  # a function left to compile on the clock: say so in the log
             _say(f"warm-up missed {len(missing)}: {missing[0]}")
@@ -205,16 +226,60 @@ def _warm_up() -> dict[str, int]:
 _WARM_SIGNATURES = _warm_up()
 
 
+# True while the import's warm-up left something for numba to compile later, which only happens
+# when it ran out of its wall-clock budget (mikhail_letal/warmup.py).
+_COLD = bool(warmup.budget().skipped)
+
+
+def _finish_warm_up(t0: float, time_left_ms: int) -> float:
+    """Compile whatever the import ran out of budget for. Returns the milliseconds it cost.
+
+    numba cannot be interrupted: a function first called inside ``ENGINE.search`` compiles there,
+    and no deadline the search checks can stop it, so that move blows through its hard budget
+    (measured: 15.9 s against a 10.2 s budget, with a warm-up forced to stop after 2 s). Doing the
+    compiling *here*, before the search starts, is what lets the hard deadline mean something
+    again -- and doing all of it at once, on the first real move, is better than letting single
+    functions compile later in the game where the budget for a move is three seconds rather than
+    the opening's hundred and twenty.
+
+    It is bounded twice: by ``cold_finish_fraction`` of the clock, and by the same predictive
+    budget the import used, which will not *start* a phase it does not expect to finish. What
+    still does not fit is left alone; the search below then runs on the clock that remains.
+    """
+    global _COLD, _WARM_SIGNATURES
+    _COLD = False  # one attempt only: a second would spend another slice of the clock for nothing
+    try:
+        warmup.arm(t0 + PARAMS.cold_finish_fraction * time_left_ms / 1000.0)
+        fastboard.warm_up()
+        fasteval.warm_up()
+        fastsearch.warm_up(ENGINE)
+        ENGINE.new_game()  # the warm-up searches leave entries of positions this game never sees
+        _WARM_SIGNATURES = _signatures()
+        left = len(warmup.budget().skipped)
+        _say(f"cold jit finished in {(perf_counter() - t0) * 1000:.0f} ms, {left} phases still out")
+    except Exception as exc:  # a warm-up failure must never cost the move
+        _say(f"cold finish failed: {type(exc).__name__}: {exc}")
+    return (perf_counter() - t0) * 1000.0
+
+
 def _check_signatures() -> None:
-    """Compare the compiled specialisations against the warm-up's, and log any that appeared."""
+    """Compare the compiled specialisations against the warm-up's, and log any that appeared.
+
+    One line, not one per function: after a warm-up cut short by its deadline this fires for
+    every function the budget did not reach, and the log keeps only its first and last 4 KB.
+    """
+    global _WARM_SIGNATURES
     with contextlib.suppress(Exception):
-        for name, count in _signatures().items():
-            if count != _WARM_SIGNATURES.get(name):
-                _say(f"jit: {name} now has {count} signatures, not {_WARM_SIGNATURES[name]}")
+        now = _signatures()
+        changed = [name for name, count in now.items() if count != _WARM_SIGNATURES.get(name)]
+        if changed:
+            _say(f"jit: {len(changed)} compiled on the clock, from {changed[0]}")
+            _WARM_SIGNATURES = now  # report each one once, not on every move for the rest of it
 
 
 _say(
     f"init {(perf_counter() - _IMPORT_STARTED) * 1000:.0f} ms {ENGINE_NAME} {__version__}"
     f" jit {fastboard.WARM_UP_SECONDS + fasteval.WARM_UP_SECONDS + fastsearch.WARM_UP_SECONDS:.1f}s"
+    f" budget {warmup.WARM_UP_BUDGET_S:.0f}s skipped {len(warmup.budget().skipped)}"
     f" nps {ENGINE.node_rate:.0f}"
 )

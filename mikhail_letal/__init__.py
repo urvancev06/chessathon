@@ -10,4 +10,4 @@ management and game-state tracking are our own. See ``docs/DESIGN.md`` for the m
 """
 
 ENGINE_NAME = "Mikhail LeTal"
-__version__ = "0.2.0"
+__version__ = "1.0.0"

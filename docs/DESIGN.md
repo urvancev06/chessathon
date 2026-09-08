@@ -23,6 +23,7 @@ mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
 mikhail_letal/fastboard.py        SHIPS   Stage 1: 0x88 board, move generation, make/unmake, position key (numba)
 mikhail_letal/fasteval.py         SHIPS   Stage 1: evaluation.py ported onto that board (numba)
 mikhail_letal/fastsearch.py       SHIPS   Stage 1: search.py ported onto that board (numba); what agent.py plays with
+mikhail_letal/warmup.py           SHIPS   the wall-clock budget the import's numba compilation must fit inside
 weights/pst.json         SHIPS   generated tables with a provenance header
 weights/PROVENANCE.json  SHIPS   machine-readable provenance for every shipped number
 tools/gen_pst.py                 the parametric prior: tables, piece values, structural weights (--out weights/pst.json ships it)
@@ -481,7 +482,7 @@ def move_from / move_to / move_promotion / move_flag (move) -> int
 def sq88(square: int) -> int;  def sq64(square: int) -> int
 def check_invariants(pos) -> None                           # tests only
 def position_key(board: chess.Board) -> int                 # hash_position for a chess.Board
-def warm_up() -> float                                      # called at import; WARM_UP_SECONDS
+def warm_up(deadline: float | None = None) -> float         # called at import; WARM_UP_SECONDS
 JITTED: tuple[str, ...]                                     # every compiled function here
 ```
 
@@ -526,7 +527,10 @@ Behaviour:
   *legal* en passant capture; the two differ only when that pawn is pinned.
 - `warm_up()` compiles every entry point at import with the exact argument types the engine will
   pass, so nothing compiles on the clock. `cache=True` is not used: the platform wipes `/tmp`
-  between games and every cache path points there, so a disk cache would never hit.
+  between games and every cache path points there, so a disk cache would never hit. It runs in
+  four phases — `generate`, `make_unmake`, `hash`, `perft` — each of which the shared
+  `warmup.WarmUpBudget` may skip if it would overrun `deadline`; `perft` is last because only the
+  tests call it. See `mikhail_letal/warmup.py`.
 
 Gates (`tests/test_fastboard.py`, python-chess is the oracle throughout; `LETAL_FULL_GATES=1`
 runs the full sizes, and `NUMBA_BOUNDSCHECK=1` makes numba check every compiled array index):
@@ -558,7 +562,7 @@ class EvalTables(NamedTuple):      # eight preallocated arrays, built once at im
 def load_eval_tables(path: Path | None = None) -> EvalTables      # plain Python; TABLES at import
 def evaluate(pos: Position, ev: EvalTables) -> int                # compiled; the whole evaluation
 def evaluate_board(board: chess.Board) -> int                     # boundary helper, tests only
-def warm_up() -> float                                            # called at import
+def warm_up(deadline: float | None = None) -> float               # called at import
 JITTED: tuple[str, ...]                                           # every compiled function here
 ```
 
@@ -612,7 +616,8 @@ class FastEngine:                  # same interface as search.Engine
                node_limit: int | None = None) -> SearchResult      # search.SearchResult
     node_rate: float               # measured nodes per second; the node cap is derived from it
 
-def warm_up(engine: FastEngine) -> float                           # called from agent.py
+def warm_up(engine: FastEngine, deadline: float | None = None) -> float   # from agent.py
+DEFAULT_NODE_RATE: float       # the rate assumed before any search has been timed
 ```
 
 What is the same as `search.py`: iterative deepening; aspiration windows from depth 4 (±40 cp,
@@ -694,10 +699,28 @@ raise: even the logging is wrapped.
 
 The engine underneath is the compiled one (`FastEngine`), and python-chess is still the legality
 oracle and the fallback, so none of the guarantees above depend on the compiled code being right.
-At import, `fastsearch.warm_up(ENGINE)` calls every jitted function with the exact argument types
-a game will pass and then runs real searches, so nothing compiles on the clock; `_warm_up` records
-how many specialisations each one then has, and `get_move` compares that once a move and logs any
-that appeared. Measured import from the extracted zip: 17–19 s, against the platform's 90 s budget.
+At import, `fastsearch.warm_up(ENGINE, _WARM_UP_DEADLINE)` calls every jitted function with the
+exact argument types a game will pass and then runs real searches, so nothing compiles on the
+clock; `_warm_up` records how many specialisations each one then has, and `get_move` compares
+that once a move and logs, in one line, any that appeared.
+
+That warm-up is **bounded**. `agent.py` arms `warmup.arm(_IMPORT_STARTED + WARM_UP_BUDGET_S)`
+before the first compiled module is imported, and every phase of every `warm_up()` asks the
+shared budget whether it is predicted to finish in time. What does not fit is skipped and
+compiles inside the first `get_move` instead — one slow move out of a 120 s clock, against an
+init failure that loses every game. `mikhail_letal/warmup.py` carries the arithmetic behind the
+70-second budget; the phase order, most important first, is `fastboard.generate`,
+`make_unmake`, `hash`, `perft`, `fasteval.evaluate`, `fastsearch.helpers`, `quiescence`,
+`negamax`, `tie_break`, `samples`, `node_rate`. If `node_rate` is skipped, `FastEngine.node_rate`
+keeps `DEFAULT_NODE_RATE` rather than zero, so the node cap that backs up the clock is still sane.
+
+`get_move` then finishes the job on the first real move, before it searches
+(`_finish_warm_up`), because numba cannot be interrupted: a function compiled *inside*
+`ENGINE.search` blows through the hard deadline (measured 15.9 s against 10.2 s). The finish is
+bounded by `TimeParams.cold_finish_fraction` of the clock and by the same predictive budget; the
+search's deadlines are then shifted by what it cost and its budget computed from the clock that
+is left, so every search stays inside its hard deadline and the cost is paid once, on the
+opening's full clock. Measured import from the extracted zip: 19–29 s, against the platform's 90 s budget.
 
 ## Determinism and logging
 
@@ -705,8 +728,9 @@ that appeared. Measured import from the extracted zip: 17–19 s, against the pl
 - Each move prints one line, for example
   `m e2e4 d 5/9 n 31240 nps 10413 t 3001 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
   nodes, nps, elapsed ms, soft ms, hard ms, clock ms). Init prints one line with the load time,
-  the compile time and the measured node rate, and `get_move` adds a `jit:` line if any compiled
-  function ever gains a specialisation after the warm-up.
+  the compile time, the warm-up budget, how many phases it had to skip and the measured node
+  rate, and `get_move` adds one `jit:` line if any compiled function gains a specialisation
+  after the warm-up.
 
 ## Testing hooks
 

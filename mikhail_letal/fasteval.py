@@ -38,6 +38,7 @@ import numpy as np
 import numpy.typing as npt
 from numba import njit
 
+from mikhail_letal import warmup
 from mikhail_letal.evaluation import (
     DRAW_SCORE,
     PHASE_TOTAL,
@@ -522,11 +523,25 @@ _WARM_UP_FENS: Final = (
 )
 
 
-def warm_up() -> float:
-    """Compile the evaluation with the exact argument types the search will pass it."""
+def warm_up(deadline: float | None = None) -> float:
+    """Compile the evaluation with the exact argument types the search will pass it.
+
+    One phase: the first FEN compiles `evaluate` and the three helpers, and the rest only widen
+    the branches already inside them, so there is nothing here worth splitting. It is skipped
+    whole if the shared `warmup` budget says it would not finish by `deadline` -- see
+    `mikhail_letal/warmup.py`.
+    """
     started = time.perf_counter()
-    for fen in _WARM_UP_FENS:
-        evaluate(from_board(chess.Board(fen)), TABLES)
+    limit = warmup.budget()
+    if deadline is not None:
+        limit.deadline = deadline
+
+    def evaluate_all() -> None:
+        for fen in _WARM_UP_FENS:
+            evaluate(from_board(chess.Board(fen)), TABLES)
+
+    limit.run("fasteval.evaluate", 1.6, evaluate_all)  # 1.6 s on the development machine
+
     global WARM_UP_SECONDS
     WARM_UP_SECONDS = time.perf_counter() - started
     return WARM_UP_SECONDS

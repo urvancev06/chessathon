@@ -29,6 +29,7 @@ from mikhail_letal.fastboard import position_key
 from mikhail_letal.fasteval import TABLES as EVAL_TABLES
 from mikhail_letal.fasteval import evaluate as compiled_evaluate
 from mikhail_letal.fastsearch import (
+    DEFAULT_NODE_RATE,
     F_HARD,
     I_EVAL_MASK,
     I_HISTORY_MASK,
@@ -42,6 +43,7 @@ from mikhail_letal.fastsearch import (
     warm_up,
 )
 from mikhail_letal.search import SearchResult
+from mikhail_letal.warmup import arm, budget
 from tests.test_fastboard import playout_boards, sample_starts
 
 FULL_GATES = os.environ.get("LETAL_FULL_GATES") == "1"
@@ -134,6 +136,62 @@ def test_nothing_compiles_during_a_game() -> None:
         keys.append(position_key(board))
     after = {name: list(getattr(module, name).signatures) for name in JITTED}
     assert after == after_warm == before
+
+
+def test_an_expired_deadline_skips_every_phase_and_still_returns() -> None:
+    """The safety property behind `mikhail_letal/warmup.py`: a warm-up that has run out of wall
+    clock stops instead of overrunning the platform's 90-second import budget. Nothing raises,
+    the phases are recorded by name for the log line, and the node rate that backs up the clock
+    keeps its conservative default rather than being left at zero."""
+    engine = FastEngine()
+    assert engine.node_rate == DEFAULT_NODE_RATE
+    try:
+        spent = warm_up(engine, deadline=time.perf_counter() - 1.0)
+        skipped = list(budget().skipped)
+    finally:
+        arm(None)  # the budget is shared, so put it back before the next test
+    assert spent < 1.0  # nothing ran, so nothing was compiled
+    assert engine.node_rate == DEFAULT_NODE_RATE
+    assert skipped == [
+        "fastsearch.helpers",
+        "fastsearch.quiescence",
+        "fastsearch.negamax",
+        "fastsearch.tie_break",
+        "fastsearch.samples",
+        "fastsearch.node_rate",
+    ]
+
+
+def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
+    """Phases are judged one at a time against what they cost on the development machine, so a
+    budget that fits some of them runs those; and the two that need a compiled `negamax` are
+    skipped once it is, because running them would compile it anyway."""
+    engine = FastEngine()
+    try:
+        # Three seconds fits `quiescence` (2.1 reference seconds) and `tie_break` (1.6) but not
+        # `helpers` (5.3) or `negamax` (12.5).
+        warm_up(engine, deadline=time.perf_counter() + 3.0)
+        skipped = list(budget().skipped)
+    finally:
+        arm(None)
+    assert skipped == [
+        "fastsearch.helpers",
+        "fastsearch.negamax",
+        "fastsearch.samples",
+        "fastsearch.node_rate",
+    ]
+    assert engine.node_rate == DEFAULT_NODE_RATE  # its seeding search was one of the four
+
+
+def test_a_generous_deadline_runs_the_whole_warm_up() -> None:
+    engine = FastEngine()
+    try:
+        warm_up(engine, deadline=time.perf_counter() + 3600.0)
+        skipped = list(budget().skipped)
+    finally:
+        arm(None)
+    assert skipped == []
+    assert engine.node_rate > 0.0
 
 
 # ----------------------------------------------------------------------------- (b) tactics

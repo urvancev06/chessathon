@@ -639,3 +639,60 @@ compile-time constant, so the compiler cannot prove it away.
 **Rejected: truncating the move list instead of raising.** Silently dropping legal moves would
 make the engine play a wrong move in a position it had every chance to get right; the exception is
 caught one frame up and costs a fallback move at worst.
+
+## 2026-09-08 — The warm-up gets a wall-clock deadline (v1.0.0)
+
+The compiled engine's import costs about 28.7 s from the extracted zip here, and the platform is
+measured at 2.3x slower (docs/CALIBRATION.md), which projects to ~66 s against a **hard 90 s**
+init budget. An import that overruns it is not a bad move: the platform records an init failure
+and *every* game is lost. Twenty-four seconds of margin on a machine we cannot benchmark before
+we ship is not a margin worth betting the entry on.
+
+So the compilation is bounded. `agent.py` arms `warmup.arm(_IMPORT_STARTED + WARM_UP_BUDGET_S)`
+(70 s) before the first jitted module is imported; `fastboard`, `fasteval` and `fastsearch` cut
+their `warm_up()` into eleven phases ordered by how much the search needs them, and each phase
+asks the shared budget whether it still fits. What does not fit is skipped and numba compiles it
+inside the first `get_move` instead — part of one move out of a 120 s clock, and the hard
+deadline still holds afterwards because the search's own clock checks are unaffected (measured:
+with the budget forced to 2 s the first move takes 15.4 s of a 30 s hard budget and is legal).
+`agent.py` logs one line naming how many phases were skipped, and the per-move signature check
+now logs one summary line rather than one line per function, so the log stays readable.
+
+**Why the check predicts rather than just tests the clock.** The phases are lumpy — compiling
+`negamax` alone is 12.5 s here — so "stop once the deadline has passed" would still let one
+phase start at 69 s and run to 107 s. Each phase declares its development-machine cost
+(docs/PROVENANCE.md), the budget scales that by the slowdown it has measured from the phases that
+already ran, and a phase starts only if it is predicted to finish in time. The worst case is then
+the deadline plus one phase's *prediction error*, not plus a whole phase.
+
+**Why 70 s and not less.** At the platform's measured 2.3x the whole warm-up ends at ~65 s, so 70
+does not bite where we actually play: the engine still arrives fully compiled. At 3x the sequence
+reaches `negamax` at ~39 s needing ~37 s more, is not started, and the import ends at ~40 s
+instead of the ~85 s an unbounded warm-up would take there. Rejected: **35–40 s**, which would
+cut `negamax` on the platform itself and hand away one slow move in every game for a danger that
+has not been measured; **no bound at all**, which is the current shipping state and is a coin
+flip on a machine 3x slower; **shrinking the warm-up** by dropping phases outright, which pays
+the same cost unconditionally instead of only when the machine is slow.
+
+**Why the phases sit where they do.** `fastboard.perft` is last in its module because only the
+tests call it. `fastsearch.samples` (the sample searches that compile the aspiration re-search,
+the null move, the reductions and the abort path) costs 0.1 s now that `negamax` is compiled, so
+it is cheap insurance rather than a candidate for cutting, and it is skipped outright when
+`negamax` was skipped, since running it would compile `negamax` anyway. `fastsearch.node_rate`,
+the seeding search, is last: if it is skipped, `FastEngine.node_rate` keeps the new
+`DEFAULT_NODE_RATE = 400 000`, deliberately above anything measured, so the node cap that backs
+up the clock is loose rather than zero or unset — a cap that never binds is safe where one that
+binds early would cut a search short.
+
+**Where the leftover compiling happens.** Measured first, then decided: with the budget forced to
+2 s, the first move took 15.9 s against a 10.2 s hard budget, because numba compiled `negamax`
+*inside* `ENGINE.search` and no deadline the search checks can interrupt a compile. So the first
+real move now finishes the outstanding warm-up **before** it searches (`agent._finish_warm_up`),
+bounded by `cold_finish_fraction` (0.25) of the clock and by the same predictive budget, and the
+search's soft and hard deadlines are shifted by what that cost while its budget is computed from
+the clock that is left. Two things follow: every search, including the first, is back inside its
+hard deadline, and the compiling is paid once on the opening's 120-second clock instead of
+dribbling into a middlegame move whose whole budget is three seconds. Rejected: leaving the
+compile inside the search, which is where the 15.9 s came from and which leaves single functions
+to compile at unpredictable moments later in the game; and refusing to search at all while the
+jit is cold, which never compiles anything and so plays fallback moves for the whole game.
