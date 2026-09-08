@@ -119,3 +119,4 @@ Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.s
 | `numba.objmode` clock read | 301 ns | 100 000 reads inside a jitted loop; hence `NODE_CHECK_INTERVAL = 512` |
 | Python → jitted call boundary | 4.0 µs | 20 000 calls of `negamax` at depth 0; why the root is Python (DECISIONS.md) |
 | compile time if the root is compiled too | 34.2 s total | measured per function before the root was moved to Python: `negamax` 13.4 s, `_search_root` 6.3 s, aspiration 2.7 s, deepening loop 5.4 s |
+| numba-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +279 =19 -2 | 96.2% | ±1.6% | +560 (+495 to +660) | 6.3% | checkmate 281, fifty_moves 1, threefold_repetition 16, insufficient_material 2 | 8 | 0.72 2.63 3.71 / 6.25 7.76 7.59 | data/openings.txt |
