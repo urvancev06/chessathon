@@ -673,9 +673,10 @@ def _has_legal(pos: Position, st: SearchState, ply: int, in_chk: int) -> int:
     The cheap test comes first, because this sits on the hottest path in the whole tree: the
     quiescence stand-pat cutoff asks it at roughly a third of all nodes, and it exists only to
     stop a checkmate or a stalemate being scored as a stand-pat. `_has_unpinned_move` answers
-    "yes" for nearly every position without generating a move (97 % of the positions of a random
-    playout, 99 % of the calls in a measured middlegame search; DECISIONS.md), and the full
-    generation below runs for the rest.
+    "yes" for nearly every position without generating a move -- measured over a depth-10 search,
+    100 % of the calls from the standard start, 99.9 % in the Kiwipete middlegame and 86.6 % in a
+    rook ending, where there is less material to find an unpinned piece among (DECISIONS.md) --
+    and the full generation below runs for the rest.
 
     That generation uses this ply's buffer, which is free wherever this is called: the node has
     either not generated its moves yet or is about to return.

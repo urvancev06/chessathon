@@ -793,8 +793,10 @@ the cruder test that the piece is not on a rank, file or diagonal *through* the 
 is the generous one on purpose — a piece wrongly called "possibly pinned" costs the scan of one
 more piece, a piece wrongly called free would be a stalemate scored as a stand-pat. En passant is
 left out, being the one move that can uncover a check from a piece the mover never stood in front
-of. It answers "yes" for 97 % of the positions of a random playout and 99 % of the search's calls,
-and each yes costs reading one piece's destinations: no make/unmake, no attack scan.
+of. Each "yes" costs reading one piece's destinations: no make/unmake, no attack scan. How often
+it can say yes, counted inside a depth-10 search: **100 %** of the calls from the standard start,
+**99.9 %** in the Kiwipete middlegame, **86.6 %** in the rook ending, where there is much less
+material to find an unpinned piece among. Over a 76 000-position random playout, 97 %.
 
 **Measured, best of four runs each, alternating between the two builds** (the box was busy, so
 absolute times drift; the pairs were taken back to back). Depth 10: standard start 0.271 s →
@@ -919,3 +921,19 @@ different bonus shape, and that is a tuning exercise against games, not somethin
 Kept for the record rather than deleted: the numbers above are the reason the shipped engine still
 has a reward-only history table, and anyone who reads the audit and reaches for the same two ideas
 should start from here.
+
+## 2026-09-08 — Sanity match for the batch above (not a strength verdict)
+
+Twenty games against `versions/v1.0` at 10 s + 0.1 s, two workers, openings from
+`data/openings.txt`. The point is that nothing crashes, no clock goes negative and no game ends in
+a failed termination — not who is stronger, which needs the real time control and many more games
+than this.
+
++7 =7 −6, score 52.5 % ± 18.1 %, Elo +17 (−112 to +152). Terminations: checkmate 13, threefold
+repetition 5, fifty moves 1, insufficient material 1 — every game ended on a rule, none on a
+flag, a crash or an illegal move. Lowest agent clock 1 647 ms after a move and before the
+increment, in the 247-ply game 12. Load average 4.8 → 6.2 throughout, because the box was busy
+with another measurement, so the clock figures measure the load as much as the engine.
+
+The interval spans zero by a wide margin at twenty games, as it must. **This row is not evidence
+that the batch is an improvement**; the strength screen at the event time control is.
