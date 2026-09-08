@@ -169,12 +169,13 @@ mailbox, and now safe to attempt because there is a proven engine to check again
 Syzygy tablebases, and a Texel fit done properly — a better leaf evaluation compounds with depth,
 so it is worth more now than it was.
 
-Known weaknesses, all measured rather than guessed, and all measured on the *interpreted* build —
-the compiled one searches three to four plies deeper and has not been re-tested on them: rook
-endgame technique is poor, and the engine does not convert the Lucena position at five seconds a
-move. King and queen against king can still
-run into the fifty-move rule from a difficult starting square. There are no tablebases and no
-opening book. The evaluation has never been successfully tuned.
+Known weaknesses, all measured rather than guessed. The two endgame failures the interpreted build
+had are gone — the compiled engine converts the Lucena position, and it mates with king and queen
+against king inside the fifty-move rule at the tablebase's own pace — but a queen ending that needs
+every one of the plies left before the referee's 600-ply cap is still on a knife edge
+([docs/RESULTS.md](docs/RESULTS.md)). There are no tablebases and no opening book. The evaluation
+has never been successfully tuned. The compiled build has not been re-rated against the Stockfish
+yardstick, so its strength is known only relative to the build before it.
 
 ## Notes
 
