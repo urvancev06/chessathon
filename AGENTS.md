@@ -101,3 +101,30 @@ tie-breaks replay. The platform sets nothing of the kind, so do not read it in y
 
 Python 3.12, type-annotated, ruff and mypy strict clean. Keep `agent.py` readable: it is the
 thing a judge reads if your games get flagged, and the thing you have to explain at the final.
+
+## This repository
+
+The starter above describes the competition. This fork is **Mikhail LeTal**, an engine built on
+it. Two rules matter more than anything else here.
+
+**The engine is measured, not guessed.** A version replaces the previous one only when it wins a
+match whose 95% confidence interval is above zero, at the real time control, with the previous
+version kept in `versions/` as the opponent. `tools/arena_openings.py` runs those matches and
+appends a row to `docs/RESULTS.md`. Never claim an improvement that has not been measured, and
+never delete a measurement that came out badly.
+
+**Everything that ships is explainable.** `agent.py` and `mikhail_letal/` are the submission, and
+someone has to walk a judge through them line by line. Plain Python, type-annotated, comments that
+say why rather than what. Every constant is recorded in `docs/PROVENANCE.md` with what produced
+it. No table or constant is ever copied from another engine; `tools/gen_pst.py` generates the
+piece-square tables from a formula so that their origin is provable.
+
+Layout: `agent.py` and `mikhail_letal/` ship; `weights/` ships; `tools/`, `tests/`, `docs/`,
+`app/`, `versions/` and `data/` never do. `make zip` follows imports from the root modules, so an
+accidental import from `tools/` would package a directory. Check `unzip -l submission.zip` after
+building.
+
+Working notes: `docs/DESIGN.md` is the module contract, and a change to any signature belongs
+there first. `docs/DECISIONS.md` records decisions with the alternative rejected. Stockfish lives
+outside the repo (`YARDSTICK_ENGINE`, or `~/.local/opt/stockfish/stockfish`) and is only ever a
+measuring instrument: it never influences a move at runtime and never enters the zip.
