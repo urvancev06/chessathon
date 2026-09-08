@@ -169,8 +169,10 @@ mailbox, and now safe to attempt because there is a proven engine to check again
 Syzygy tablebases, and a Texel fit done properly — a better leaf evaluation compounds with depth,
 so it is worth more now than it was.
 
-Known weaknesses, all measured rather than guessed: rook endgame technique is poor, and the engine
-does not convert the Lucena position at five seconds a move. King and queen against king can still
+Known weaknesses, all measured rather than guessed, and all measured on the *interpreted* build —
+the compiled one searches three to four plies deeper and has not been re-tested on them: rook
+endgame technique is poor, and the engine does not convert the Lucena position at five seconds a
+move. King and queen against king can still
 run into the fifty-move rule from a difficult starting square. There are no tablebases and no
 opening book. The evaluation has never been successfully tuned.
 
