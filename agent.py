@@ -7,7 +7,7 @@ itself (search, evaluation, time management, position history) lives in the pack
 build the board, decide how much time to spend, call the engine, and check its answer.
 
 The engine underneath is compiled: ``mikhail_letal.fastsearch`` searches its own 0x88 board
-(``fastboard``) with numba, some fifteen times faster than the interpreted searcher in
+(``fastboard``) with numba, about fourteen times as many nodes a second as the searcher in
 ``search.py``, which stays in the repository as the specification the compiled port is checked
 against. That changes nothing here. python-chess is still the legality oracle -- the board is
 built with it, the move that comes back is looked up in its ``legal_moves``, and anything that
