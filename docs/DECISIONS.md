@@ -1348,3 +1348,40 @@ any of the above, so whatever `RESULTS.md` records, it must not read as a fix fo
 the root-clustering falsifier returns thirty-way ties, that is a fact about our evaluation and
 **not** an explanation of this game — we have no baseline for a good engine's root distribution and
 no way to obtain one before the cutoff. The lesson above is exactly what that would be repeating.
+
+## 2026-09-08 — `root_scores` holds bounds, not values
+
+Found by `chessathon-5a` while instrumenting the root to test whether locked positions cluster.
+Recorded on its own because it will mislead the next person who instruments this engine, and it
+misleads in the most dangerous direction: **it confirms whatever you already believe.**
+
+Reading `st.root_scores` (`fastsearch.py:1247`) after an ordinary aspirated search gives
+**spread(top1 − top5) = 0 cp in every position, locked and open alike** — including one where a
+capture is genuinely +150 clear — with 24–39 moves apparently "within 5 cp of best". The cause is
+fail-hard alpha-beta: the null-move cutoff at `fastsearch.py:861` does `return beta`, and root moves
+searched on a null window after alpha has risen come back at exactly alpha. **Those numbers are
+bounds, not evaluations.** The array is not at fault — its own comment at line 213 says it exists
+for the draw tie-break, a use for which bounds are correct. The fault is reading it as analysis.
+
+Anyone investigating "the evaluation is flat" who instruments the root the obvious way gets a
+spectacular confirmation, manufactured entirely by the search's bound discipline. If either
+operator document's "dozens of root moves tie" came from that array, the observation was worthless.
+
+**The correct measurement is a full window with alpha never raised at the root**, and it says
+something different and real: locked positions cluster about **sevenfold** tighter than open ones
+(median top-5 spread 9.5 cp against 67 cp), with the top two moves exactly tied in three of six
+locked positions.
+
+**Two reconciliations worth keeping.** That result and `chessathon-bb`'s finding — that static
+evaluation gives a *uniquely* best move in 95.5 % of middlegame positions — are compatible rather
+than contradictory: the evaluation does discriminate one ply out, and the differences wash out by
+depth 8 because the lines transpose into each other. So the clustering is a property of locked
+*positions*, not of our tables, and the quantisation framing was the wrong explanation for a real
+effect. And "quiescence is a no-op in locked positions" is false: 710 000–1 350 000 captures entered
+quiescence in exactly these positions. Root captures were 0–2, so the documents generalised from the
+root to the tree.
+
+**Nothing is being changed on the strength of it before the cutoff.** A tighter root spread in
+closed positions may simply be what closed positions are; we have established that we shuffle
+normally for how locked our positions are and that the field's kings wander the same way. Acting
+needs a change that is measurably better, and there is not one.
