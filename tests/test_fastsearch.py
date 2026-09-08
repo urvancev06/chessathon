@@ -146,20 +146,26 @@ def test_an_expired_deadline_skips_every_phase_and_still_returns() -> None:
     engine = FastEngine()
     assert engine.node_rate == DEFAULT_NODE_RATE
     try:
-        spent = warm_up(engine, deadline=time.perf_counter() - 1.0)
-        skipped = list(budget().skipped)
+        # `budget()` is one shared record whose `skipped` list accumulates across calls, so the
+        # test arms it itself rather than reading whatever earlier tests (or the agent import)
+        # happened to leave in it. `arm` resets the accounting; `warm_up` only sets the deadline.
+        arm(time.perf_counter() - 1.0)
+        spent = warm_up(engine)
+        skipped = set(budget().skipped)
     finally:
         arm(None)  # the budget is shared, so put it back before the next test
     assert spent < 1.0  # nothing ran, so nothing was compiled
     assert engine.node_rate == DEFAULT_NODE_RATE
-    assert skipped == [
+    # Every phase of this module has to be in there. Membership, not an exact list: the order and
+    # any phases other modules record are not what this test is about.
+    assert {
         "fastsearch.helpers",
         "fastsearch.quiescence",
         "fastsearch.negamax",
         "fastsearch.tie_break",
         "fastsearch.samples",
         "fastsearch.node_rate",
-    ]
+    } <= skipped
 
 
 def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
