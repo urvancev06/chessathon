@@ -27,6 +27,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,6 +36,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import chess
+import chess.engine
 import chess.pgn
 
 from harness.referee import FAILED_TERMINATIONS, play_match
@@ -319,6 +321,56 @@ def agent_clocks_ms(pgn: str, plays_white: bool, increment_ms: int) -> tuple[int
     return plies, clocks
 
 
+# One agent log line per move, as `agent.py` writes it: `m e2e4 d 12/30 n 805926 t 805 ... e +45`.
+# Tokens are read by name, so a field appearing or disappearing does not break the parse.
+AGENT_LINE_RE = re.compile(r"^m (?P<uci>[a-h][1-8][a-h][1-8][qrbn]?) (?P<rest>.*)$")
+
+
+def agent_move_reports(stderr_log: str) -> list[dict[str, str]]:
+    """The engine's own per-move report lines, in order, as token dictionaries."""
+    reports: list[dict[str, str]] = []
+    for line in stderr_log.splitlines():
+        match = AGENT_LINE_RE.match(line.strip())
+        if match is None:
+            continue
+        tokens = match.group("rest").split()
+        fields = dict(zip(tokens[::2], tokens[1::2], strict=False))
+        fields["m"] = match.group("uci")
+        reports.append(fields)
+    return reports
+
+
+def stamp_agent_evaluations(pgn: str, reports: Sequence[dict[str, str]], plays_white: bool) -> str:
+    """Write the engine's own score and depth into the PGN, beside the clocks the referee wrote.
+
+    `[%eval]` is python-chess's native comment, so every PGN viewer and our own analysis tool read
+    it without a parser. Having the engine's score and Stockfish's score on the same move turns
+    finding a blunder into a subtraction instead of a manual reproduction.
+    """
+    game = chess.pgn.read_game(io.StringIO(pgn))
+    if game is None or not reports:
+        return pgn
+    ours = 0
+    for index, node in enumerate(game.mainline()):
+        if (index % 2 == 0) != plays_white:  # not our move
+            continue
+        if ours >= len(reports):
+            break
+        report = reports[ours]
+        ours += 1
+        raw = report.get("e")
+        if raw is None:  # the engine does not report a score yet
+            continue
+        try:
+            centipawns = int(raw)
+            depth = int(report.get("d", "0").split("/")[0])
+        except ValueError:
+            continue
+        # Scores are from the side to move; PovScore records whose point of view it is.
+        node.set_eval(chess.engine.PovScore(chess.engine.Cp(centipawns), node.parent.turn()), depth)
+    return str(game)
+
+
 def play_game(
     index: int, settings: Settings, openings: Sequence[Opening]
 ) -> tuple[GameRecord, str]:
@@ -328,9 +380,13 @@ def play_game(
     opponent = settings.opponent.resolve()
     white, black = (agent, opponent) if plays_white else (opponent, agent)
     started = time.perf_counter()
+    # Bound to names so the agent's own log can be read back after the game; `play_match` stops
+    # both agents, which is what fills `stderr_log`.
+    white_agent, black_agent = local(white, seed), local(black, seed)
+    ours = white_agent if plays_white else black_agent
     outcome = play_match(
-        local(white, seed),
-        local(black, seed),
+        white_agent,
+        black_agent,
         settings.base_ms,
         settings.increment_ms,
         ply_cap=settings.ply_cap,
@@ -350,7 +406,8 @@ def play_game(
         agent_low_clock_ms=min(clocks) if clocks else None,
         elapsed_s=elapsed,
     )
-    return record, outcome.pgn
+    stamped = stamp_agent_evaluations(outcome.pgn, agent_move_reports(ours.stderr_log), plays_white)
+    return record, stamped
 
 
 def describe_game(record: GameRecord, played: int) -> str:
