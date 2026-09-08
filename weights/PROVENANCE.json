@@ -2,129 +2,129 @@
   {
     "parameter": "piece_values_mg",
     "value_or_shape": "{\"P\": 100, \"N\": 320, \"B\": 330, \"R\": 500, \"Q\": 900, \"K\": 0}",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "universal textbook values, recorded as such, untuned"
   },
   {
     "parameter": "piece_values_eg",
     "value_or_shape": "{\"P\": 100, \"N\": 320, \"B\": 330, \"R\": 500, \"Q\": 900, \"K\": 0}",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "identical to the middlegame values until tuned"
   },
   {
     "parameter": "pst_mg.P",
     "value_or_shape": "64 ints, min 0, max 24",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_mg.N",
     "value_or_shape": "64 ints, min -20, max 30",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_mg.B",
     "value_or_shape": "64 ints, min -3, max 21",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_mg.R",
     "value_or_shape": "64 ints, min 0, max 28",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_mg.Q",
     "value_or_shape": "64 ints, min -14, max 2",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_mg.K",
     "value_or_shape": "64 ints, min -80, max 25",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.P",
     "value_or_shape": "64 ints, min 0, max 50",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.N",
     "value_or_shape": "64 ints, min -20, max 30",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.B",
     "value_or_shape": "64 ints, min -3, max 21",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.R",
     "value_or_shape": "64 ints, min 0, max 0",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.Q",
     "value_or_shape": "64 ints, min -2, max 10",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "pst_eg.K",
     "value_or_shape": "64 ints, min -5, max 25",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "geometric formula of the square; parameters in pst.json _provenance"
   },
   {
     "parameter": "phase_weights",
     "value_or_shape": "{\"N\": 1, \"B\": 1, \"R\": 2, \"Q\": 4}",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "sum over the full board is 24 = PHASE_TOTAL"
   },
   {
     "parameter": "mopup",
     "value_or_shape": "{\"edge\": 10, \"close\": 12}",
-    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "produced_by": "tools/gen_pst.py @ 621afb5c5ba0ce9d8103121fbc01f7730dddf107",
     "data": "none: parametric prior",
-    "run_id": "2026-09-06",
+    "run_id": "2026-09-08",
     "note": "drive the bare king to the edge, bring ours close; close beats one king ring"
   },
   {
@@ -238,5 +238,117 @@
     "data": "none: same value as hard_fraction, and for the same reason",
     "run_id": "2026-09-08",
     "note": "the share of the clock the first move may spend finishing a warm-up the import ran out of budget for; at most one move of one game"
+  },
+  {
+    "parameter": "search.null_move",
+    "value_or_shape": "min depth 3, R = 2 + depth // 6",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: min depth chosen by measurement (see note)",
+    "run_id": "2026-09-08",
+    "note": "textbook reduction; min depth 3 rather than 2 because at 2 a capture-rich middlegame tripled the nodes to depth 5, null searches landing in quiescence at the widest layer"
+  },
+  {
+    "parameter": "search.late_move_reductions",
+    "value_or_shape": "min depth 3, first 3 moves full, reduction 1",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a fail-high"
+  },
+  {
+    "parameter": "search.aspiration",
+    "value_or_shape": "from depth 4, window 40 cp, widen x4, 2 fails then full",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "40 cp is under half a pawn, so a stable root re-searches rarely"
+  },
+  {
+    "parameter": "search.futility_margins",
+    "value_or_shape": "[0, 150, 300]",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "indexed by remaining depth: a minor piece at depth 1, two at depth 2; depth 0 is dead because the search goes to quiescence there"
+  },
+  {
+    "parameter": "search.delta_margin",
+    "value_or_shape": "200",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "quiescence skips a capture that cannot reach alpha even with the victim's value"
+  },
+  {
+    "parameter": "search.qs_evasion_plies",
+    "value_or_shape": "4",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: chosen by measurement (see note)",
+    "run_id": "2026-09-08",
+    "note": "quiescence searches every evasion this deep; 4 keeps an eight-queens-a-side position under 100k nodes at depth 1, where an uncapped search never finished an iteration"
+  },
+  {
+    "parameter": "search.draw_tiebreak_margin",
+    "value_or_shape": "300",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "'clearly ahead' for the root tie-break when every move scores a rule draw: a minor"
+  },
+  {
+    "parameter": "search.node_check_interval",
+    "value_or_shape": "128",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: chosen by measurement (see note)",
+    "run_id": "2026-09-08",
+    "note": "how often the compiled search reads the clock; 1024 gave 25 ms mean and 65 ms worst overshoot locally, and a perf_counter read costs ~60 ns, so 128 is effectively free"
+  },
+  {
+    "parameter": "search.max_ply",
+    "value_or_shape": "128",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: structural",
+    "run_id": "2026-09-08",
+    "note": "recursion bound for search, quiescence and extensions together"
+  },
+  {
+    "parameter": "search.game_ply_cap",
+    "value_or_shape": "600",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "agent contract: a game reaching this many plies is a draw",
+    "run_id": "2026-09-08",
+    "note": "not a choice; the opening position counts toward it"
+  },
+  {
+    "parameter": "search.transposition_table",
+    "value_or_shape": "2^21 entries, cleared at move start above 60% full",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
+    "data": "none: sized by measurement (see note)",
+    "run_id": "2026-09-08",
+    "note": "fixed numpy arrays, depth-preferred within a move and aged across moves; int-only entries keep gen-2 GC pauses to ~14 ms where chess.Move values cost 143 ms"
+  },
+  {
+    "parameter": "search.eval_cache",
+    "value_or_shape": "2^18 entries (compiled); 100000 (reference engine)",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
+    "data": "none: sized by measurement",
+    "run_id": "2026-09-08",
+    "note": "static evaluations keyed by Zobrist; the cap holds a 20 s search under 100 MB"
+  },
+  {
+    "parameter": "search.history_bonus",
+    "value_or_shape": "depth * depth, clamped at 999999",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "cutoffs near the root are rarer and worth more; the clamp keeps quiet moves below the killer band so ordering bands cannot invert"
+  },
+  {
+    "parameter": "search.mate_scores",
+    "value_or_shape": "mate 100000, threshold 99000",
+    "produced_by": "code (mikhail_letal/evaluation.py)",
+    "data": "none: arbitrary large constants",
+    "run_id": "2026-09-08",
+    "note": "a mate at ply p scores MATE_SCORE - p, so shorter mates outrank longer ones"
   }
 ]
