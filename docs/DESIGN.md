@@ -19,6 +19,7 @@ mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searche
 mikhail_letal/timing.py           SHIPS   time budget formula (all constants in one dataclass)
 mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
 mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
+mikhail_letal/fastboard.py        SHIPS   Stage 1: 0x88 board, move generation, make/unmake (numba)
 weights/pst.json         SHIPS   generated tables with a provenance header
 weights/PROVENANCE.json  SHIPS   machine-readable provenance for every shipped number
 tools/gen_pst.py                 the parametric prior: tables, piece values, structural weights (--out weights/pst.json ships it)
@@ -31,9 +32,10 @@ docs/                            DESIGN, DECISIONS, RESULTS, PROVENANCE, CALIBRA
 data/                            openings.txt, tuning positions and labels (data/tuning/), other collected data
 ```
 
-Rules: `agent.py` and `mikhail_letal/` import only the standard library and `chess`. Nothing under `mikhail_letal/`
-imports `tools/`, `tests/`, `harness/` or `numpy`/`numba` (Stage 1 adds numba). No file in the zip
-is named after a stdlib or stack module. No randomness anywhere in the shipped code path.
+Rules: `agent.py` and `mikhail_letal/` import only the standard library, `chess`, and — in
+`fastboard.py` and the Stage 1 modules built on it — `numpy` and `numba`. Nothing under
+`mikhail_letal/` imports `tools/`, `tests/` or `harness/`. No file in the zip is named after a
+stdlib or stack module. No randomness anywhere in the shipped code path.
 
 ## Shared conventions
 
@@ -375,6 +377,91 @@ One ply: play a mate in one if present; otherwise maximise material after the mo
 preferred; ties broken by UCI string so the result is deterministic. Must return in a few
 milliseconds; never raises when `legal` is non-empty. If `legal` is empty (should never happen —
 the referee ends the game first) it raises `ValueError`, and `agent.py` guards for that.
+
+## `mikhail_letal/fastboard.py` (Stage 1, phase 1)
+
+The compiled position: its own board, its own move generation, its own make and unmake, with no
+Python object in the hot path. Phase 1 is this file only; the compiled search and evaluation that
+will call it are a later phase, and until they exist nothing in `agent.py`'s move path uses it.
+
+```python
+class Position(NamedTuple):        # five preallocated int32 arrays, mutated in place
+    board: NDArray[int32]          # 128 entries, 0x88 indexed: piece_type | colour << 3, or 0
+    plist: NDArray[int32]          # colour * 16 + slot -> square
+    pidx:  NDArray[int32]          # square -> slot in its colour's list, else -1
+    meta:  NDArray[int32]          # side, castling, ep, halfmove, fullmove, undo depth, kings, counts
+    undo:  NDArray[int32]          # MAX_UNDO x UNDO_N
+
+def new_position() -> Position
+def new_move_buffer() -> NDArray[int32]                     # MAX_MOVES
+def new_move_stack(max_ply: int = 64) -> NDArray[int32]     # one buffer per recursion level
+
+# compiled (numba njit); every one is called by warm_up() at import
+def attacked(board, square: int, by_colour: int) -> int     # 1 or 0
+def in_check(pos) -> int
+def gen_pseudo(pos, out) -> int                             # writes packed moves, returns the count
+def gen_legal(pos, out) -> int                              # filters gen_pseudo in place
+def make_move(pos, move: int) -> int                        # 1 if legal; ALWAYS pushes an undo record
+def unmake_move(pos) -> None
+def has_legal_move(pos, out) -> int
+def perft(pos, stack, depth: int, ply: int) -> int
+
+# boundary, plain Python
+def from_board(board: chess.Board) -> Position;  def from_fen(fen: str) -> Position
+def set_from_board(pos, board) -> None;          def to_fen(pos) -> str
+def legal_moves(pos) -> list[int]
+def move_to_uci(move) -> str;  def move_to_chess(move) -> chess.Move
+def move_from_chess(pos, move: chess.Move) -> int
+def pack_move(frm, to, promotion=0, flag=FLAG_NORMAL) -> int
+def move_from / move_to / move_promotion / move_flag (move) -> int
+def sq88(square: int) -> int;  def sq64(square: int) -> int
+def check_invariants(pos) -> None                           # tests only
+def warm_up() -> float                                      # called at import; WARM_UP_SECONDS
+```
+
+Conventions inside this module, which differ from the rest of the engine and are converted only at
+the boundary:
+
+- Squares are **0x88** (`a1 = 0x00`, `h1 = 0x07`, `a8 = 0x70`), not python-chess's 0..63. A square
+  is on the board exactly when `sq & 0x88 == 0`, which is the whole reason for the representation:
+  every knight hop, king step and slider ray tests the edge with one AND and cannot wrap.
+- Colours are `WHITE = 0`, `BLACK = 1`, not python-chess's `True`/`False`. Piece types match
+  python-chess (`PAWN = 1 .. KING = 6`) so a promotion code passes straight to `chess.Move`.
+- A move is one int32: `from | to << 7 | promotion << 14 | flag << 17`. The flag distinguishes a
+  double push, an en passant capture and a castling move, none of which make/unmake can infer
+  from the squares alone.
+- Every array is int32. One dtype means one numba specialisation per function and no implicit
+  casts.
+
+Behaviour:
+
+- Generation is pseudo-legal plus "make, then ask whether the mover's king is attacked". Castling
+  is the exception: its "not out of, through or into check" conditions are checked in the
+  generator, because they concern squares the king does not end on. En passant discovered check
+  needs no special case — the captured pawn has already left the board when the king is tested.
+- `make_move` always plays the move and always pushes an undo record, whatever it returns, so the
+  caller must `unmake_move` exactly once either way. That is what makes the legality test free in
+  a search: the move it wants to keep is already on the board.
+- `unmake_move` restores the board, both piece lists, the castling rights, the en passant square
+  and both clocks exactly. The captured piece's piece-list slot is stored in the undo record,
+  because the swap-with-last removal would otherwise lose it.
+- `to_fen` reproduces `chess.Board.fen()` byte for byte, including python-chess's default
+  en passant rule: the target square is printed only when a legal en passant capture exists.
+- `warm_up()` compiles every entry point at import with the exact argument types the engine will
+  pass, so nothing compiles on the clock. `cache=True` is not used: the platform wipes `/tmp`
+  between games and every cache path points there, so a disk cache would never hit.
+
+Gates (`tests/test_fastboard.py`, python-chess is the oracle throughout; `LETAL_FULL_GATES=1`
+runs the full sizes, and `NUMBA_BOUNDSCHECK=1` makes numba check every compiled array index):
+
+1. Perft to depth 4 on the standard public positions and on 58 positions built to break one rule
+   each, depth 3 on all 219 curated openings and on 2,000 positions from random playouts.
+2. Legal-move-set equality, as sets of UCI strings, on 100,000 positions, with the sample audited
+   for en passant, all sixteen castling-rights combinations, check, double check, promotions,
+   pawns on the seventh and terminal positions.
+3. Make/unmake round trip: FEN with both clocks byte-identical, `meta` unchanged, and
+   `check_invariants` green after every make and unmake in a Python-level perft.
+4. No jitted function gains a signature under load, so nothing compiles after import.
 
 ## `agent.py`
 

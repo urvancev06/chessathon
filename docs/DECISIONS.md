@@ -382,3 +382,46 @@ and more balanced position set (a higher node limit, discard labels beyond ±600
 value per piece shared by both phases; fewer table parameters (mirror-symmetric files); and
 re-tuning the search margins together with the tables. Each would be a new experiment measured
 the same way.
+
+## 2026-09-08 — Stage 1 board is a 0x88 mailbox with piece lists, not bitboards
+
+`mikhail_letal/fastboard.py` is the compiled foundation of the numba engine (`docs/PLAN.md`
+priority 1). The representation had to be picked before anything else, and the choice was made on
+how fast it could be made *provably* right, not on peak throughput.
+
+**Chosen: 0x88 mailbox, piece lists per colour, pseudo-legal generation, legality by
+make-then-test-the-king.** An off-board test is `(sq & 0x88) == 0`, one AND, so the classic
+mailbox bug — a rook on h4 sliding east onto a5 — cannot be written. Legality by playing the move
+and asking whether the mover's king is attacked gets en passant discovered check, a king walking
+along the checking slider's ray, and castling out of or through check for free, with no special
+case to forget; it is also nearly free inside a search, where the move being kept has to be
+played anyway.
+
+**Rejected: bitboards.** Several times faster, and the right target once the whole engine is
+green, but they need magic multipliers or kindergarten tables, careful 64-bit unsigned arithmetic
+(where Python's arbitrary-precision ints leak into numba and silently overflow), and a separate
+correct-by-construction pin analysis. With three days left, a generator that is fast and subtly
+wrong loses more games than one that is merely fast.
+
+**Rejected: legality by pin analysis** (compute pinned pieces and checkers, generate only legal
+moves). Faster than make-and-test, but it is the part of a generator that is easiest to get
+wrong, and its failures are rare positions rather than common ones — exactly the shape of bug
+that survives a test suite and shows up in a rated game.
+
+**Rejected: `numba.experimental.jitclass`** for the position. Nicer to read, but slower to
+compile and awkward under mypy. A `NamedTuple` of five preallocated int32 arrays is a first-class
+numba type, costs nothing on a call, and keeps every mutation visible to the caller.
+
+**Rejected: `cache=True`.** The platform wipes `/tmp` between games and every cache path points
+there, so the cache would never hit and would only add a write to the start-up budget.
+
+Measured on this laptop (`tools/bench_fastboard.py`, 13.5 M nodes over four positions):
+10–13 M nodes/s against python-chess's 1.0–1.3 M nodes/s with bulk counting at the last ply
+(9–15x), or 32–40x when python-chess is made to make and unmake every leaf move as the compiled
+side does. Compilation at import is 2.5–3.2 s, well inside the 90 s budget even on a core three
+times slower. All three correctness gates pass, with and without `NUMBA_BOUNDSCHECK=1`; the full
+run is 143 tests in 168 s, or 171 s with bounds checking on.
+
+Not yet done, and deliberately: nothing calls this module at runtime. The compiled search and
+evaluation are the next phase, and `agent.py` keeps the python-chess engine until they exist and
+win a match under the promotion rule.
