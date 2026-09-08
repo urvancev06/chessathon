@@ -48,6 +48,25 @@ Send it, in this order:
    distribution, does anything in the terminations or the clock shape look unlike the rest of the
    evening.
 
+### 3a. Who the blind reader is, and what to do if there is none
+
+**Primary: `chessathon-64`.** It authored the adopted gate, has seen no figure from this match, and
+has confirmed it is standing by with nothing outstanding.
+
+**Most of its contribution has already happened, which lowers the risk here.** Before any data
+existed it verified the gate against inputs *constructed to break it* — both sides of the n=100
+boundary (2 below passes, 3 fails), the non-integer allowance at n=150, a flag disqualifying despite
+a clean clock, and 300 games containing two voids correctly refused as an interim look at 298. Real
+data exercises a boundary only by luck, so the gate's **logic** is already independently confirmed.
+What the 04:00 pass adds is a check of the specific computation on the real numbers. Valuable, but
+not the load-bearing half.
+
+**If no blind reader is available**, run the adjudication alone and **record in the row that the
+blind pass did not happen**. Do not have someone who has already seen the numbers perform it and
+describe it as a blind review — that is worth less than nothing, because it puts a claim of
+independent verification into the record where none exists. An honest "no second reader was
+available" costs the row a sentence; a fabricated one costs it its credibility.
+
 ## 4. Writing the `RESULTS.md` row — four things it must say
 
 - **Both gates**, with the date each was written, and the underlying distribution: count below
