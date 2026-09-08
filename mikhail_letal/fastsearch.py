@@ -152,6 +152,7 @@ from mikhail_letal.search import (
     UPPER,
     SearchResult,
 )
+from mikhail_letal.timing import DEFAULT_PARAMS, TimeParams, should_start_next_depth
 
 # The margins as an array: numba indexes an array with a runtime integer, a Python tuple only
 # with a constant one.
@@ -1191,14 +1192,18 @@ class FastEngine:
         hard_deadline: float,
         max_depth: int = 64,
         node_limit: int | None = None,
+        params: TimeParams = DEFAULT_PARAMS,
     ) -> SearchResult:
         """Search ``board`` and return the best move found within the limits.
 
         ``history`` holds the position keys (``fastboard.position_key``) of every earlier position
         of the game, the root included; any of them reached inside the tree is scored as a draw.
-        ``soft_deadline`` is the ``perf_counter()`` time after which no new iteration starts;
-        ``hard_deadline`` aborts the search wherever it is. ``node_limit`` overrides the cap
-        derived from the measured node rate.
+        ``soft_deadline`` is the target: after each completed iteration the next one is started
+        only if it is predicted to finish inside it, from the time the completed iterations took
+        (``timing.should_start_next_depth``, which also stretches the target for an unsettled root
+        move and cuts it for a settled one). ``hard_deadline`` aborts the search wherever it is,
+        and bounds everything that rule does. ``node_limit`` overrides the cap derived from the
+        measured node rate.
         """
         start = time.perf_counter()
         st = self.state
@@ -1239,6 +1244,12 @@ class FastEngine:
         # A forced move needs no deep search; one iteration gives it a score and banks the time.
         limit = 1 if count == 1 else max(1, min(max_depth, MAX_PLY - 1))
 
+        # What the next iteration is expected to cost is read off these: how long each completed
+        # depth took, and how settled the root move is (see timing.should_start_next_depth).
+        iteration_times: list[float] = []
+        iteration_start = start
+        stable_depths = 0
+
         for depth in range(1, limit + 1):
             score, move = self._search_root_aspirated(
                 count, depth, best_move, best_score, completed_depth
@@ -1256,8 +1267,23 @@ class FastEngine:
                     # none, and the ordering has put the most promising one first.
                     best_move = self._first_root_move
                 break
+            # How settled the root is: iterations in a row that kept the same best move, and how
+            # far the score fell at this one (negative when it rose).
+            stable_depths = stable_depths + 1 if completed_depth and move == best_move else 0
+            score_drop = best_score - score if completed_depth else 0
             best_move, best_score, completed_depth = move, score, depth
-            if time.perf_counter() >= soft_deadline:
+            now = time.perf_counter()
+            iteration_times.append(now - iteration_start)
+            iteration_start = now
+            if not should_start_next_depth(
+                now - start,
+                iteration_times,
+                soft_deadline - start,
+                hard_deadline - start,
+                stable_depths,
+                score_drop,
+                params,
+            ):
                 break
             # A mate in n plies found at depth >= n cannot be shortened by searching deeper.
             if abs(score) >= MATE_THRESHOLD and MATE_SCORE - abs(score) <= depth:

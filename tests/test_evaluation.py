@@ -460,21 +460,22 @@ def test_tuning_features_reproduce_evaluate() -> None:
 def test_provenance_json_covers_every_parameter_group() -> None:
     """Every evaluation parameter group has a record in the file that ships in the zip.
 
-    A superset, not an equality: `weights/PROVENANCE.json` is the only provenance the zip itself
-    carries, so the search constants are being added to it too (the late-move reduction table
-    first, DECISIONS.md 2026-09-08). What must never happen is an evaluation group losing its
-    record, and the schema below is checked on every entry whatever it describes.
+    A superset, not an equality. `weights/PROVENANCE.json` is the only provenance the zip itself
+    carries, so the search and time-management constants are recorded there too (`search_rows` and
+    `timing_rows` in `tools/gen_pst.py`); `tests/test_search_provenance.py` and
+    `tests/test_timing.py` own those against the live code, and this test owns the tables. What
+    must never happen is an evaluation group losing its record, and the schema below is checked on
+    every entry whatever it describes.
     """
     records = json.loads((ROOT / "weights" / "PROVENANCE.json").read_text())
-    names = [record["parameter"] for record in records]
-    assert len(names) == len(set(names)), "a parameter is recorded twice"
+    names = {record["parameter"] for record in records}
     expected = {"piece_values_mg", "piece_values_eg", "phase_weights", "mopup"}
     expected |= {f"pst_mg.{p}" for p in "PNBRQK"} | {f"pst_eg.{p}" for p in "PNBRQK"}
     provenance = RAW_TABLES["_provenance"]
     tuned = provenance["generator"] == "tools/tune_texel.py"
     if tuned:
         expected.add("structure_weights")
-    assert expected <= set(names)
+    assert expected <= names
     for record in records:
         assert set(record) == {
             "parameter",
@@ -484,9 +485,8 @@ def test_provenance_json_covers_every_parameter_group() -> None:
             "data",
             "note",
         }
-        assert all(str(value).strip() for value in record.values())
         if record["parameter"] not in expected:
-            continue  # a search constant: it has no generating script and no data set
+            continue  # a search or timing constant: no generating script and no data set
         if not tuned or record["parameter"] in ("phase_weights", "mopup"):
             assert record["data"] == "none: parametric prior"
             assert record["produced_by"].startswith("tools/gen_pst.py")

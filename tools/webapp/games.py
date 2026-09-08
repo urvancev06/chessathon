@@ -91,7 +91,8 @@ KNOWN_LOG_KEYS: dict[str, str] = {
     "m": "move",
     "d": "depth",
     "n": "nodes",
-    "nps": "nps",
+    "nps": "nps",  # older logs only: the agent prints the score in its place now
+    "e": "score",
     "t": "time_ms",
     "s": "soft_ms",
     "h": "hard_ms",

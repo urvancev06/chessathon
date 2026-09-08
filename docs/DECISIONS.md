@@ -937,3 +937,314 @@ with another measurement, so the clock figures measure the load as much as the e
 
 The interval spans zero by a wide margin at twenty games, as it must. **This row is not evidence
 that the batch is an improvement**; the strength screen at the event time control is.
+## 2026-09-08 — The next depth is started on a prediction, not on a fixed share of the budget
+
+The platform's log for v1.0 shows per-move times in two lumps and nothing between: 1.5–3.0 s when
+an iteration finished and the engine stopped with a third of its budget unspent, or 8.9–10.1 s
+when it started a depth that ran into the hard ceiling. `next_iteration_fraction = 0.45` is the
+direct cause: iteration costs grow by 4–5x a depth, so a depth begun at 0.45 of the budget cannot
+finish inside it, and the rule has no way to tell the two cases apart.
+
+So the decision to start depth d+1 is now a prediction: `ratio × time(d)`, with the ratio measured
+from the last two completed iterations, clamped to 2.0–8.0 and defaulting to 4.5 before there is
+data, started only if it is predicted to end inside the target (`timing.should_start_next_depth`,
+called by both engines so the compiled one and the reference one cannot drift). The target is the
+soft budget times `iteration_target_factor`, stretched by half again when the root move changed at
+the last completed depth and cut to 0.7 when it has been stable for six iterations with a score
+that is not falling. Every target is clamped to the hard window, so the abort path and the flag
+invariant are untouched; the measurements are in docs/CALIBRATION.md.
+
+**Rejected: a target equal to the soft budget.** It is the obvious reading of "do not overrun the
+budget", and it spends 0.70 of the budget for 10.83 mean depth where 1.35 spends 0.80 for 11.17,
+because with geometric iteration costs a rule that insists the next depth *finish* by the target
+must stop a factor of `ratio` short of it. **Rejected: 1.75**, which reached the hard ceiling on
+the same positions — the behaviour being removed. **Rejected: the first easy-move rule** (stable
+for 4 iterations, half the target), which fired on nearly every move and spent 0.41 of the budget,
+less than the fixed rule it replaced; 6 iterations at 0.7 costs 0.17 of a ply and banks 16 %.
+
+**The divisor is refitted to how long games actually are.** Our five rated games under v1.0
+(`data/pgn/ours`, clocks verified against the platform's log) are the whole argument:
+
+| game | colour | result | plies | our moves | clock left |
+|---|---|---|---|---|---|
+| `1e1c9922` | W | win | 36 | 18 | 87.5 s |
+| `3ebceb52` | B | loss | 46 | 23 | 90.2 s |
+| `cf4043b1` | W | win | 102 | 51 | 31.6 s |
+| `f43e60b5` | W | win | 210 | 105 | 6.0 s |
+| `5504d7fa` | B | draw, fifty moves | 226 | 113 | 4.7 s |
+
+The two games that ended near the flag are the two longest, and the longer of them is the draw, so
+the tail of a long game is where the dropped half point actually is; the two shortest ended with
+roughly 90 s unspent. `moves_to_go = clamp(40 − moves // 2, 12, 40)` is wrong at both ends because
+it is calibrated for a game half the length of a real one: across the 1 697 finished ladder games
+collected by 2026-09-08 the
+median is 67 of our moves, and the median still to play is 67 at the start, 47 at our move 20, 31
+at 40 and about 25 from 50 on. The new line is that measured curve scaled by 0.70 — the share of
+its soft budget a move actually spends under the prediction rule — so that realised spending is
+the even split of the clock over the moves really left: `clamp(50 − 0.7 × moves played, 20, 50)`.
+Simulated over all 1 697 games (`tools/sim_time.py`), it moves the lowest clock any game reaches
+from 3.3 s to 5.9 s and the spend from our move 80 on from 0.68 s to 0.79 s, for 0.32 s a move
+less in the opening.
+
+**Rejected: 30 / 24 with the halving kept**, which was this change's first attempt, made against
+our four games before the ladder data existed: it front-loads the opening at 2.86 s a move and
+starves everything after move 50 (1.09 s), because a maximum that low reaches the floor after a
+dozen moves. **Rejected: a minimum of 16**, which is what the median remaining moves imply. Two
+criteria say 20. The soft formula alone balances the increment at
+`overhead_ms + moves_to_go_min × increment_ms × (1 / usage − increment_fraction)`, which at a full
+spend of the budget is exactly `panic_ms` = 1650 ms for 16 — a long game would settle on the clock
+at which the agent gives up searching — and 2050 ms for 20; and in the deep tail the
+remaining-moves distribution is skewed (median 27, mean 40 at our move 100), so the median
+under-states what is left in the games that get there. Over the ladder games of at least 90 of
+our moves, 20 keeps the lowest clock at 5.9 s against 4.6 s, and at 3.3 s against 2.6 s if a move
+spends 0.85 of its budget instead of the measured 0.70. What actually stops the clock falling
+further is neither constant: `floor_ms` and `hard_fraction` mean the plan never leaves less than
+the reserve after a move, so the clock cannot settle below about 2.05 s whatever the divisor is —
+the divisor decides how fast it gets there, not where it stops.
+
+**Rejected: any use of the opponent's clock.** Estimating it to play for a flag was investigated
+and the arithmetic kills it: with a 0.5 s increment the opponent's net drain was 0.063 s a move,
+so flagging from 10 s needs about 157 moves and the referee's 600-ply draw lands first.
+
+`overhead_ms` drops from 150 to 50 in the same change: the platform charges 0–2 ms (mean 1.1) over
+25 measured moves, and CALIBRATION.md's own rule is the maximum plus 50 ms. `panic_ms` deliberately
+stays at 1650 even though `overhead_ms + floor_ms` is now 1550, so that nothing within a second and
+a half of the flag behaves differently from the version that was measured.
+
+Every constant above is now also in `weights/PROVENANCE.json`, which is the only provenance
+artefact that ships (docs/ does not). Its rows are generated from `TimeParams` itself by
+`tools/gen_pst.py:timing_rows`, and `tests/test_timing.py` fails if the shipped file and the
+constants disagree, so the record cannot go stale the next time one of them is tuned.
+
+## 2026-09-08 — A king-danger term, counting attackers rather than open files
+
+The evaluation had exactly one king term, `king_shield`, and nothing that knew what an attack
+looked like. Round 70 was lost by castling long into a queen already standing on b3
+(`handoff/FINDING-king-safety.md`, Yan): the search was not short of depth — Yan re-ran the
+critical positions with sixteen times the node rate and four to five extra plies and none of the
+three decisions changed — it was short of a reason to dislike the position.
+
+**Chosen:** attack units into the king's 3×3 zone. Each enemy knight, bishop, rook or queen whose
+attacks reach the zone contributes a weight once, however many zone squares it touches; the
+penalty is `KING_DANGER_SCALE × units²`, capped, middlegame only, and skipped entirely while the
+king still has two of its own shield pawns.
+
+**Rejected: the open-file term** (Yan's `ks1`), which was the cheaper option and the one the
+compiled evaluation could compute almost for free, because `fasteval` already builds per-file pawn
+summaries. Two reasons. It had the wrong polarity in Yan's own measurement — after `cxd4` the
+c-file still held our pawn on c6, so "no own pawn on the king's file" never fired — and, decisively,
+**it would not have fired in the game it was meant to explain.** Round 70 was not lost down an open
+file; it was lost to pieces arriving. A term that is cheap and silent on the one position we have
+evidence for is worse than a dearer term that speaks.
+
+**Rejected: counting attacked squares** rather than attackers. What decides a king hunt is how many
+pieces arrive, not how much of the box each one covers; counting squares would let one long-range
+bishop outweigh a knight and a queen together.
+
+**Why the cost objection no longer holds.** Yan measured four variants and rejected three on node
+rate, the textbook attacker-count shape (`ks5`) worst at −22 %/−26 %. Those figures were taken on
+the interpreted engine, where an evaluation cost **8.3 µs**; it now costs **204 ns**, so evaluation
+went from roughly half the cost of a node to about a fifth of it. Re-measured on the compiled
+engine at a **fixed node count** (so search shape cannot confound it), median of five runs: −0.6 %
+from the start position, +2.4 % in a quiet middlegame, −2.0 % in the round-70 position and
+**+11.0 % with both kings open**. The first and third are inside the noise. The term is free where
+the shelter gate skips it and costs about a tenth of the node rate where it actually runs, which is
+the trade the gate exists to make.
+
+**Kept from Yan's work:** the shelter gate, which was his one transferable result, as a named
+constant (`KING_DANGER_SHELTERED_PAWNS`) rather than an inlined 2 — whether its blindness is still
+worth paying for at 204 ns is a question for the arena, not for a comment.
+
+**Status: unmeasured in games.** On the three round-70 positions the compiled engine now declines
+`8...O-O-O` and plays `h6` instead; it still plays `Ne2+` at move 20 and `Nxd4` at move 22. This
+earns a promotion match against `versions/v1.0`, not a place in the zip, and the term sits behind
+`KING_DANGER_TERM` / `E_KING_DANGER_ON` so the match can switch it off.
+
+**Correction, same day, from Yan's PR #4.** This entry first called the move-20 and move-22
+blunders "tactical losses rather than king-safety ones". That was wrong, and the mistake was to
+infer a cause from a term's silence. Yan built four king-danger variants -- `expo` (king virtual
+mobility plus queen proximity), `units` (weighted attackers, quadratic: the same family as the term
+above), `files` (open lines toward the king) and `storm` (shield deficit plus pawn storm) -- all
+parity-checked, all cheap (-0.6 % to +4.9 % nps), and **every one reproduces all three blunders**.
+
+His diagnosis is structural, not a weight wanting tuning. For the black king on c8 the virtual
+mobility is **6, the floor, before `22...Nxd4`, after it, and after the correct `22...Nf4` alike**:
+the king's own rook on d8 blocks east, its own pawn on c6 blocks south, its own queen on e6 blocks
+the diagonal. The c-file opens *behind* the c6 pawn as the king sees it, so no exposure count moves,
+and what remained was a queen-distance term identical for every candidate. **A king's own crowding
+pieces suppress every exposure measure exactly when the danger is worst.** So these were king-safety
+failures that this whole family of terms cannot see, not tactical oversights -- the danger was a
+half-open file an enemy rook could arrive down, which is a fact about enemy access rather than about
+where the king could walk.
+
+The consequence for the term above: keep it and screen it **on general merit** -- king safety is
+something engines have and ours did not -- but it must not be claimed to address round 70. It
+declines the losing castle at move 8 and nothing more, which is exactly what Yan's result predicts.
+And if the screen comes back inside the noise, the next step is not a fifth exposure variant.
+
+## 2026-09-08 — Pre-registered: what the bundle match result will mean
+
+Written at 21:2x, while the match is running and **before any result exists**. That timing is the
+whole value of this entry: a promotion rule decided after seeing the number is not a rule, it is a
+rationalisation, and the deviation below would be indefensible if it were invented to fit an
+awkward result. The operator delegated the decision ("do the best idk"); it is recorded here in his
+name and with the reasoning exposed, so a judge can disagree with the judgement rather than wonder
+whether one was made.
+
+The match: `v1.1-bundle-vs-v1.0-real`, 300 games in three chunks of 100, real clock, against
+`versions/v1.0`. It measures **two** changes together — the timing refit (`82b20e2`) and the
+king-danger term (`897e1e2`) — which is the right thing for the shipping question ("is what we
+would upload better than what is uploaded") and cannot attribute the result to either half.
+
+**The rule, fixed in advance:**
+
+1. **Interval above zero** → promote. This is CLAUDE.md's rule, unchanged, and needs no argument.
+2. **Point estimate negative, or lower bound at or below the non-inferiority margin** → revert both
+   changes; v1.0 ships. The margin is **−40 Elo at the full 300 games**, scaled by `sqrt(300 / n)`
+   if fewer games are played (−49 at 200, −69 at 100).
+
+   The scaling is not a loophole, it is the correction that keeps the margin meaning one thing. A
+   *genuinely neutral* change returns `elo_low` of −35.3 at 300 games, **−43.4 at 200 and −61.9 at
+   100** (computed from `tools.arena_openings.statistics` at a 20 % draw rate). A fixed −40 would
+   therefore pass a neutral result at 300 games and reject the same neutral result at 200 — turning
+   "did a chunk survive" into a verdict on the engine. −40 was chosen to sit just outside the width
+   of a neutral 300-game interval: wide enough not to reject a change that is genuinely level,
+   tight enough to catch a real regression.
+
+   Consequence worth stating plainly: at 300 games this margin is **not the binding constraint** —
+   any non-negative point estimate clears it. The conditions that actually decide case 3 below are
+   the non-negative point estimate and the clock.
+3. **Interval straddles zero, point estimate at or above zero, lower bound above the margin, *and*
+   the safety condition below holds** → promote, and record in `RESULTS.md` and the report that it
+   shipped on the **safety** criterion, not the Elo rule.
+
+   **The safety condition, stated in what this match actually records.** The first draft of this
+   entry said "the lowest-clock figure improves against v1.0". That cannot be evaluated:
+   `arena_openings` records `agent_low_clock_ms`, "the lowest clock **the agent** had", and in a
+   v1.1-versus-v1.0 match the agent is v1.1. The opponent's clock is never written down, so there
+   is no v1.0 figure in the run to compare against, and v1.0's existing rows were played against
+   Stockfish at different game lengths and are not comparable. A criterion that cannot be computed
+   is not a criterion, and discovering that after the number arrived would have meant choosing an
+   interpretation to fit it.
+
+   So the condition is absolute rather than comparative, which is arguably what it should have been
+   from the start — the risk being reduced is running out of clock, not being relatively better at
+   not running out:
+
+   - **no game lost on time**: `flag` appears in no chunk's terminations (it is in
+     `harness.referee.FAILED_TERMINATIONS`, so it is recorded), **and**
+   - **`low_clock_ms` stays above 5 000 ms** across all 300 games — three times `panic_ms` (1 650),
+     the clock below which `get_move` abandons the search and plays a fallback. A run that never
+     comes within three times that of the panic floor did not survive by luck.
+
+   A v1.0 comparison would need its own run and is **not** a condition of this decision.
+
+**Why case 3 is a deviation worth making.** The strict rule assumes the change is trying to buy
+Elo. The timing refit is not: it exists because two of our seven rated games finished on 4.7 s and
+6.0 s, and a flag loses the game outright. A 300-game match measures that badly, because most games
+never reach the tail where the constant bites — the effect is concentrated in the minority of long
+games and diluted across the rest. Refusing to ship a measured risk reduction because a
+badly-matched instrument returned "not proven" would be following the rule's words against its
+purpose. `low_clock_ms` is recorded by the arena already, so case 3 is decided on a measurement
+rather than on the argument above.
+
+**What case 3 does not license.** Not a positive point estimate alone; not "the simulation says so";
+not king safety, which has no independent safety argument and rides along on the bundle. If the
+bundle ships under case 3, the king-danger term ships unproven and the record must say so.
+
+**Attribution, either way.** The confounding is accepted for the upload decision, not for the
+record. Once the calendar correction is accounted for there are roughly nine six-hour slots left
+before the Friday 11:00 cutoff, so a timing-alone match against `versions/v1.0` runs afterwards for
+the report regardless of what is uploaded. Shipping fast and knowing why are not in competition
+here; there is room for both.
+
+### Amendment 4, and the operative rule restated in full
+
+Two structural defects, found by `chessathon-64` auditing the entry above, both fixed **before any
+result exists**. The rule has now been amended four times in one evening; patching it a fifth time
+would leave a decision procedure nobody could state without reading the diffs, so the whole of it
+is restated here and **this section supersedes the numbered cases above**. Those remain as written,
+unedited, because how the rule got here is part of the record.
+
+**Defect A: optional stopping.** The rule permitted deciding after chunk A, B or C, and calibrated
+the margin at each. Fixing the interval's *width* at each `n` does nothing about the multiplicity
+of *looks*, which is a different failure. Simulated over 20 000 matches, a genuinely level change
+at a 20 % draw rate:
+
+| truly level change | one look at pooled 300 | promote at first favourable chunk |
+|---|---|---|
+| case 1 fires (interval above zero) | 2.60 % | **5.71 %** |
+| case 3 gate fires (point estimate ≥ 0) | 51.22 % | **70.35 %** |
+
+64 quantified the first row. The second is the one that matters, because case 3 is the path most
+likely to fire, and there best-of-three turns a coin flip into a 70 % chance of promoting a change
+worth nothing. A pre-registration that says "decided in advance" while permitting best-of-three is
+performing the ritual and skipping the substance.
+
+**Defect B: the rule was not exhaustive, and the safety condition gated the wrong case.** A
+straddling interval with a non-negative point estimate, a lower bound above the margin, *and* a
+failed safety condition matched no case at all — which is exactly the situation a pre-commitment is
+for, because it is the one where "the Elo is fine, ship it" is tempting. Worse, case 1 promoted on
+the interval alone with **no** safety condition, so a build that flagged a game would have shipped
+on strength — in a change whose entire rationale is that a flag loses the game outright.
+
+**The operative rule.**
+
+**Step 1 — the safety gate, applied first and to every case.** Over all games actually completed:
+no `flag` termination in any chunk, and `low_clock_ms` above 5 000 ms (three times the 1 650 ms
+`panic_ms` floor). **If this fails, nothing is promoted, whatever the Elo shows**, and the failure
+is recorded in `RESULTS.md` as the reason. A flag in 300 games is disqualifying on its own.
+
+**Step 2 — one look, on the pooled total.** The Elo decision is taken **once**, on every game
+completed, whatever that number turns out to be. The chunks exist to bound the cost of a crash, not
+to provide three chances. An early chunk may **stop** the match for futility — a disaster visible at
+100 games costs nothing to act on, and stopping early can only make the decision more conservative —
+but **no chunk may promote**. Asymmetric stopping needs no alpha-spending arithmetic because it
+errs in the safe direction.
+
+**Step 3 — the Elo decision, exhaustive over what remains.** With `margin = −40 × sqrt(300 / n)`:
+
+| pooled result | outcome |
+|---|---|
+| lower bound above zero | promote |
+| point estimate < 0, **or** lower bound ≤ margin | revert both changes; v1.0 ships |
+| otherwise (straddles, point estimate ≥ 0, lower bound > margin) | promote, recorded as shipping on the **safety** criterion and not the Elo rule |
+
+The three rows are mutually exclusive and cover every case, given step 1 has passed. King safety
+still has no independent safety argument: if the bundle ships by the third row, the king-danger
+term ships unproven and the record says so.
+
+### Amendment 5: the futility stop gets a number
+
+`chessathon-5a` pointed out that "stop if chunk A is a disaster" had no threshold, and that picking
+one after seeing chunk A would be a discretionary stop dressed as a rule — the same species as
+defect A above, even though it errs safe. Proposed by 5a blind, at 21:4x, before chunk A landed;
+accepted here after checking what it does.
+
+**The rule: stop the match if and only if chunk A's 95 % interval has an upper bound at or below
+50 %** — that is, the *optimistic* end of the interval is still a regression. At n = 100 and a 20 %
+draw rate that requires a score of **41.0 % or worse**, roughly −60 Elo as a point estimate.
+
+Simulated over 20 000 chunk-A runs:
+
+| true strength of the change | probability the rule stops the match |
+|---|---|
+| level (0 Elo) | 2.56 % |
+| −35 Elo | 20.95 % |
+| −70 Elo | 62.72 % |
+| −140 Elo | 99.39 % |
+
+It stops nearly every catastrophe, most large regressions, and a level change one time in forty.
+It **can only reject, never promote**, so it spends no alpha against the promotion decision, and a
+false stop costs machine time and reverts to v1.0 — which is the safe default and a build we
+already have. Applied at chunk A only: by chunk B two thirds of the games are already played and
+the saving no longer justifies another look.
+
+**Tree freeze, recorded because it is not obvious and it constrains everyone.** `arena_openings`
+resolves the agent under test to the **repo root** (`settings.agent.resolve()`), and
+`harness/sandbox.py` spawns a fresh subprocess per game from that directory. **The working tree is
+the live agent for the whole run.** So while a match is up: no merge to `main`, no edit to
+`agent.py` or `mikhail_letal/`, or the pooled result becomes a mixture of two engines with no record
+of which game ran which. `docs/` is safe apart from `RESULTS.md`, which each chunk appends to as it
+finishes. This is also why the three chunks run sequentially rather than at once: 24 processes on 16
+cores would manufacture exactly the flags the safety gate exists to detect.

@@ -44,7 +44,7 @@ from mikhail_letal.fastsearch import (
     new_state,
     warm_up,
 )
-from mikhail_letal.search import SearchResult
+from mikhail_letal.search import Engine, SearchResult
 from mikhail_letal.warmup import arm, budget
 from tests.test_fastboard import playout_boards, sample_starts
 
@@ -159,20 +159,26 @@ def test_an_expired_deadline_skips_every_phase_and_still_returns() -> None:
     assert engine.node_rate == DEFAULT_NODE_RATE
     arm(None)  # the budget is shared and `warm_up` only sets its deadline: start its log empty
     try:
-        spent = warm_up(engine, deadline=time.perf_counter() - 1.0)
-        skipped = list(budget().skipped)
+        # `budget()` is one shared record whose `skipped` list accumulates across calls, so the
+        # test arms it itself rather than reading whatever earlier tests (or the agent import)
+        # happened to leave in it. `arm` resets the accounting; `warm_up` only sets the deadline.
+        arm(time.perf_counter() - 1.0)
+        spent = warm_up(engine)
+        skipped = set(budget().skipped)
     finally:
         arm(None)  # the budget is shared, so put it back before the next test
     assert spent < 1.0  # nothing ran, so nothing was compiled
     assert engine.node_rate == DEFAULT_NODE_RATE
-    assert skipped == [
+    # Every phase of this module has to be in there. Membership, not an exact list: the order and
+    # any phases other modules record are not what this test is about.
+    assert {
         "fastsearch.helpers",
         "fastsearch.quiescence",
         "fastsearch.negamax",
         "fastsearch.tie_break",
         "fastsearch.samples",
         "fastsearch.node_rate",
-    ]
+    } <= skipped
 
 
 def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
@@ -444,6 +450,35 @@ def test_the_hard_deadline_is_respected() -> None:
     assert overshoot < 0.05, f"overran the hard deadline by {overshoot * 1000:.0f} ms"
     assert result.move is not None
     assert result.move in board.legal_moves
+
+
+def test_the_soft_target_stops_the_deepening() -> None:
+    """A soft target already in the past ends the search after one completed iteration, and one
+    sized for a couple of iterations stops well inside the hard window."""
+    board = chess.Board(BUSY_MIDDLEGAME)
+    ENGINE.new_game()
+    started = time.perf_counter()
+    shallow = ENGINE.search(board, [position_key(board)], started, started + 5.0)
+    assert shallow.depth == 1
+    assert not shallow.aborted
+
+    ENGINE.new_game()
+    started = time.perf_counter()
+    result = ENGINE.search(board, [position_key(board)], started + 0.30, started + 2.0)
+    elapsed = time.perf_counter() - started
+    # The prediction is what stops it: it neither runs to the hard deadline nor stops at the
+    # 0.45 share of the target that the fixed rule used to stop at.
+    assert result.depth >= 1
+    assert elapsed < 2.0, f"took {elapsed:.2f} s of a 2.0 s hard budget"
+
+
+def test_the_engines_agree_on_when_to_stop_deepening() -> None:
+    """The reference searcher runs the same rule, so both stop at the same soft target."""
+    board = chess.Board(BUSY_MIDDLEGAME)
+    started = time.perf_counter()
+    reference = Engine().search(board, {}, started, started + 5.0)
+    assert reference.depth == 1
+    assert not reference.aborted
 
 
 def test_dense_position_keeps_the_first_iteration_small() -> None:

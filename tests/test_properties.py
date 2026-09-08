@@ -26,6 +26,7 @@ import pytest
 pytest.importorskip("mikhail_letal.search")
 timing = pytest.importorskip("mikhail_letal.timing")
 import agent  # noqa: E402  (must follow the importorskip guards)
+from mikhail_letal import evaluation  # noqa: E402
 
 # Slack on top of the engine's hard budget: the test process, `chess.Board(fen)` and the assert
 # itself all run inside the measured window.
@@ -386,3 +387,25 @@ def test_fifty_move_room_is_passed_only_in_a_mop_up() -> None:
     # A pawn or any piece on the weaker side can reset the clock: no deadline is passed.
     assert agent._fifty_move_room(chess.Board("8/8/8/8/3k4/8/4P3/4KQ2 w - - 82 60")) is None
     assert agent._fifty_move_room(chess.Board("8/8/8/8/3kr3/8/8/4KQ2 w - - 82 60")) is None
+
+
+# --- the per-move log line ---
+
+
+def test_the_log_line_carries_a_signed_score_and_fits_the_platform_log() -> None:
+    """The platform keeps only the first and last 4 KB of our output, so the line has to stay
+    short enough for a long game to survive whole; and the score has to be unambiguous."""
+    assert agent._score_token(45) == " e +45"
+    assert agent._score_token(-12) == " e -12"
+    assert agent._score_token(0) == " e +0"
+    assert agent._score_token(None) == ""  # no search ran: the token is left out entirely
+    # A mate is a distance in moves behind a `#`, which cannot be read as centipawns.
+    assert agent._score_token(evaluation.MATE_SCORE - 5) == " e #+3"
+    assert agent._score_token(-(evaluation.MATE_SCORE - 6)) == " e #-3"
+
+    line = f"m e2e4 d 12/30 n 805926 t 805{agent._score_token(45)} s 3396 h 10189 c 120000"
+    assert len(line.encode()) <= 66, line
+    # The platform keeps the first 4 KB and the last 4 KB, 8 KB in all. At this length that is
+    # more than 130 of our moves, where the longest game we have played was 113 and the referee's
+    # own cap is 300 of them; the node rate that used to sit in the line was `n / t` anyway.
+    assert 8192 // (len(line.encode()) + 1) > 130

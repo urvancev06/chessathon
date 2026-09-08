@@ -33,6 +33,8 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
+from mikhail_letal.timing import DEFAULT_PARAMS
+
 ROOT = Path(__file__).resolve().parent.parent
 PST_PATH = ROOT / "weights" / "pst.json"
 PRIOR_PATH = ROOT / "data" / "tuning" / "prior_pst.json"
@@ -50,6 +52,303 @@ PIECE_VALUES_EG: dict[str, int] = {"P": 100, "N": 320, "B": 330, "R": 500, "Q": 
 # Game-phase weights: knights and bishops count 1, rooks 2, queens 4. With every non-pawn piece on
 # the board the sum is 4*1 + 4*1 + 4*2 + 2*4 = 24, which is ``PHASE_TOTAL`` in the evaluation.
 PHASE_WEIGHTS: dict[str, int] = {"N": 1, "B": 1, "R": 2, "Q": 4}
+
+
+# The time-management half of the shipped provenance record. The brief (§10) asks for the
+# time-management constants as well as the evaluation tables, and `weights/PROVENANCE.json` is the
+# only provenance artefact inside the zip (`docs/PROVENANCE.md` does not ship). Every value here is
+# read from `TimeParams` itself, so the shipped record cannot drift from the code that uses it;
+# `tests/test_timing.py` asserts the file matches this function.
+TIMING_RUN_ID = "2026-09-08"
+LADDER_DATA = (
+    "1697 finished ladder games (data/pgn/ladder-top, data/pgn/ladder-top50), collected from the "
+    "public game pages; our own five rated games in data/pgn/ours as the check"
+)
+PLATFORM_DATA = "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)"
+POSITIONS_DATA = (
+    "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and "
+    "10 of them at six clocks (60 moves a variant) for the before-and-after comparison"
+)
+
+
+def timing_rows(run_id: str = TIMING_RUN_ID) -> list[dict[str, str]]:
+    """Provenance records for every constant in `mikhail_letal.timing.TimeParams`."""
+    p = DEFAULT_PARAMS
+    sim = "tools/sim_time.py"
+    code = "code (mikhail_letal/timing.py)"
+    rows: list[tuple[str, str, str, str, str]] = [
+        (
+            "timing.increment_ms",
+            str(p.increment_ms),
+            code,
+            "agent contract (aichessathon.com/docs/agent-contract.md)",
+            "the increment the platform adds after each of our moves; not a choice",
+        ),
+        (
+            "timing.overhead_ms",
+            str(p.overhead_ms),
+            code,
+            PLATFORM_DATA,
+            "referee-charged minus self-measured move time was 0-2 ms, mean 1.1; docs/CALIBRATION"
+            ".md's rule is max + 50, so 52, taken as 50",
+        ),
+        (
+            "timing.moves_to_go",
+            f"max {p.moves_to_go_max}, min {p.moves_to_go_min}, decay {p.moves_to_go_decay}",
+            sim,
+            LADDER_DATA,
+            "the ladder games measure how many of our moves are left at each point (median 67 at "
+            "the start, falling about one a move to 25); the divisor is that curve scaled by the "
+            "0.70 of its budget a move spends. The minimum is 20 rather than 17 because at 16 the "
+            "settling clock equals panic_ms and the deep tail is skewed (median 27, mean 40)",
+        ),
+        (
+            "timing.increment_fraction",
+            str(p.increment_fraction),
+            code,
+            "none: brief section 6.2",
+            "spend most of the increment each move and keep a little; untuned",
+        ),
+        (
+            "timing.hard_multiplier",
+            str(p.hard_multiplier),
+            code,
+            "none: brief section 6.2",
+            "an iteration may overrun the soft target by this factor before it is aborted",
+        ),
+        (
+            "timing.hard_fraction",
+            str(p.hard_fraction),
+            code,
+            "none: brief section 6.2",
+            "no single move may spend more than this share of the clock",
+        ),
+        (
+            "timing.floor_ms / floor_fraction",
+            f"{p.floor_ms} ms, {p.floor_fraction}",
+            code,
+            "none: brief section 6.2",
+            "the reserve the budget never plans to dip into; with hard_fraction it is what keeps "
+            "the clock off the flag, and what stops a long game settling below about 2 s",
+        ),
+        (
+            "timing.panic_ms",
+            str(p.panic_ms),
+            code,
+            PLATFORM_DATA,
+            "below this the engine is skipped and the fallback plays; kept at the value the "
+            "platform measured under v1.0 even though overhead_ms + floor_ms is now 1550",
+        ),
+        (
+            "timing.next_iteration_fraction",
+            str(p.next_iteration_fraction),
+            code,
+            "none: brief section 6.2",
+            "no longer the normal rule: only the fallback for an iteration too short to predict "
+            "from, applied to the soft budget itself",
+        ),
+        (
+            "timing.iteration_ratio",
+            f"default {p.iteration_ratio_default}, clamped to "
+            f"[{p.iteration_ratio_min}, {p.iteration_ratio_max}], measurable above "
+            f"{p.ratio_measurable_s} s",
+            code,
+            PLATFORM_DATA + "; dev-box searches 2026-09-07 (median 4.3-5.2, maximum about 10)",
+            "the cost of depth d+1 over depth d, measured live from the last two iterations; the "
+            "clamp keeps one mis-timed iteration from stopping the search early or starting one "
+            "it cannot finish",
+        ),
+        (
+            "timing.iteration_target_factor",
+            str(p.iteration_target_factor),
+            code,
+            POSITIONS_DATA,
+            "how far past the soft budget the next iteration may be predicted to end: 1.0 spent "
+            "0.70 of the budget for mean depth 10.83, 1.35 spent 0.80 for 11.17, 1.75 reached the "
+            "hard ceiling. 1.35 x unstable_factor is still below hard_multiplier",
+        ),
+        (
+            "timing.unstable_factor",
+            str(p.unstable_factor),
+            code,
+            "none: hand-chosen at a textbook magnitude, untuned",
+            "a root move that changed at the last completed depth is worth half a budget more, "
+            "bounded by the hard ceiling like every other target",
+        ),
+        (
+            "timing.easy_move",
+            f"factor {p.easy_factor}, after {p.easy_stable_depths} iterations, score drop "
+            f"<= {p.easy_score_drop_cp} cp",
+            code,
+            POSITIONS_DATA,
+            "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first "
+            "attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule",
+        ),
+        (
+            "timing.cold_finish_fraction",
+            str(p.cold_finish_fraction),
+            code,
+            "none: same value as hard_fraction, and for the same reason",
+            "the share of the clock the first move may spend finishing a warm-up the import ran "
+            "out of budget for; at most one move of one game",
+        ),
+    ]
+    return [
+        {
+            "parameter": parameter,
+            "value_or_shape": value,
+            "produced_by": produced_by,
+            "data": data,
+            "run_id": run_id,
+            "note": note,
+        }
+        for parameter, value, produced_by, data, note in rows
+    ]
+
+
+# The search half of the shipped record. Brief §10 asks for "search margins (null-move R, LMR
+# table, futility margins, aspiration window), TT size: all of them", and until this existed the
+# zip documented the evaluation tables and nothing else -- leaving the constants a judge is most
+# likely to suspect of being copied with no answer at all. Every value is read from the module
+# that uses it, so the shipped record cannot drift; `tests/test_search_provenance.py` asserts it.
+SEARCH_RUN_ID = "2026-09-08"
+TEXTBOOK = "none: hand-chosen at textbook magnitude, untuned"
+
+
+def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
+    """Provenance records for every search constant that ships."""
+    from mikhail_letal import evaluation, fastsearch, search
+
+    code = "code (mikhail_letal/search.py)"
+    compiled = "code (mikhail_letal/fastsearch.py)"
+    rows: list[tuple[str, str, str, str, str]] = [
+        (
+            "search.null_move",
+            f"min depth {search.NULL_MOVE_MIN_DEPTH}, R = {search.NULL_MOVE_BASE_REDUCTION}"
+            f" + depth // {search.NULL_MOVE_DEPTH_DIVISOR}",
+            code,
+            "none: min depth chosen by measurement (see note)",
+            "textbook reduction; min depth 3 rather than 2 because at 2 a capture-rich middlegame "
+            "tripled the nodes to depth 5, null searches landing in quiescence at the widest layer",
+        ),
+        (
+            "search.late_move_reductions",
+            f"min depth {search.LMR_MIN_DEPTH}, first {search.LMR_FULL_DEPTH_MOVES} moves full,"
+            f" then a {len(search.LMR_TABLE)}x{len(search.LMR_TABLE[0])} table of"
+            f" trunc({search.LMR_BASE} + log(depth) * log(move) / {search.LMR_DIVISOR}),"
+            f" values {min(min(r) for r in search.LMR_TABLE)}"
+            f"-{max(max(r) for r in search.LMR_TABLE)}",
+            code,
+            TEXTBOOK,
+            "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a "
+            "fail-high. Generated from the formula at import rather than stored, so what ships is "
+            "the derivation and not a list of numbers; floored at 1 ply and capped at depth - 2 so "
+            "a reduced search is never shallower than depth 1",
+        ),
+        (
+            "search.aspiration",
+            f"from depth {search.ASPIRATION_MIN_DEPTH}, window {search.ASPIRATION_WINDOW} cp,"
+            f" widen x{search.ASPIRATION_WIDEN}, {search.ASPIRATION_MAX_FAILS} fails then full",
+            code,
+            TEXTBOOK,
+            "40 cp is under half a pawn, so a stable root re-searches rarely",
+        ),
+        (
+            "search.futility_margins",
+            json.dumps(list(search.FUTILITY_MARGINS)),
+            code,
+            TEXTBOOK,
+            "indexed by remaining depth: a minor piece at depth 1, two at depth 2; depth 0 is dead "
+            "because the search goes to quiescence there",
+        ),
+        (
+            "search.delta_margin",
+            str(search.DELTA_MARGIN),
+            code,
+            TEXTBOOK,
+            "quiescence skips a capture that cannot reach alpha even with the victim's value",
+        ),
+        (
+            "search.qs_evasion_plies",
+            str(search.QS_EVASION_PLIES),
+            code,
+            "none: chosen by measurement (see note)",
+            "quiescence searches every evasion this deep; 4 keeps an eight-queens-a-side position "
+            "under 100k nodes at depth 1, where an uncapped search never finished an iteration",
+        ),
+        (
+            "search.draw_tiebreak_margin",
+            str(search.DRAW_TIEBREAK_MARGIN),
+            code,
+            TEXTBOOK,
+            "'clearly ahead' for the root tie-break when every move scores a rule draw: a minor",
+        ),
+        (
+            "search.node_check_interval",
+            str(search.NODE_CHECK_INTERVAL),
+            code,
+            "none: chosen by measurement (see note)",
+            "how often the compiled search reads the clock; 1024 gave 25 ms mean and 65 ms worst "
+            "overshoot locally, and a perf_counter read costs ~60 ns, so 128 is effectively free",
+        ),
+        (
+            "search.max_ply",
+            str(search.MAX_PLY),
+            code,
+            "none: structural",
+            "recursion bound for search, quiescence and extensions together",
+        ),
+        (
+            "search.game_ply_cap",
+            str(search.GAME_PLY_CAP),
+            code,
+            "agent contract: a game reaching this many plies is a draw",
+            "not a choice; the opening position counts toward it",
+        ),
+        (
+            "search.transposition_table",
+            f"2^{fastsearch.TT_BITS} entries, cleared at move start above "
+            f"{search.TT_CLEAR_FRACTION:.0%} full",
+            compiled,
+            "none: sized by measurement (see note)",
+            "fixed numpy arrays, depth-preferred within a move and aged across moves; int-only "
+            "entries keep gen-2 GC pauses to ~14 ms where chess.Move values cost 143 ms",
+        ),
+        (
+            "search.eval_cache",
+            f"2^{fastsearch.EVAL_BITS} entries (compiled); {search.EVAL_CACHE_MAX_ENTRIES} "
+            "(reference engine)",
+            compiled,
+            "none: sized by measurement",
+            "static evaluations keyed by Zobrist; the cap holds a 20 s search under 100 MB",
+        ),
+        (
+            "search.history_bonus",
+            f"depth * depth, clamped at {search._HISTORY_MAX}",
+            code,
+            TEXTBOOK,
+            "cutoffs near the root are rarer and worth more; the clamp keeps quiet moves below the "
+            "killer band so ordering bands cannot invert",
+        ),
+        (
+            "search.mate_scores",
+            f"mate {evaluation.MATE_SCORE}, threshold {evaluation.MATE_THRESHOLD}",
+            "code (mikhail_letal/evaluation.py)",
+            "none: arbitrary large constants",
+            "a mate at ply p scores MATE_SCORE - p, so shorter mates outrank longer ones",
+        ),
+    ]
+    return [
+        {
+            "parameter": name,
+            "value_or_shape": value,
+            "produced_by": produced,
+            "data": data,
+            "run_id": run_id,
+            "note": note,
+        }
+        for name, value, produced, data, note in rows
+    ]
 
 
 class Param(NamedTuple):
@@ -366,6 +665,8 @@ def main() -> None:
     out_path.write_text(dump_json(document, 0) + "\n", encoding="utf-8")
     print(f"wrote {display(out_path)}")
     if out_path == PST_PATH:
+        records += timing_rows(today)  # the time-management half; see timing_rows
+        records += search_rows(today)  # the search half; see search_rows
         PROVENANCE_PATH.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {PROVENANCE_PATH.relative_to(ROOT)}")
 

@@ -70,6 +70,7 @@ def evaluate_running(board, mg, eg, phase) -> int     # everything that is not t
 def evaluate(board: chess.Board) -> int               # static evaluation, side-to-move perspective
 def is_mate_score(score: int) -> bool
 def pawn_structure(white_pawns: int, black_pawns: int) -> tuple[int, int]  # (mg, eg), White's view
+def king_danger(board, white_pawns: int, black_pawns: int) -> int          # mg only, White's view
 
 STRUCTURE_TERMS: bool                 # feature_flag("LETAL_EVAL_TERMS", True)
 STRUCTURE_WEIGHTS: dict[str, int]     # every structural weight, one line of rationale each
@@ -117,6 +118,15 @@ Behaviour:
     one or two ranks ahead of it (precomputed 64-square masks per colour).
   The pawn-only part is a pure function of the two pawn bitboards and is cached in
   `_PAWN_CACHE` (cap `PAWN_CACHE_MAX_ENTRIES = 50 000`, emptied when full).
+- **King danger** (`king_danger`, middlegame only, behind `KING_DANGER_TERM`). Separate from
+  `_structure` because it needs the board rather than bitboards alone, and separate from
+  `STRUCTURE_TERMS` so the two groups can be measured apart. For each king: skip entirely while it
+  still has `KING_DANGER_SHELTERED_PAWNS` (2) of its own shield pawns; otherwise count each enemy
+  knight, bishop, rook or queen whose attacks reach the king's zone (its own square and the up to
+  eight around it) once, weighted by `KING_ATTACK_UNITS`, and charge
+  `KING_DANGER_SCALE × units²` capped at `KING_DANGER_CAP`. Counted per attacking *piece*, not per
+  attacked square. Added to `mg` alone, so the phase blend tapers it out — which is why its test
+  positions live in `MIDDLEGAME_TERM_POSITIONS` and must carry non-zero phase to prove anything.
 - No randomness. `evaluate` itself is a pure function of the board; the searcher caches its
   results by piece placement and side to move (`Engine._evaluate`, below).
 
@@ -186,10 +196,11 @@ class Engine:
         self,
         board: chess.Board,
         history: Mapping[Key, int],          # keys of every earlier position in the game, incl. root
-        soft_deadline: float,                # perf_counter(): do not start an iteration after this
+        soft_deadline: float,                # perf_counter(): the target the next depth must fit in
         hard_deadline: float,                # perf_counter(): abort the search when reached
         max_depth: int = 64,
         node_limit: int | None = None,
+        params: TimeParams = DEFAULT_PARAMS, # the iteration-control constants (timing.py)
     ) -> SearchResult: ...
 
 # v0.2 feature switches, each feature_flag("LETAL_...", True); the arena's --env turns one off.
@@ -200,9 +211,10 @@ Behaviour (v0.2; the v0.1 searcher is this without the staged generation, the ca
 switched features, all of which were added under measurement, see DECISIONS.md):
 
 - Iterative deepening from depth 1. After each completed iteration, stop if
-  `perf_counter() >= soft_deadline`, if the score is a mate score with the shortest mate already
-  found at this depth, or if `depth >= max_depth`. The caller sets `soft_deadline` to
-  `start + next_iteration_fraction * soft_ms` (see timing).
+  `timing.should_start_next_depth` says the next depth is not predicted to finish inside the
+  target, if the score is a mate score with the shortest mate already found at this depth, or if
+  `depth >= max_depth`. The caller sets `soft_deadline` to `start + soft_ms` (see timing); the
+  search itself records how long each completed depth took and how settled the root move is.
 - Inside the search every `NODE_CHECK_INTERVAL = 128` nodes read the clock and raise
   `SearchAborted` past `hard_deadline` or past `node_limit`. On abort, return the best move of the
   last completed iteration, or the current iteration's best if the previously-best move was
@@ -366,16 +378,27 @@ promotion, castling and en passant positions.
 @dataclass(frozen=True)
 class TimeParams:
     increment_ms: int = 500
-    overhead_ms: int = 150          # calibrated after the first upload (docs/CALIBRATION.md)
-    moves_to_go_max: int = 40
-    moves_to_go_min: int = 12
+    overhead_ms: int = 50           # calibrated 2026-09-08 (docs/CALIBRATION.md): measured 0-2 ms
+    moves_to_go_max: int = 50       # all three from tools/sim_time.py over 1697 ladder games
+    moves_to_go_min: int = 20
+    moves_to_go_decay: float = 0.7  # divisor moves dropped per move of ours played
     increment_fraction: float = 0.8
     hard_multiplier: float = 3.0
     hard_fraction: float = 0.25
     floor_ms: int = 1500
     floor_fraction: float = 0.05
-    panic_ms: int = 1650            # below this, skip the engine and play the fallback (= overhead + floor)
-    next_iteration_fraction: float = 0.45
+    panic_ms: int = 1650            # below this, skip the engine and play the fallback
+    next_iteration_fraction: float = 0.45   # fallback only: an iteration too short to predict from
+    iteration_ratio_default: float = 4.5    # cost of depth d+1 over depth d, before it is measured
+    iteration_ratio_min: float = 2.0        # ... and the range the measured ratio is clamped to
+    iteration_ratio_max: float = 8.0
+    ratio_measurable_s: float = 0.001
+    iteration_target_factor: float = 1.35   # how far past soft the next depth may be predicted to end
+    unstable_factor: float = 1.5            # a root move that just changed gets a bigger target
+    easy_factor: float = 0.7                # a settled one gets a smaller one
+    easy_stable_depths: int = 6
+    easy_score_drop_cp: int = 30
+    cold_finish_fraction: float = 0.25
 
 @dataclass(frozen=True)
 class Budget:
@@ -394,7 +417,7 @@ def budget(
 ```
 
 ```
-moves_to_go = clamp(moves_to_go_max - own_moves_so_far // 2, moves_to_go_min, moves_to_go_max)
+moves_to_go = clamp(moves_to_go_max - int(own_moves_so_far * moves_to_go_decay), moves_to_go_min, moves_to_go_max)
 moves_to_go = min(moves_to_go, max(1, (plies_to_cap + 1) // 2))        # if given
 moves_to_go = min(moves_to_go, max(1, (fifty_move_room + 1) // 2))     # if given
 soft = (time_left_ms - overhead_ms) / moves_to_go + increment_fraction * increment_ms
@@ -404,6 +427,32 @@ hard = min(hard, time_left_ms - overhead_ms - floor)    # never plan to leave le
 soft = min(soft, hard)
 both clamped to >= 0
 ```
+
+```python
+def should_start_next_depth(
+    elapsed_s: float,                    # since the search started
+    iteration_times_s: Sequence[float],  # what each completed depth cost, in order
+    soft_s: float,                       # the soft budget as a window from the search's start
+    hard_s: float,                       # the hard budget, likewise
+    stable_depths: int,                  # completed depths that kept the previous best move
+    score_drop_cp: int,                  # how far the score fell at the last one
+    params: TimeParams = DEFAULT_PARAMS,
+) -> bool
+```
+
+```
+target = soft_s * iteration_target_factor
+target *= unstable_factor      if two depths are done and the best move changed at the last one
+target *= easy_factor          elif stable_depths >= easy_stable_depths and score_drop_cp <= easy_score_drop_cp
+target = min(target, hard_s)                       # a stretch never reaches past the abort point
+False                          if target <= 0 or elapsed_s >= target
+elapsed_s < next_iteration_fraction * target       if the last iteration is under ratio_measurable_s
+ratio = clamp(last / previous, ratio_min, ratio_max), or iteration_ratio_default with no measurable pair
+elapsed_s + ratio * last <= target                 otherwise
+```
+
+Guarantee: a `True` return implies `elapsed_s < hard_s`, so the rule can never start an iteration
+past the abort point. `tests/test_timing.py` asserts it over a grid of histories and windows.
 
 ## `mikhail_letal/gamestate.py`
 
@@ -626,8 +675,8 @@ def _break_draw_tie(pos, st, ev, count, best) -> int
 class FastEngine:                  # same interface as search.Engine
     def new_game(self) -> None
     def search(self, board: chess.Board, history: Sequence[int], soft_deadline: float,
-               hard_deadline: float, max_depth: int = 64,
-               node_limit: int | None = None) -> SearchResult      # search.SearchResult
+               hard_deadline: float, max_depth: int = 64, node_limit: int | None = None,
+               params: TimeParams = DEFAULT_PARAMS) -> SearchResult    # search.SearchResult
     node_rate: float               # measured nodes per second; the node cap is derived from it
 
 def warm_up(engine: FastEngine, deadline: float | None = None) -> float   # from agent.py
@@ -704,12 +753,12 @@ def get_move(fen, time_left_ms) -> str:
             b = budget(time_left_ms, STATE.own_moves, PARAMS,
                        plies_to_cap=600 - board.ply(), fifty_move_room=<100 - halfmove_clock in a mop-up, else None>)
             result = ENGINE.search(board, STATE.fast_history,
-                                     soft_deadline = t0 + PARAMS.next_iteration_fraction * b.soft_ms / 1000,
-                                     hard_deadline = t0 + b.hard_ms / 1000)
+                                     soft_deadline = t0 + b.soft_ms / 1000,
+                                     hard_deadline = t0 + b.hard_ms / 1000, params = PARAMS)
             move = result.move if result.move in legal else fallback_move(board, legal)
     except Exception: log one line with the exception class; move = fallback_move(board or chess.Board(fen), legal or list(...))
     board.push(move); STATE.record_own_move(board)
-    print one compact line (≤ 120 bytes): move, depth/seldepth, nodes, nps, elapsed ms, soft/hard ms, clock
+    print one compact line (≤ 120 bytes): move, depth/seldepth, nodes, elapsed ms, score, soft/hard ms, clock
     return move.uci()
 ```
 
@@ -746,8 +795,13 @@ opening's full clock. Measured import from the extracted zip: 19–29 s, against
 
 - No `random`, no `HARNESS_SEED`, no time-dependent ordering except the deadline itself.
 - Each move prints one line, for example
-  `m e2e4 d 5/9 n 31240 nps 10413 t 3001 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
-  nodes, nps, elapsed ms, soft ms, hard ms, clock ms). Init prints one line with the load time,
+  `m e2e4 d 5/9 n 31240 t 3001 e +45 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
+  nodes, elapsed ms, score, soft ms, hard ms, clock ms). The score is from the side to move, with
+  the sign always written, and a mate is `e #+3` or `e #-3` — a distance in moves that cannot be
+  read as centipawns. It is left out entirely when no search ran (a forced move, a panic clock or
+  an error). The node rate used to sit where the score is: it was `n / t`, and the platform keeps
+  only the first and last 4 KB of our output, so a redundant token costs moves off the end of a
+  long game's log. Init prints one line with the load time,
   the compile time, the warm-up budget, how many phases it had to skip and the measured node
   rate, and `get_move` adds one `jit:` line if any compiled function gains a specialisation
   after the warm-up.

@@ -39,7 +39,7 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["docs"]  # ruff would reflow the code blocks inside the Markdown design notes
+extend-exclude = ["docs", "handoff"]  # prose and one-off analysis scripts, not shipped code
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
