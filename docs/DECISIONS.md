@@ -993,8 +993,11 @@ defect A above, even though it errs safe. Proposed by 5a blind, at 21:4x, before
 accepted here after checking what it does.
 
 **The rule: stop the match if and only if chunk A's 95 % interval has an upper bound at or below
-50 %** — that is, the *optimistic* end of the interval is still a regression. At n = 100 and a 20 %
-draw rate that requires a score of **41.0 % or worse**, roughly −60 Elo as a point estimate.
+50 %** — that is, the *optimistic* end of the interval is still a regression. That works out at a
+score of **≈41 % at n = 100 and a 20 % draw rate; derived from the upper-bound rule, not an
+independent threshold**, and it moves with the draw rate. The upper-bound form is the rule and the
+only one in the code; the percentage is quoted because the derivation makes it legible, and labelled
+as derived so nobody later treats 41 % as a second condition to satisfy.
 
 Simulated over 20 000 chunk-A runs:
 
