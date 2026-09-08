@@ -5,7 +5,7 @@ Everything you (the operator) do by hand, in order. Claude never touches your ac
 ## 0. What you are submitting
 
 - **Build:** v0.2.1, git tag `v0.2.1`, commit `f3392bf`, on https://github.com/urvancev06/chessathon. Engine identical to tag `v0.2`; only comments and docs differ.
-- **File:** `submission.zip` in the repo root (`~/dev/chessathon/submission.zip`), 35 087 bytes,
+- **File:** `submission.zip` in the repo root (`~/dev/chessathon/submission.zip`), 35 238 bytes,
   106 035 bytes unzipped, sha256 `4f3ac2e27dcacee259eedaab745f8e43e3b629c917044095a3b0839fce46e280`.
   Check it with `sha256sum submission.zip` before uploading.
 - **Contents (nine files, `agent.py` at the root):** `agent.py`, `mikhail_letal/__init__.py`,
@@ -34,9 +34,9 @@ If validation fails, the previous valid build keeps playing; nothing is lost. Pa
 
 - Rated rounds run hourly 08:00–22:00 London. A new build starts with a provisional rating.
 - Locally v0.2 beat the starter's minimax baseline 39–1 and beat our own v0.1 by roughly
-  300 Elo at the real clock. A fast-clock reading against rating-limited Stockfish put v0.1 at
-  about 1500–1850 on Stockfish's scale; v0.2 is stronger, but the number for v0.2 has not been
-  measured yet. Treat every rating as an estimate until the ladder reports one.
+  300 Elo at the real clock. 300 real-clock games against rating-limited Stockfish put it at
+  about 2050 on the CCRL-style scale (interval 1940–2170), FIDE-equivalent roughly 1840–2360.
+  Treat every rating as an estimate until the ladder reports one.
 - Uploads close **Thursday 11 September 11:00 London (12:00 in Spain)**. The last valid build
   plays the 13-round Swiss that afternoon. Only the Swiss counts for qualification.
 
@@ -44,7 +44,7 @@ If validation fails, the previous valid build keeps playing; nothing is lost. Pa
 
 ```
 cd ~/dev/chessathon
-git checkout v0.2            # or main for the latest
+git checkout v0.2.1          # or main for the latest
 uv run python -m harness.package
 unzip -l submission.zip      # nine files, agent.py at the root
 sha256sum submission.zip
@@ -70,7 +70,9 @@ engine, watch it against Stockfish at a chosen Elo, analyse games, read the docs
 `tectonic` or Overleaf also work). Sections: competition and result; rules compliance and the
 memorised-code checks; architecture; board and move generation; search; evaluation; time
 management; endgames; safety; testing; rating estimate; limitations. Red `[PENDING …]` markers
-show the numbers still to fill (platform validation, ladder rating, Stage 3 rating estimate).
+show the numbers still to fill: the platform validation log, its calibration, and the ladder
+rating. The rating estimate (section 11) is measured and filled in. The compiled PDF is at
+`docs/build/report.pdf`, 18 pages.
 
 ## 6. What to say if a judge asks "did you write this?"
 
