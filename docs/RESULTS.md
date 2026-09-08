@@ -96,3 +96,26 @@ the time-management check the brief's §7.4 asks for. Both are on the dev box, n
 
 Maximum-likelihood fit over all 300 games, draws as ½: **CCRL-40/4-scale ≈ 2050 (95% interval 1940–2170, bootstrap 2000–2110 plus ±100 yardstick calibration in quadrature); FIDE-equivalent ≈ 1840–2360 (Route A: CCRL−100 lower bound, TalkChess 2800−0.7×(2800−CCRL) upper bound); chess.com Rapid-equivalent ≈ 1820–2340; chess.com Blitz-equivalent ≈ 1730–2700 (ChessGoals table, interpolated). Route B (Sunfish) not run. Estimates built on a rating-limited reference engine and a survey table; honest uncertainty ±200 or more on the human scales.** Caveats: Stockfish's UCI_Elo is calibrated for 120 s + 1 s and anchored to CCRL 40/4; 60 games per level; the 2200 and 2400 scores are not monotonic (limited-strength noise); games shared the machine six at a time; zero flags, lowest clock 1 889 ms.
 | numba-fuzz-random | . | baselines/random | 3+0.05 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 8 | 0.50 0.60 1.45 / 7.32 7.51 5.22 | data/openings.txt |
+
+### 2026-09-08 — Stage 1 phase 2: the compiled engine against the Python one (dev box, solo)
+
+Same machine, same positions, same three-second budget, both engines started from a cleared table.
+Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.search` in turn with
+`soft_deadline = hard_deadline = now + 3.0` (recorded in the commit message of this row).
+
+| position | compiled: depth/seldepth, nodes, nps | Python: depth/seldepth, nodes, nps | ratio |
+|---|---|---|---|
+| standard start | 12/28, 2 205 699, 735 205 | 9/21, 161 792, 53 886 | 13.6x nodes, +3 plies |
+| middlegame (`r4rk1/1pp1qppp/…`) | 10/30, 2 074 624, 691 482 | 6/28, 150 784, 50 232 | 13.8x nodes, +4 plies |
+| rook ending (`8/2p5/3p4/KP5r/…`) | 14/26, 2 738 176, 912 598 | 10/19, 206 336, 68 760 | 13.3x nodes, +4 plies |
+
+| measurement | value | how |
+|---|---|---|
+| import + compile, extracted zip | 18.5 s | `harness.package` smoke games, `init` log line; platform budget is 90 s |
+| import + compile, in place | 16.9–17.3 s | `import agent`, `init` log line |
+| peak RSS after three moves | 349 MB | `resource.getrusage(RUSAGE_SELF).ru_maxrss`; platform cap is 2 GB |
+| compiled evaluation | 204 ns (opening), 129 ns (rook ending) | 500 000 calls inside a jitted loop |
+| Python evaluation, same positions | 8 312 ns, 2 666 ns | 20 000 calls |
+| `numba.objmode` clock read | 301 ns | 100 000 reads inside a jitted loop; hence `NODE_CHECK_INTERVAL = 512` |
+| Python → jitted call boundary | 4.0 µs | 20 000 calls of `negamax` at depth 0; why the root is Python (DECISIONS.md) |
+| compile time if the root is compiled too | 34.2 s total | measured per function before the root was moved to Python: `negamax` 13.4 s, `_search_root` 6.3 s, aspiration 2.7 s, deepening loop 5.4 s |

@@ -1,0 +1,17 @@
+. vs versions/v0.2: 300 games at 10000+100 ms, ply cap 600, 8 worker(s), openings from data/openings.txt (219), seed offset 0, load 0.72 2.63 3.71
+Game 1/300 (seed 0), Petroff Defence as white, white by checkmate, 40 plies, low clock 1649 ms, 46.6 s
+Game 2/300 (seed 1), Petroff Defence as black, black by checkmate, 113 plies, low clock 1648 ms, 56.0 s
+Game 3/300 (seed 2), Sicilian Closed as white, white by checkmate, 94 plies, low clock 1649 ms, 52.5 s
+Game 4/300 (seed 3), Sicilian Closed as black, black by checkmate, 69 plies, low clock 1649 ms, 50.4 s
+Game 5/300 (seed 4), London System as white, white by checkmate, 80 plies, low clock 1648 ms, 52.0 s
+Game 6/300 (seed 5), London System as black, draw by fifty_moves, 197 plies, low clock 1649 ms, 64.9 s
+Game 7/300 (seed 6), London System as white, white by checkmate, 62 plies, low clock 1649 ms, 50.9 s
+Game 8/300 (seed 7), London System as black, black by checkmate, 105 plies, low clock 1648 ms, 52.3 s
+Game 9/300 (seed 8), Sicilian Closed as white, white by checkmate, 114 plies, low clock 1648 ms, 55.8 s
+Game 10/300 (seed 9), Sicilian Closed as black, black by checkmate, 123 plies, low clock 1649 ms, 56.1 s
+Game 11/300 (seed 10), Sicilian Najdorf as white, white by checkmate, 54 plies, low clock 1893 ms, 50.5 s
+Game 12/300 (seed 11), Sicilian Najdorf as black, black by checkmate, 73 plies, low clock 1649 ms, 52.0 s
+Game 13/300 (seed 12), Sicilian Classical as white, white by checkmate, 66 plies, low clock 1648 ms, 50.5 s
+Game 14/300 (seed 13), Sicilian Classical as black, black by checkmate, 81 plies, low clock 1648 ms, 51.7 s
+Game 15/300 (seed 14), Pirc Defence as white, white by checkmate, 98 plies, low clock 1649 ms, 53.6 s
+Game 16/300 (seed 15), Pirc Defence as black, black by checkmate, 67 plies, low clock 1649 ms, 51.4 s
