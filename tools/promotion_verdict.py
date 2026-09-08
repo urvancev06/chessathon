@@ -76,12 +76,23 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
 
     games = load_games(arguments.chunks)
+    # Void games (both agents failed) are excluded from the score by arena_openings, so they must
+    # be excluded from n too. Counting them would inflate n in two places: it tightens the margin
+    # harmlessly, but it also lets three chunks with two voids reach n == 300 on 298 scored games,
+    # so a match short of the pre-registered sample would be treated as the full look and the
+    # reject-only protection of amendment 4 would stop applying exactly where it must hold.
+    scored = [g for g in games if g["result"] != "void"]
+    voids = len(games) - len(scored)
+    games = scored
     n = len(games)
     wins, draws, losses = tally(games)
     terminations = Counter(g["termination"] for g in games)
     low = clocks(games)
 
-    print(f"pooled over {n} games from {len(arguments.chunks)} chunk(s)")
+    print(
+        f"pooled over {n} scored games from {len(arguments.chunks)} chunk(s)"
+        + (f" ({voids} void excluded)" if voids else "")
+    )
     print(f"  +{wins} ={draws} -{losses}")
     print(f"  terminations: {dict(terminations)}")
 
@@ -91,8 +102,11 @@ def main(argv: list[str] | None = None) -> int:
     print("\nclock distribution (agent_low_clock_ms, per game):")
     if low:
         worst = min(low)
-        worst_game = next(g["index"] + 1 for g in games if g["agent_low_clock_ms"] == worst)
-        print(f"  minimum      {worst:9.0f} ms   (game {worst_game})")
+        # `index` is 0-based *within a run*, and the chunks are three separate runs, so there are
+        # three game 5s in the pool. `seed` is index + seed_offset and is unique across them, which
+        # is what makes this line point at a game a judge can actually go and find.
+        worst_seed = next(g["seed"] for g in games if g["agent_low_clock_ms"] == worst)
+        print(f"  minimum      {worst:9.0f} ms   (seed {worst_seed})")
         if len(low) >= 10:
             print(f"  p10          {stats.quantiles(low, n=10)[0]:9.0f} ms")
         print(f"  median       {stats.median(low):9.0f} ms")
