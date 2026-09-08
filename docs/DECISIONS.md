@@ -1096,3 +1096,48 @@ disagreement is the finding and goes in the report.
 **If 64 declines, or does not answer before the pooled result exists, the original gate stands and
 the bundle fails it.** Losing the change is an acceptable outcome. A rule amended by people who
 already knew the answer is not.
+
+### Amendment 7: the safety gate, authored blind and adopted as written
+
+`chessathon-64` authored the replacement without having seen `RESULTS.md`, the match output or any
+chunk figure, and without knowing whether either gate passes. **Adopted verbatim:**
+
+> **(A) No game lost on time.** No game's termination is `flag`. Any occurrence disqualifies, at any
+> sample size.
+>
+> **(B) At most 2 % of completed games have `agent_low_clock_ms` below 5 000 ms**, over the pooled
+> games the decision is taken on — 2 of 100, 4 of 200, 6 of 300.
+
+**Why this shape is right.** The intent was "the time manager is not habitually operating near the
+panic floor". That is a statement about the *body* of a distribution and it was encoded as a
+statement about its *extreme*. A proportion is what "habitually" means, is comparable across sample
+sizes, and improves with more data rather than tightening — the precise inversion of the defect.
+(A) stays absolute because a flag is a **categorical** harm rather than a quality measure: no rate
+of losing on time is acceptable, so "never" is the correct encoding there and was the wrong one for
+the clock condition.
+
+**The trade-off, stated by its author rather than discovered later.** 64 was asked for a rule no
+more permissive than the original at 300 games and answered that **no such rule exists**: the
+original said "no game below 5 000 ms", so any rate above zero admits games the original excluded,
+and every scale-free replacement is therefore strictly more permissive at n = 300. That is inherent
+in fixing the defect, not a concession chosen to help. A 0 % rate is the original rule wearing a
+percentage sign.
+
+**Why 2 % and not the 1 % also offered.** 64 gave 2 % as its proposal and said 1 % was defensible.
+**This session did not choose between them**, because it has seen partial data and any selection
+between two offered thresholds is a selection made knowing which way it cuts. The blind author's
+primary recommendation is taken as authored. That discretion was declined deliberately, and this
+paragraph exists so that a judge can see it was declined rather than exercised quietly.
+
+**Computability, checked before adoption** — the failure mode of the third amendment. `low_clock_ms`
+in the `RESULTS.md` row is a run minimum and **cannot** settle a rate. `GameRecord.agent_low_clock_ms`
+is recorded per game and `write_json` serialises the whole `results` list, so (B) is evaluated from
+the run's `--json` file. Verified the running match writes one per chunk (`chunk0`, `chunk100`,
+`chunk200`), so the data will exist.
+
+**What gets published regardless of which gate is used.** The pooled result against **both** gates
+with the date each was written, plus the underlying distribution: the count below 5 000 ms, the
+count below `panic_ms`, the lowest clock and the game it occurred in, and the terminations. A judge
+can then apply any threshold they prefer instead of trusting ours. 64 asked not to be told which way
+its rule lands until this is recorded, and if the replacement flips the decision, that fact goes in
+this file too.
