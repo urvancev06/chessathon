@@ -98,11 +98,13 @@
         for (const job of jobs) {
           const p = job.progress || { done: 0, total: 0 };
           const active = job.status === 'running' || job.status === 'queued';
+          const count = active ? (p.total ? `${p.done} of ${p.total}` : 'waiting') : (p.total ? `${p.total} positions` : '');
           jobsList.append(
             el('span', { class: 'grey', text: job.status }),
             el('span', {}, el('a', { class: 'quiet', style: { padding: 0 }, href: `#/analysis?job=${encodeURIComponent(job.job_id)}`, text: job.label || job.job_id, onClick: (event) => { event.preventDefault(); openJob(job.job_id); } })),
-            el('span', { class: 'grey tabular', text: active ? (p.total ? `${p.done} of ${p.total}` : 'waiting') : '' }),
-            el('span', {}, active ? el('button', { type: 'button', class: 'quiet', style: { padding: 0 }, text: 'Cancel', onClick: () => cancelJob(job.job_id) }) : null));
+            el('span', { class: 'job-end' },
+              el('span', { class: 'grey tabular', text: count }),
+              active ? el('button', { type: 'button', class: 'quiet', style: { padding: 0 }, text: 'Cancel', onClick: () => cancelJob(job.job_id) }) : null));
         }
       }
       async function cancelJob(jobId) {
