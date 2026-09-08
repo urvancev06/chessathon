@@ -533,7 +533,7 @@ about what the algorithm is.
 
 ```python
 class SearchState(NamedTuple):     # every array the search reads or writes; allocated once
-    tt_key: NDArray[int64]; tt_data: NDArray[int32]     # (slots, 4): depth, score, flag, move
+    tt_key: NDArray[int64]; tt_data: NDArray[int32]     # (slots, 5): depth, score, flag, move, generation
     killers, history: NDArray[int32]                    # (MAX_PLY+2, 2), (2, 128*128)
     moves, order: NDArray[int32]                        # one move buffer + score buffer per ply
     root_scores: NDArray[int32]; path: NDArray[int64]
@@ -574,8 +574,10 @@ current line, by the fifty-move rule and at the referee's 600-ply cap.
 
 What had to change:
 
-- **The table is an array, not a dictionary.** Fixed size, a power of two, depth-preferred
-  replacement, indexed by `fastboard.hash_position`. Entries are replaced rather than accumulated,
+- **The table is an array, not a dictionary.** Fixed size, a power of two, indexed by
+  `fastboard.hash_position`, depth-preferred *within* a move and always-replace across moves (each
+  entry records the move of the game that wrote it; without that a slot holding a deep entry from
+  move three would refuse every shallower entry for the rest of the game). Entries are replaced rather than accumulated,
   and a key collision is possible (about one in 2⁶⁴ per probe). A collision can hand the search a
   wrong score or a wrong first move to try, never an illegal move: the table move is *matched
   against the generated move list*, never played on trust.
@@ -641,7 +643,7 @@ oracle and the fallback, so none of the guarantees above depend on the compiled 
 At import, `fastsearch.warm_up(ENGINE)` calls every jitted function with the exact argument types
 a game will pass and then runs real searches, so nothing compiles on the clock; `_warm_up` records
 how many specialisations each one then has, and `get_move` compares that once a move and logs any
-that appeared. Measured import from the extracted zip: 17 s, against the platform's 90 s budget.
+that appeared. Measured import from the extracted zip: 17–19 s, against the platform's 90 s budget.
 
 ## Determinism and logging
 
