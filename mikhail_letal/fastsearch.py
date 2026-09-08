@@ -43,7 +43,12 @@ best remaining one is selected on each iteration of the loop -- the same order, 
 that suits a compiled generator with no Python objects to allocate. Illegal moves fall out of
 ``make_move`` returning 0, which is how this board representation tests legality anyway.
 
-*Nothing recurses through Python.* ``run_search`` is one compiled call per move.
+*The root is Python; the tree is not.* Iterative deepening, the aspiration window and the loop
+over the legal root moves live in ``FastEngine`` (see the note above that section, and
+DECISIONS.md 2026-09-08): they run a few hundred times a move, and compiling them cost fourteen
+seconds of the platform's 90-second start-up budget, because numba re-optimises a callee's whole
+compiled module in every caller. Below the root nothing crosses back into Python: one ``negamax``
+call per root move per iteration is the only boundary the search ever crosses.
 """
 
 from __future__ import annotations
