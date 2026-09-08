@@ -21,3 +21,7 @@ docs/report.fdb_latexmk
 docs/report.log
 docs/report.out
 docs/report.synctex.gz
+# Arena and fuzz run logs, and the done-files that mark a background run finished. The
+# measurements themselves belong in docs/RESULTS.md, not in a transcript.
+*.log
+*.done
