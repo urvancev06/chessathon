@@ -1,6 +1,11 @@
 [project]
-name = "aichessathon-starter"
-version = "0.1.0"
+name = "mikhail-letal"
+version = "0.2.1"
+description = "A chess engine in plain Python for AI Chessathon 2026"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Alexander Urvancev" }]
+keywords = ["chess", "chess-engine", "alpha-beta", "python-chess"]
 requires-python = "==3.12.*"
 dependencies = [
     "chess==1.11.2",
@@ -9,6 +14,9 @@ dependencies = [
     "torch==2.13.0",
     "onnxruntime==1.29.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/urvancev06/chessathon"
 
 [tool.uv]
 package = false
