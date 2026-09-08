@@ -104,6 +104,54 @@ The defect is in the evaluation, and `fasteval.py` inherits it verbatim: its own
 "This is a *port*, not a redesign. Every term, every weight and every rounding decision is the one"
 of `evaluation.py`, and its only king term is `W_KING_SHIELD`.
 
+## Four king-danger terms ported to the compiled evaluation: a negative result
+
+Four candidate terms were written into isolated copies of v1.0 (`variants/v10-{expo,units,files,storm}`),
+each added to **both** `evaluation.py` and `fasteval.py`, then independently audited by a second
+agent that re-ran every claim with its own scripts.
+
+| variant | idea | py-vs-compiled agreement | nps cost | plays 20 / 22 / 24 |
+|---|---|---|---|---|
+| `expo` | king virtual mobility + queen proximity | 44 558 positions, 0 mismatches | +4.9 % | `Ne2+` / `Nxd4` / `Qf6` |
+| `units` | weighted attacker units, quadratic | 20 000, 0 mismatches (+ repo gate, 283 tests) | +4.0 % | `Ne2+` / `Rd6` / `Qf6` |
+| `files` | open lines toward the king | 72 314, 0 mismatches | +3.5 % | `Ne2+` / `Nxd4` / `Qf6` |
+| `storm` | shield deficit + pawn storm | 20 000, 0 mismatches | **-0.6 %** | `Ne2+` / `Nxd4` / `Qf6` |
+
+Baseline v1.0 plays `Ne2+` / `Nxd4` / `Qf6`. **Every variant reproduces every blunder.** The one
+deviation, `units` playing `Rd6` at move 22, its own fixed-depth control showed is not attributable
+to the term. Audits confirmed all four: gates genuinely exercise the compiled path, all are really
+shield-gated, **no overfitting to the three positions** in any of them.
+
+So the terms are cheap, correct, and do not fix what they were built for. Recorded as a negative
+result rather than quietly dropped.
+
+**Why, and this is the useful part.** For the black king on c8 the virtual mobility is **6 — exactly
+the floor — both before and after `22...Nxd4 23.cxd4`, and also after `22...Nf4`.** The king sees
+a6, a8, b7, b8, c7, d7 and nothing else: its own rook on d8 blocks east, its own pawn on c6 blocks
+south, its own queen on e6 blocks the diagonal. Opening the c-file happens *behind* the c6 pawn from
+the king's point of view, so the count never moves. The entire penalty came from the
+queen-distance half, which is identical for every candidate move and so discriminates nothing.
+
+**King-exposure terms measure where the king could walk. The danger here was a half-open file an
+enemy rook could arrive down — and the king's own crowding pieces suppress the exposure count
+exactly when that danger is worst.** That is a structural blind spot in the whole family, not a
+weight that needs tuning.
+
+None of these has been played in games. They are cheap enough to be worth an arena run on their own
+general merits, but there is no evidence any of them addresses this defect.
+
+### Two measurement traps found on the way, both worth keeping
+
+1. **Sequential benchmarking on this machine is worthless.** The *unmodified* base measured
+   1 090 179 nps and 940 895 nps on the same position twenty minutes apart — a 14 % spread. A first,
+   non-interleaved reading put one term's cost at 15.9 %; that was drift, not the term. Every number
+   above alternates base and variant in fresh subprocesses.
+2. **Adding a field to the `EvalTables` NamedTuple is not free.** `ev` is threaded through every
+   recursive call of the compiled search, so each extra array is more words pushed at every call
+   boundary — paid by every node whether the term runs or not. Moving the new tables to module-level
+   numpy globals (the pattern `fastboard` already uses for its direction tables) recovered several
+   per cent.
+
 ## Suggested next step, for whoever picks it up
 
 A king-danger term is the highest-value evaluation addition on the table, and it is the only one
