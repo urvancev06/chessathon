@@ -1413,3 +1413,44 @@ figure to weigh in both cases is the one that is not marginal: **no game below `
 
 This is stated now so that it constrains the write-up in either direction rather than being
 available afterwards to whichever side needs it.
+
+## 2026-09-08 — Reading this file: the defects were in the checking, not the engine
+
+`chessathon-64`'s framing, adopted because a reader arriving at this file tomorrow will otherwise
+draw the opposite conclusion from its length. Tonight produced roughly eight findings and they read
+like a build in trouble. **That is not what we have.**
+
+Sort them by where the fault was:
+
+**In the checking, not the engine** — a per-term parity test whose positions scored zero on both
+sides; a warm-up gate that passed against the code it was written to catch; a promotion rule that
+could not be evaluated from what the run records; a verdict tool that made the forbidden action
+easy; a shipped provenance record naming the wrong constant and the wrong module; a `mypy` check
+gated on `tail`'s exit status; a `root_scores` array whose contents confirm whatever the reader
+already believes; a "behaviour-preserving" claim resting on a test comparing two things that changed
+together.
+
+**In the engine** — none of the eight. The candidate defects that survived the evening are
+`rook_eg` identically zero across 64 squares, a king table scoring `b1` and `c1` the same as `g1`,
+and a missing family of mobility, space, outpost and lever terms. All three are **plausible defects
+with no measured harm**, and none is shipping.
+
+**What the engine actually did, in the same period.** 5 wins, 1 draw, 2 losses over rated rounds
+67–74. **100 real-clock games in chunk A with no `flag`, no crash and nothing below `panic_ms`.**
+Start-up, from five samples rather than the two that made it look bimodal: 34.1, 35.2, 35.6, 35.8
+and one outlier at 50.7 s, against a warm-up deadline armed at 70 s and a 90 s budget — a 19.3 s
+margin at the worst observed, with zero warm-up phases skipped in every sample.
+
+**The recurring shape, five times in one evening: an unmatched number is uninterpretable, and the
+correction was always a comparison that already existed on disk.** Our shuffle rate looked damning
+until the field's was 11.4–11.7 % against our 9.7 %. Locked-position shuffling looked absent until
+the field showed a fivefold dose-response seven games could not resolve. King wandering looked like
+the 94th percentile until it was matched on closedness and became p = 0.157. Root-move clustering
+looked like nothing until an open control made it sevenfold. Start-up variance looked bimodal until
+three more `init` lines were read from logs already stored. It cut in **both** directions — twice
+making a defect vanish, once making a real effect appear — so it is not a bias toward comfort.
+Analysing our own seven games harder never once produced the correction.
+
+**The practical reading.** A long findings list is what a team looks like when it is checking its
+checks. The engine's own record over the same hours is the thing to weigh, and it is unremarkable
+in the way a shippable build should be.
