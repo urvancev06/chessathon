@@ -147,3 +147,4 @@ python-chess. Two of the three are now converted; the third is on a knife edge.
 
 The Python engine was replayed alongside the compiled one on the third position and mated in 19
 plies as well, so the two are on the same edge, not on opposite sides of it.
+| numba-vs-v0.2-real | . | versions/v0.2 | 120+0.5 s | 60 | +51 =9 -0 | 92.5% | ±4.6% | +436 (+345 to +607) | 15.0% | checkmate 51, fifty_moves 1, threefold_repetition 8 | 4 | 4.18 7.15 7.39 / 2.66 3.75 4.12 | data/openings.txt |
