@@ -873,9 +873,11 @@ class Game:
     def human_move(self, uci: str, spent_ms: float) -> None:
         with self._lock:
             self._touch()
-            if self.status == "starting":
-                raise GameError(409, "the engine is still starting")
-            if self.status != "running":
+            # The engine takes tens of seconds to compile itself before its first move, and
+            # there is no reason to make the human wait for that: the position exists, so the
+            # move is legal or it is not. If we are still starting, the startup thread plays
+            # the reply when it is ready.
+            if self.status == "finished":
                 raise GameError(409, "the game is over")
             if self.human is None:
                 raise GameError(409, "this is an engine vs engine game")
@@ -891,9 +893,10 @@ class Game:
             self._push(move, mover, spent, None)
             if self._check_end():
                 return
-            threading.Thread(
-                target=self._engine_turn, name=f"game-{self.id}-move", daemon=True
-            ).start()
+            if self.status == "running":
+                threading.Thread(
+                    target=self._engine_turn, name=f"game-{self.id}-move", daemon=True
+                ).start()
 
     def takeback(self) -> None:
         """Undo the last full move pair so the human is to move again."""
@@ -988,7 +991,7 @@ class Game:
     def snapshot(self) -> dict[str, object]:
         with self._lock:
             human_to_move = (
-                self.status == "running"
+                self.status in ("running", "starting")
                 and not self.thinking
                 and self.human is not None
                 and self._side_to_move() == self.human
