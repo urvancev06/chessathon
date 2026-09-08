@@ -466,7 +466,10 @@ def test_provenance_json_covers_every_parameter_group() -> None:
     tuned = provenance["generator"] == "tools/tune_texel.py"
     if tuned:
         expected.add("structure_weights")
-    assert names == expected
+    # The file also carries the time-management constants, which ship in the same zip and are
+    # checked against the live TimeParams in tests/test_timing.py; this test owns the tables.
+    assert {name for name in names if not name.startswith("timing.")} == expected
+    records = [r for r in records if not r["parameter"].startswith("timing.")]
     for record in records:
         assert set(record) == {
             "parameter",

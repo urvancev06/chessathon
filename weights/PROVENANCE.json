@@ -126,5 +126,117 @@
     "data": "none: parametric prior",
     "run_id": "2026-09-06",
     "note": "drive the bare king to the edge, bring ours close; close beats one king ring"
+  },
+  {
+    "parameter": "timing.increment_ms",
+    "value_or_shape": "500",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "agent contract (aichessathon.com/docs/agent-contract.md)",
+    "run_id": "2026-09-08",
+    "note": "the increment the platform adds after each of our moves; not a choice"
+  },
+  {
+    "parameter": "timing.overhead_ms",
+    "value_or_shape": "50",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)",
+    "run_id": "2026-09-08",
+    "note": "referee-charged minus self-measured move time was 0-2 ms, mean 1.1; docs/CALIBRATION.md's rule is max + 50, so 52, taken as 50"
+  },
+  {
+    "parameter": "timing.moves_to_go",
+    "value_or_shape": "max 50, min 20, decay 0.7",
+    "produced_by": "tools/sim_time.py",
+    "data": "1697 finished ladder games (data/pgn/ladder-top, data/pgn/ladder-top50), collected from the public game pages; our own five rated games in data/pgn/ours as the check",
+    "run_id": "2026-09-08",
+    "note": "the ladder games measure how many of our moves are left at each point (median 67 at the start, falling about one a move to 25); the divisor is that curve scaled by the 0.70 of its budget a move spends. The minimum is 20 rather than 17 because at 16 the settling clock equals panic_ms and the deep tail is skewed (median 27, mean 40)"
+  },
+  {
+    "parameter": "timing.increment_fraction",
+    "value_or_shape": "0.8",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-08",
+    "note": "spend most of the increment each move and keep a little; untuned"
+  },
+  {
+    "parameter": "timing.hard_multiplier",
+    "value_or_shape": "3.0",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-08",
+    "note": "an iteration may overrun the soft target by this factor before it is aborted"
+  },
+  {
+    "parameter": "timing.hard_fraction",
+    "value_or_shape": "0.25",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-08",
+    "note": "no single move may spend more than this share of the clock"
+  },
+  {
+    "parameter": "timing.floor_ms / floor_fraction",
+    "value_or_shape": "1500 ms, 0.05",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-08",
+    "note": "the reserve the budget never plans to dip into; with hard_fraction it is what keeps the clock off the flag, and what stops a long game settling below about 2 s"
+  },
+  {
+    "parameter": "timing.panic_ms",
+    "value_or_shape": "1650",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)",
+    "run_id": "2026-09-08",
+    "note": "below this the engine is skipped and the fallback plays; kept at the value the platform measured under v1.0 even though overhead_ms + floor_ms is now 1550"
+  },
+  {
+    "parameter": "timing.next_iteration_fraction",
+    "value_or_shape": "0.45",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-08",
+    "note": "no longer the normal rule: only the fallback for an iteration too short to predict from, applied to the soft budget itself"
+  },
+  {
+    "parameter": "timing.iteration_ratio",
+    "value_or_shape": "default 4.5, clamped to [2.0, 8.0], measurable above 0.001 s",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves); dev-box searches 2026-09-07 (median 4.3-5.2, maximum about 10)",
+    "run_id": "2026-09-08",
+    "note": "the cost of depth d+1 over depth d, measured live from the last two iterations; the clamp keeps one mis-timed iteration from stopping the search early or starting one it cannot finish"
+  },
+  {
+    "parameter": "timing.iteration_target_factor",
+    "value_or_shape": "1.35",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and 10 of them at six clocks (60 moves a variant) for the before-and-after comparison",
+    "run_id": "2026-09-08",
+    "note": "how far past the soft budget the next iteration may be predicted to end: 1.0 spent 0.70 of the budget for mean depth 10.83, 1.35 spent 0.80 for 11.17, 1.75 reached the hard ceiling. 1.35 x unstable_factor is still below hard_multiplier"
+  },
+  {
+    "parameter": "timing.unstable_factor",
+    "value_or_shape": "1.5",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: hand-chosen at a textbook magnitude, untuned",
+    "run_id": "2026-09-08",
+    "note": "a root move that changed at the last completed depth is worth half a budget more, bounded by the hard ceiling like every other target"
+  },
+  {
+    "parameter": "timing.easy_move",
+    "value_or_shape": "factor 0.7, after 6 iterations, score drop <= 30 cp",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and 10 of them at six clocks (60 moves a variant) for the before-and-after comparison",
+    "run_id": "2026-09-08",
+    "note": "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule"
+  },
+  {
+    "parameter": "timing.cold_finish_fraction",
+    "value_or_shape": "0.25",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: same value as hard_fraction, and for the same reason",
+    "run_id": "2026-09-08",
+    "note": "the share of the clock the first move may spend finishing a warm-up the import ran out of budget for; at most one move of one game"
   }
 ]

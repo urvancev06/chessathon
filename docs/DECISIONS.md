@@ -696,3 +696,82 @@ dribbling into a middlegame move whose whole budget is three seconds. Rejected: 
 compile inside the search, which is where the 15.9 s came from and which leaves single functions
 to compile at unpredictable moments later in the game; and refusing to search at all while the
 jit is cold, which never compiles anything and so plays fallback moves for the whole game.
+
+## 2026-09-08 — The next depth is started on a prediction, not on a fixed share of the budget
+
+The platform's log for v1.0 shows per-move times in two lumps and nothing between: 1.5–3.0 s when
+an iteration finished and the engine stopped with a third of its budget unspent, or 8.9–10.1 s
+when it started a depth that ran into the hard ceiling. `next_iteration_fraction = 0.45` is the
+direct cause: iteration costs grow by 4–5x a depth, so a depth begun at 0.45 of the budget cannot
+finish inside it, and the rule has no way to tell the two cases apart.
+
+So the decision to start depth d+1 is now a prediction: `ratio × time(d)`, with the ratio measured
+from the last two completed iterations, clamped to 2.0–8.0 and defaulting to 4.5 before there is
+data, started only if it is predicted to end inside the target (`timing.should_start_next_depth`,
+called by both engines so the compiled one and the reference one cannot drift). The target is the
+soft budget times `iteration_target_factor`, stretched by half again when the root move changed at
+the last completed depth and cut to 0.7 when it has been stable for six iterations with a score
+that is not falling. Every target is clamped to the hard window, so the abort path and the flag
+invariant are untouched; the measurements are in docs/CALIBRATION.md.
+
+**Rejected: a target equal to the soft budget.** It is the obvious reading of "do not overrun the
+budget", and it spends 0.70 of the budget for 10.83 mean depth where 1.35 spends 0.80 for 11.17,
+because with geometric iteration costs a rule that insists the next depth *finish* by the target
+must stop a factor of `ratio` short of it. **Rejected: 1.75**, which reached the hard ceiling on
+the same positions — the behaviour being removed. **Rejected: the first easy-move rule** (stable
+for 4 iterations, half the target), which fired on nearly every move and spent 0.41 of the budget,
+less than the fixed rule it replaced; 6 iterations at 0.7 costs 0.17 of a ply and banks 16 %.
+
+**The divisor is refitted to how long games actually are.** Our five rated games under v1.0
+(`data/pgn/ours`, clocks verified against the platform's log) are the whole argument:
+
+| game | colour | result | plies | our moves | clock left |
+|---|---|---|---|---|---|
+| `1e1c9922` | W | win | 36 | 18 | 87.5 s |
+| `3ebceb52` | B | loss | 46 | 23 | 90.2 s |
+| `cf4043b1` | W | win | 102 | 51 | 31.6 s |
+| `f43e60b5` | W | win | 210 | 105 | 6.0 s |
+| `5504d7fa` | B | draw, fifty moves | 226 | 113 | 4.7 s |
+
+The two games that ended near the flag are the two longest, and the longer of them is the draw, so
+the tail of a long game is where the dropped half point actually is; the two shortest ended with
+roughly 90 s unspent. `moves_to_go = clamp(40 − moves // 2, 12, 40)` is wrong at both ends because
+it is calibrated for a game half the length of a real one: across the 1 697 finished ladder games
+collected by 2026-09-08 the
+median is 67 of our moves, and the median still to play is 67 at the start, 47 at our move 20, 31
+at 40 and about 25 from 50 on. The new line is that measured curve scaled by 0.70 — the share of
+its soft budget a move actually spends under the prediction rule — so that realised spending is
+the even split of the clock over the moves really left: `clamp(50 − 0.7 × moves played, 20, 50)`.
+Simulated over all 1 697 games (`tools/sim_time.py`), it moves the lowest clock any game reaches
+from 3.3 s to 5.9 s and the spend from our move 80 on from 0.68 s to 0.79 s, for 0.32 s a move
+less in the opening.
+
+**Rejected: 30 / 24 with the halving kept**, which was this change's first attempt, made against
+our four games before the ladder data existed: it front-loads the opening at 2.86 s a move and
+starves everything after move 50 (1.09 s), because a maximum that low reaches the floor after a
+dozen moves. **Rejected: a minimum of 16**, which is what the median remaining moves imply. Two
+criteria say 20. The soft formula alone balances the increment at
+`overhead_ms + moves_to_go_min × increment_ms × (1 / usage − increment_fraction)`, which at a full
+spend of the budget is exactly `panic_ms` = 1650 ms for 16 — a long game would settle on the clock
+at which the agent gives up searching — and 2050 ms for 20; and in the deep tail the
+remaining-moves distribution is skewed (median 27, mean 40 at our move 100), so the median
+under-states what is left in the games that get there. Over the ladder games of at least 90 of
+our moves, 20 keeps the lowest clock at 5.9 s against 4.6 s, and at 3.3 s against 2.6 s if a move
+spends 0.85 of its budget instead of the measured 0.70. What actually stops the clock falling
+further is neither constant: `floor_ms` and `hard_fraction` mean the plan never leaves less than
+the reserve after a move, so the clock cannot settle below about 2.05 s whatever the divisor is —
+the divisor decides how fast it gets there, not where it stops.
+
+**Rejected: any use of the opponent's clock.** Estimating it to play for a flag was investigated
+and the arithmetic kills it: with a 0.5 s increment the opponent's net drain was 0.063 s a move,
+so flagging from 10 s needs about 157 moves and the referee's 600-ply draw lands first.
+
+`overhead_ms` drops from 150 to 50 in the same change: the platform charges 0–2 ms (mean 1.1) over
+25 measured moves, and CALIBRATION.md's own rule is the maximum plus 50 ms. `panic_ms` deliberately
+stays at 1650 even though `overhead_ms + floor_ms` is now 1550, so that nothing within a second and
+a half of the flag behaves differently from the version that was measured.
+
+Every constant above is now also in `weights/PROVENANCE.json`, which is the only provenance
+artefact that ships (docs/ does not). Its rows are generated from `TimeParams` itself by
+`tools/gen_pst.py:timing_rows`, and `tests/test_timing.py` fails if the shipped file and the
+constants disagree, so the record cannot go stale the next time one of them is tuned.

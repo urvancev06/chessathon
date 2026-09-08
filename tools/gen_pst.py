@@ -33,6 +33,8 @@ import subprocess
 from pathlib import Path
 from typing import NamedTuple
 
+from mikhail_letal.timing import DEFAULT_PARAMS
+
 ROOT = Path(__file__).resolve().parent.parent
 PST_PATH = ROOT / "weights" / "pst.json"
 PRIOR_PATH = ROOT / "data" / "tuning" / "prior_pst.json"
@@ -50,6 +52,158 @@ PIECE_VALUES_EG: dict[str, int] = {"P": 100, "N": 320, "B": 330, "R": 500, "Q": 
 # Game-phase weights: knights and bishops count 1, rooks 2, queens 4. With every non-pawn piece on
 # the board the sum is 4*1 + 4*1 + 4*2 + 2*4 = 24, which is ``PHASE_TOTAL`` in the evaluation.
 PHASE_WEIGHTS: dict[str, int] = {"N": 1, "B": 1, "R": 2, "Q": 4}
+
+
+# The time-management half of the shipped provenance record. The brief (§10) asks for the
+# time-management constants as well as the evaluation tables, and `weights/PROVENANCE.json` is the
+# only provenance artefact inside the zip (`docs/PROVENANCE.md` does not ship). Every value here is
+# read from `TimeParams` itself, so the shipped record cannot drift from the code that uses it;
+# `tests/test_timing.py` asserts the file matches this function.
+TIMING_RUN_ID = "2026-09-08"
+LADDER_DATA = (
+    "1697 finished ladder games (data/pgn/ladder-top, data/pgn/ladder-top50), collected from the "
+    "public game pages; our own five rated games in data/pgn/ours as the check"
+)
+PLATFORM_DATA = "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)"
+POSITIONS_DATA = (
+    "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and "
+    "10 of them at six clocks (60 moves a variant) for the before-and-after comparison"
+)
+
+
+def timing_rows(run_id: str = TIMING_RUN_ID) -> list[dict[str, str]]:
+    """Provenance records for every constant in `mikhail_letal.timing.TimeParams`."""
+    p = DEFAULT_PARAMS
+    sim = "tools/sim_time.py"
+    code = "code (mikhail_letal/timing.py)"
+    rows: list[tuple[str, str, str, str, str]] = [
+        (
+            "timing.increment_ms",
+            str(p.increment_ms),
+            code,
+            "agent contract (aichessathon.com/docs/agent-contract.md)",
+            "the increment the platform adds after each of our moves; not a choice",
+        ),
+        (
+            "timing.overhead_ms",
+            str(p.overhead_ms),
+            code,
+            PLATFORM_DATA,
+            "referee-charged minus self-measured move time was 0-2 ms, mean 1.1; docs/CALIBRATION"
+            ".md's rule is max + 50, so 52, taken as 50",
+        ),
+        (
+            "timing.moves_to_go",
+            f"max {p.moves_to_go_max}, min {p.moves_to_go_min}, decay {p.moves_to_go_decay}",
+            sim,
+            LADDER_DATA,
+            "the ladder games measure how many of our moves are left at each point (median 67 at "
+            "the start, falling about one a move to 25); the divisor is that curve scaled by the "
+            "0.70 of its budget a move spends. The minimum is 20 rather than 17 because at 16 the "
+            "settling clock equals panic_ms and the deep tail is skewed (median 27, mean 40)",
+        ),
+        (
+            "timing.increment_fraction",
+            str(p.increment_fraction),
+            code,
+            "none: brief section 6.2",
+            "spend most of the increment each move and keep a little; untuned",
+        ),
+        (
+            "timing.hard_multiplier",
+            str(p.hard_multiplier),
+            code,
+            "none: brief section 6.2",
+            "an iteration may overrun the soft target by this factor before it is aborted",
+        ),
+        (
+            "timing.hard_fraction",
+            str(p.hard_fraction),
+            code,
+            "none: brief section 6.2",
+            "no single move may spend more than this share of the clock",
+        ),
+        (
+            "timing.floor_ms / floor_fraction",
+            f"{p.floor_ms} ms, {p.floor_fraction}",
+            code,
+            "none: brief section 6.2",
+            "the reserve the budget never plans to dip into; with hard_fraction it is what keeps "
+            "the clock off the flag, and what stops a long game settling below about 2 s",
+        ),
+        (
+            "timing.panic_ms",
+            str(p.panic_ms),
+            code,
+            PLATFORM_DATA,
+            "below this the engine is skipped and the fallback plays; kept at the value the "
+            "platform measured under v1.0 even though overhead_ms + floor_ms is now 1550",
+        ),
+        (
+            "timing.next_iteration_fraction",
+            str(p.next_iteration_fraction),
+            code,
+            "none: brief section 6.2",
+            "no longer the normal rule: only the fallback for an iteration too short to predict "
+            "from, applied to the soft budget itself",
+        ),
+        (
+            "timing.iteration_ratio",
+            f"default {p.iteration_ratio_default}, clamped to "
+            f"[{p.iteration_ratio_min}, {p.iteration_ratio_max}], measurable above "
+            f"{p.ratio_measurable_s} s",
+            code,
+            PLATFORM_DATA + "; dev-box searches 2026-09-07 (median 4.3-5.2, maximum about 10)",
+            "the cost of depth d+1 over depth d, measured live from the last two iterations; the "
+            "clamp keeps one mis-timed iteration from stopping the search early or starting one "
+            "it cannot finish",
+        ),
+        (
+            "timing.iteration_target_factor",
+            str(p.iteration_target_factor),
+            code,
+            POSITIONS_DATA,
+            "how far past the soft budget the next iteration may be predicted to end: 1.0 spent "
+            "0.70 of the budget for mean depth 10.83, 1.35 spent 0.80 for 11.17, 1.75 reached the "
+            "hard ceiling. 1.35 x unstable_factor is still below hard_multiplier",
+        ),
+        (
+            "timing.unstable_factor",
+            str(p.unstable_factor),
+            code,
+            "none: hand-chosen at a textbook magnitude, untuned",
+            "a root move that changed at the last completed depth is worth half a budget more, "
+            "bounded by the hard ceiling like every other target",
+        ),
+        (
+            "timing.easy_move",
+            f"factor {p.easy_factor}, after {p.easy_stable_depths} iterations, score drop "
+            f"<= {p.easy_score_drop_cp} cp",
+            code,
+            POSITIONS_DATA,
+            "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first "
+            "attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule",
+        ),
+        (
+            "timing.cold_finish_fraction",
+            str(p.cold_finish_fraction),
+            code,
+            "none: same value as hard_fraction, and for the same reason",
+            "the share of the clock the first move may spend finishing a warm-up the import ran "
+            "out of budget for; at most one move of one game",
+        ),
+    ]
+    return [
+        {
+            "parameter": parameter,
+            "value_or_shape": value,
+            "produced_by": produced_by,
+            "data": data,
+            "run_id": run_id,
+            "note": note,
+        }
+        for parameter, value, produced_by, data, note in rows
+    ]
 
 
 class Param(NamedTuple):
@@ -366,6 +520,7 @@ def main() -> None:
     out_path.write_text(dump_json(document, 0) + "\n", encoding="utf-8")
     print(f"wrote {display(out_path)}")
     if out_path == PST_PATH:
+        records += timing_rows(today)  # the time-management half; see timing_rows
         PROVENANCE_PATH.write_text(json.dumps(records, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {PROVENANCE_PATH.relative_to(ROOT)}")
 

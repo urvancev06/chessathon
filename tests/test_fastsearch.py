@@ -42,7 +42,7 @@ from mikhail_letal.fastsearch import (
     new_state,
     warm_up,
 )
-from mikhail_letal.search import SearchResult
+from mikhail_letal.search import Engine, SearchResult
 from mikhail_letal.warmup import arm, budget
 from tests.test_fastboard import playout_boards, sample_starts
 
@@ -361,6 +361,35 @@ def test_the_hard_deadline_is_respected() -> None:
     assert overshoot < 0.05, f"overran the hard deadline by {overshoot * 1000:.0f} ms"
     assert result.move is not None
     assert result.move in board.legal_moves
+
+
+def test_the_soft_target_stops_the_deepening() -> None:
+    """A soft target already in the past ends the search after one completed iteration, and one
+    sized for a couple of iterations stops well inside the hard window."""
+    board = chess.Board(BUSY_MIDDLEGAME)
+    ENGINE.new_game()
+    started = time.perf_counter()
+    shallow = ENGINE.search(board, [position_key(board)], started, started + 5.0)
+    assert shallow.depth == 1
+    assert not shallow.aborted
+
+    ENGINE.new_game()
+    started = time.perf_counter()
+    result = ENGINE.search(board, [position_key(board)], started + 0.30, started + 2.0)
+    elapsed = time.perf_counter() - started
+    # The prediction is what stops it: it neither runs to the hard deadline nor stops at the
+    # 0.45 share of the target that the fixed rule used to stop at.
+    assert result.depth >= 1
+    assert elapsed < 2.0, f"took {elapsed:.2f} s of a 2.0 s hard budget"
+
+
+def test_the_engines_agree_on_when_to_stop_deepening() -> None:
+    """The reference searcher runs the same rule, so both stop at the same soft target."""
+    board = chess.Board(BUSY_MIDDLEGAME)
+    started = time.perf_counter()
+    reference = Engine().search(board, {}, started, started + 5.0)
+    assert reference.depth == 1
+    assert not reference.aborted
 
 
 def test_dense_position_keeps_the_first_iteration_small() -> None:

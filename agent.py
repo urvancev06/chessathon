@@ -109,11 +109,14 @@ def get_move(fen: str, time_left_ms: int) -> str:
             result = ENGINE.search(
                 board,
                 STATE.fast_history,
-                # Do not start another depth once this share of the soft budget has elapsed:
-                # the next iteration costs several times the previous one.
-                soft_deadline=t0 + (warm_ms + PARAMS.next_iteration_fraction * soft_ms) / 1000.0,
+                # The target. The search starts another depth only when it predicts that depth
+                # will finish inside it, from what the completed ones cost; it may stretch the
+                # target for an unsettled root move and stop early for a settled one. All of that
+                # is bounded by the hard deadline below (mikhail_letal/timing.py).
+                soft_deadline=t0 + (warm_ms + soft_ms) / 1000.0,
                 # Abort mid-iteration here, whatever the state of the search.
                 hard_deadline=t0 + (warm_ms + hard_ms) / 1000.0,
+                params=PARAMS,
             )
             depth, seldepth, nodes = result.depth, result.seldepth, result.nodes
             # Node rate over the search's own clock: the number calibration compares.

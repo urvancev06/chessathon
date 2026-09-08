@@ -111,21 +111,23 @@ move spends under it is the number the budget constants below are calibrated wit
 
 **Before and after, ten middlegame positions at six clocks (60 moves a variant), same process**,
 with v1.0's rule reproduced inside the new code (an unreachable `ratio_measurable_s` forces the
-fallback branch, with v1.0's constants):
+fallback branch, with v1.0's constants). `t/soft` is the share of the budget the move spent:
 
-| clock (our moves played) | v1.0 soft / mean t / depth | new soft / mean t / depth |
+| clock (our moves played) | v1.0 soft / mean t / t/soft / depth | new soft / mean t / t/soft / depth |
 |---|---|---|
-| 120 s (0) | 3396 / 2193 / 10.50 | 2799 / 1880 / 10.20 |
-| 60 s (20) | 2395 / 1372 / 10.00 | 2065 / 1544 / 10.00 |
-| 20 s (40) | 1392 / 970 / 9.20 | 1307 / 1116 / 9.40 |
-| 5 s (60) | 804 / 618 / 8.50 | 709 / 605 / 8.50 |
-| 2 s (70) | 350 / 217 / 7.20 | 450 / 324 / 7.80 |
-| 1.7 s (80) | 50 / 37 / 4.70 | 150 / 61 / 5.70 |
+| 120 s (0) | 3396 / 1940 / 0.57 / 10.50 | 2799 / 2408 / 0.86 / 10.40 |
+| 60 s (20) | 2395 / 1472 / 0.61 / 10.20 | 2065 / 1614 / 0.78 / 10.10 |
+| 20 s (40) | 1392 / 956 / 0.69 / 9.50 | 1307 / 1042 / 0.80 / 9.40 |
+| 5 s (60) | 804 / 632 / 0.79 / 8.80 | 648 / 541 / 0.83 / 8.50 |
+| 2 s (70) | 350 / 251 / 0.72 / 7.50 | 450 / 299 / 0.67 / 7.30 |
+| 1.7 s (80) | 50 / 42 / 0.84 / 5.10 | 150 / 69 / 0.46 / 5.80 |
 
-The share of the budget spent rises everywhere (0.57 → 0.75 at 60 s, 0.70 → 0.85 at 20 s) and no
-move exceeded its hard budget in either run (worst overshoot 2 ms, the clock-read granularity).
-The full clock buys less per move on purpose: that time is moved into the rest of the game by the
-divisors below, which this per-position probe cannot show and the whole-game simulation can.
+The budget is used far more fully where the clock is large (0.57 → 0.86 at 120 s, 0.61 → 0.78 at
+60 s), which is the bimodality closing up, and no move exceeded its hard budget in either run
+(worst overshoot 1 ms, the clock-read granularity). Mean depth is unchanged inside the noise of a
+shared machine. The soft budget itself is smaller at a full clock on purpose: that time is moved
+into the rest of the game by the divisors below, which a per-position probe cannot show and the
+whole-game simulation can.
 
 **Budget.** `overhead_ms` 150 → 50 (the measured maximum plus this file's 50 ms margin).
 
