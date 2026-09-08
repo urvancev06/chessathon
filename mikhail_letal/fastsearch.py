@@ -176,7 +176,8 @@ I_NULL_MOVES: Final = 6  # a statistic the tests read
 I_TT_MASK: Final = 7
 I_EVAL_MASK: Final = 8
 I_HISTORY_MASK: Final = 9  # of the game-history hash set
-I_COUNT: Final = 10
+I_GENERATION: Final = 10  # which move of the game wrote a table entry (see _tt_store)
+I_COUNT: Final = 11
 
 # The soft deadline is the Python root's business; the compiled tree only ever needs the hard one.
 F_HARD: Final = 0  # perf_counter() at which the search aborts wherever it is
@@ -188,7 +189,7 @@ class SearchState(NamedTuple):
     for the whole game, so no node ever allocates."""
 
     tt_key: npt.NDArray[np.int64]  # Zobrist key of each table slot; 0 means never written
-    tt_data: npt.NDArray[np.int32]  # (slots, 4): depth, score, flag, move
+    tt_data: npt.NDArray[np.int32]  # (slots, 5): depth, score, flag, move, generation
     killers: npt.NDArray[np.int32]  # (MAX_PLY + 2, 2): two quiet cutoff moves per ply
     history: npt.NDArray[np.int32]  # (2, 128 * 128): cutoff credit by colour and from-to
     moves: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): one move buffer per ply
@@ -207,16 +208,17 @@ def new_state(tt_bits: int = TT_BITS, eval_bits: int = EVAL_BITS) -> SearchState
     """Allocate the search's memory. Sizes are powers of two so indexing is a mask."""
     tt_size = 1 << tt_bits
     eval_size = 1 << eval_bits
-    # The history set holds one key per position of the game so far; 1024 slots keep it under a
-    # quarter full even at the 600-ply cap, so linear probing stays short.
-    history_size = 1024
+    # The history set holds one key per position of the game so far. The referee draws at 600
+    # plies, so it never holds more than about 601 keys; 2048 slots keep it under a third full at
+    # the worst, which keeps linear probing to a step or two and leaves room to spare.
+    history_size = 2048
     ints = np.zeros(I_COUNT, dtype=np.int64)
     ints[I_TT_MASK] = tt_size - 1
     ints[I_EVAL_MASK] = eval_size - 1
     ints[I_HISTORY_MASK] = history_size - 1
     return SearchState(
         tt_key=np.zeros(tt_size, dtype=np.int64),
-        tt_data=np.zeros((tt_size, 4), dtype=np.int32),
+        tt_data=np.zeros((tt_size, 5), dtype=np.int32),
         killers=np.full((MAX_PLY + 2, 2), NO_MOVE, dtype=np.int32),
         history=np.zeros((2, 128 * 128), dtype=np.int32),
         moves=np.zeros((MAX_PLY + 2, MAX_MOVES), dtype=np.int32),
@@ -274,19 +276,33 @@ def _tt_probe(st: SearchState, key: int) -> int:
 
 @njit(cache=False)
 def _tt_store(st: SearchState, key: int, depth: int, score: int, flag: int, move: int) -> None:
-    """Depth-preferred replacement: a slot is overwritten when it is empty, when it holds this
-    same position, or when the new entry was searched at least as deeply as the old one."""
+    """Depth-preferred within the move, always-replace across moves.
+
+    A slot is overwritten when it is empty, when it holds this same position, when it was written
+    for an earlier move of the game, or when the new entry was searched at least as deeply as the
+    old one. The generation test is what keeps a fixed-size table usable over a long game: without
+    it a slot holding some deep entry from move three would refuse every shallower entry for the
+    rest of the game, and the table would slowly stop accepting anything at all. It is the
+    equivalent of `search.py` emptying its dictionary between moves once it passes
+    `TT_CLEAR_FRACTION`, except that it throws away only the entries a new one wants the room for.
+    """
     if key == 0:
         return
     index = key & st.ints[I_TT_MASK]
     stored = st.tt_key[index]
-    if stored != 0 and stored != key and depth < st.tt_data[index, 0]:
+    if (
+        stored != 0
+        and stored != key
+        and st.tt_data[index, 4] == st.ints[I_GENERATION]
+        and depth < st.tt_data[index, 0]
+    ):
         return
     st.tt_key[index] = key
     st.tt_data[index, 0] = depth
     st.tt_data[index, 1] = score
     st.tt_data[index, 2] = flag
     st.tt_data[index, 3] = move
+    st.tt_data[index, 4] = st.ints[I_GENERATION]
 
 
 @njit(cache=False)
@@ -1000,6 +1016,7 @@ class FastEngine:
         st.eval_value[:] = 0
         st.killers[:] = NO_MOVE
         st.history[:] = 0
+        st.ints[I_GENERATION] = 0
 
     # ------------------------------------------------------------------ public entry point
 
@@ -1033,6 +1050,7 @@ class FastEngine:
         ints[I_ABORT] = 0
         ints[I_PATH_DRAW] = 0
         ints[I_ROOT_PLY] = board.ply()
+        ints[I_GENERATION] += 1  # every entry written below belongs to this move (see _tt_store)
         st.flt[F_HARD] = hard_deadline
         if node_limit is None:
             # Twice what the measured rate says the hard budget can buy: the clock is the real
@@ -1252,7 +1270,7 @@ class FastEngine:
             if value == 0:  # the "empty slot" marker; one position in 2**64 loses its repetition
                 continue
             index = value & mask
-            while True:
+            for _ in range(mask + 1):  # bounded: a full table must not spin here
                 stored = int(st.history_keys[index])
                 if stored == 0 or stored == value:
                     st.history_keys[index] = value
