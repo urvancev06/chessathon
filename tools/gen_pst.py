@@ -184,14 +184,6 @@ def timing_rows(run_id: str = TIMING_RUN_ID) -> list[dict[str, str]]:
             "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first "
             "attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule",
         ),
-        (
-            "timing.cold_finish_fraction",
-            str(p.cold_finish_fraction),
-            code,
-            "none: same value as hard_fraction, and for the same reason",
-            "the share of the clock the first move may spend finishing a warm-up the import ran "
-            "out of budget for; at most one move of one game",
-        ),
     ]
     return [
         {

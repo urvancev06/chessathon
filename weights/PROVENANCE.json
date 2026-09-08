@@ -232,14 +232,6 @@
     "note": "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule"
   },
   {
-    "parameter": "timing.cold_finish_fraction",
-    "value_or_shape": "0.25",
-    "produced_by": "code (mikhail_letal/timing.py)",
-    "data": "none: same value as hard_fraction, and for the same reason",
-    "run_id": "2026-09-08",
-    "note": "the share of the clock the first move may spend finishing a warm-up the import ran out of budget for; at most one move of one game"
-  },
-  {
     "parameter": "search.null_move",
     "value_or_shape": "min depth 3, R = 2 + depth // 6",
     "produced_by": "code (mikhail_letal/search.py)",

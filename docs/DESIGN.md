@@ -384,7 +384,6 @@ class TimeParams:
     easy_factor: float = 0.7                # a settled one gets a smaller one
     easy_stable_depths: int = 6
     easy_score_drop_cp: int = 30
-    cold_finish_fraction: float = 0.25
 
 @dataclass(frozen=True)
 class Budget:
@@ -766,7 +765,7 @@ keeps `DEFAULT_NODE_RATE` rather than zero, so the node cap that backs up the cl
 `get_move` then finishes the job on the first real move, before it searches
 (`_finish_warm_up`), because numba cannot be interrupted: a function compiled *inside*
 `ENGINE.search` blows through the hard deadline (measured 15.9 s against 10.2 s). The finish is
-bounded by `TimeParams.cold_finish_fraction` of the clock and by the same predictive budget; the
+unbounded: it compiles everything left, and `get_move` subtracts the cost from the clock before the budget is computed, so the search shrinks to fit; the
 search's deadlines are then shifted by what it cost and its budget computed from the clock that
 is left, so every search stays inside its hard deadline and the cost is paid once, on the
 opening's full clock. Measured import from the extracted zip: 19–29 s, against the platform's 90 s budget.

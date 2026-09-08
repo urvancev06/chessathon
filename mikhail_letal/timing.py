@@ -102,13 +102,6 @@ class TimeParams:
     easy_factor: float = 0.7
     easy_stable_depths: int = 6
     easy_score_drop_cp: int = 30
-    # If the import's numba warm-up ran out of its own budget, the first real move finishes the
-    # compiling before it searches, and may spend this share of the clock doing it. numba cannot
-    # be interrupted, so a function compiled inside the search blows straight through the hard
-    # deadline; doing it here instead keeps every search inside its budget and pays the cost once,
-    # on the fullest clock of the game. Normally zero moves are affected, because the warm-up
-    # finishes at import (mikhail_letal/warmup.py).
-    cold_finish_fraction: float = 0.25
 
 
 @dataclass(frozen=True)
