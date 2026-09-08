@@ -1307,7 +1307,32 @@ position most likely to attract a fifth theory.
 manoeuvre and the metric counts it as waste, so one middlegame move in ten is what playing chess
 looks like, not a defect. A tie-break that pushed us below 9.7 % would move us *away* from the field.
 
-**The transferable lesson: a rate is not a finding.** 9.7 % looked damning with nothing standing
+5. **King wandering, and a PST that makes it free** (`chessathon-bb`). The surviving anomaly looked
+   like king moves: 0.125 non-castling king moves per middlegame move at ≥24 men, the 94th
+   percentile of 939 field sides. A code mechanism was found for it — the king middlegame table
+   scores `b1` and `c1` **identically to `g1`** (absolute values `a1=0 b1=25 c1=25 d1=-10 e1=-10
+   f1=0 g1=25 h1=0`), so round 73's walk runs 25 → 0 → −10 → −10 → **25**: net zero on arrival,
+   three cheap squares in transit, and nothing in the evaluation knows the king dismantled its own
+   castle. **The mechanism is real; the anomaly it explains is not.** The field's kings wander
+   **7.3× more** in locked positions than open ones (1.51 % at zero rams to 10.98 % at 4+), because
+   a king march is a real plan when the centre cannot open. Closedness-matched, our 10 king-wander
+   moves against an expectation of 6.87 give **obs/exp = 1.46, Poisson P(X ≥ 10) = 0.157**. The
+   94th-percentile figure had been computed against field sides *without matching on structure*, and
+   our games skew closed — round 73 alone had eight rams.
+
+   The PST property stays on the candidate list with an honest label: **plausible defect, no measured
+   harm, would need its own screen.** Not as an explanation of round 73.
+
+**The transferable lesson, and it is now three for three: the fix was a matched baseline, never more
+analysis of our own games.** Shuffling looked like a defect until it was compared against the field
+(9.7 % against 11.4–11.7 %). Locked-position shuffling looked absent until the field showed a
+five-fold dose-response our seven games could not resolve. King wandering looked like the 94th
+percentile until it was matched on closedness and became p = 0.157. Each time the corrective was a
+comparison, cost one command over PGNs already on disk, and arrived after several rounds of deeper
+analysis of the same seven games. **Analysing our own data harder never once produced the
+correction.**
+
+**A rate is not a finding.** 9.7 % looked damning with nothing standing
 next to it. This is the control-arm problem one level up — 5a controlled for position structure,
 correctly, and that killed explanation 3; neither of us controlled for what *good play* scores on
 the metric itself. The baseline was the cheapest analysis available and the fourth or fifth one run.
