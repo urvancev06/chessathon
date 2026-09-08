@@ -4,9 +4,9 @@ Everything you (the operator) do by hand, in order. Claude never touches your ac
 
 ## 0. What you are submitting
 
-- **Build:** v0.2, git tag `v0.2`, commit `0ecf486`, on https://github.com/urvancev06/chessathon.
+- **Build:** v0.2.1, git tag `v0.2.1`, commit `f3392bf`, on https://github.com/urvancev06/chessathon. Engine identical to tag `v0.2`; only comments and docs differ.
 - **File:** `submission.zip` in the repo root (`~/dev/chessathon/submission.zip`), 35 087 bytes,
-  105 680 bytes unzipped, sha256 `3dbec41a3317f3c9b475ea3e3a288cd90584d4192bd825c88d5d1b78216f4873`.
+  106 035 bytes unzipped, sha256 `4f3ac2e27dcacee259eedaab745f8e43e3b629c917044095a3b0839fce46e280`.
   Check it with `sha256sum submission.zip` before uploading.
 - **Contents (nine files, `agent.py` at the root):** `agent.py`, `mikhail_letal/__init__.py`,
   `evaluation.py`, `search.py`, `timing.py`, `gamestate.py`, `fallback.py`, `weights/pst.json`,
