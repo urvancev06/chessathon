@@ -33,7 +33,26 @@ Local node rate: see RESULTS.md.
 
 ## Log of calibrations
 
-(none yet — awaiting the first validation log)
+### 2026-09-08 — first platform measurements, from rated rounds 67, 68 and 69 (build v0.2.1)
+
+| quantity | platform | local | note |
+|---|---|---|---|
+| per-move overhead (referee-charged minus self-measured) | 0–2 ms, mean 1.1 ms over 25 moves | 0–1 ms | `overhead_ms = 150` is ~100x more conservative than needed |
+| node rate, middlegame | 21 600–27 300 nps | ~55 000 nps | platform is **2.3x slower** |
+| node rate, late endgame | up to 64 000 nps | — | rises as the board empties |
+| depth reached, middlegame | 5–8 | 8–9 | about 2–3 plies less |
+| import time | 0.6 s | 0.033 s | mostly fixed container and interpreter cost, not compute |
+| clock left at end, 113-move game | 4.7 s | — | survived, but thin (round 68) |
+
+Read from the `m … d … n … nps … t … s … h … c …` lines the agent prints, paired with the
+platform's own per-move clock column. Overhead is `(clock before − clock after) + increment − t`.
+
+**What this changes.** The 150 ms overhead reserve is far larger than the measured 1.1 ms, so the
+budget is leaving time unused on every move; it is kept for now because it is cheap insurance and
+was not the thing that cost points. The real time-management finding is round 68: 113 moves left
+4.7 s on the clock, because `moves_to_go` starts at 40 and floors at 12, which spends too freely
+early in a long game. The speed factor of 2.3 is the number to scale any local depth expectation
+by, and it is the figure the compiled engine's start-up cost must be judged against.
 
 ### Procedure when a validation log arrives
 
