@@ -1451,6 +1451,24 @@ three more `init` lines were read from logs already stored. It cut in **both** d
 making a defect vanish, once making a real effect appear — so it is not a bias toward comfort.
 Analysing our own seven games harder never once produced the correction.
 
+**The other half of the frame, which `chessathon-64` supplied and without which this entry is
+self-congratulatory: almost every defect was in the checking — and we found them mostly by checking
+each other's checks, not our own.** Every item in the list above was caught by a session other than
+the one that wrote it, or by its author only after another session asked a question. The phase-0
+positions, the `mypy` pipe, the void-counting bug, the unverified behaviour-preserving claim, the
+n-dependent gate, the misaligned clock indices — each was found by someone who had not written it.
+Where a defect *was* caught by its author, it was because a question from elsewhere prompted the
+re-reading. **The takeaway is that checking needs checking, not that our checking was bad**, and
+the mechanism was three participants none of whom deferred.
+
 **The practical reading.** A long findings list is what a team looks like when it is checking its
 checks. The engine's own record over the same hours is the thing to weigh, and it is unremarkable
 in the way a shippable build should be.
+
+**A note on the decision machinery, since it bears on trusting the pooled result.** `64` verified
+the adopted gate against inputs **constructed to break it** rather than against whatever the match
+happened to produce — both sides of the n=100 boundary (2 below passes, 3 fails), the non-integer
+allowance at n=150, a flag disqualifying despite a clean clock, and 300 games containing two voids
+correctly refused as an interim look at 298. Real data exercises a boundary only by luck. Separately
+the tool ran on chunk A's real output and behaved as designed, including the two fixes applied hours
+earlier: **a fix applied at 22:00 and first exercised at 04:00 is a fix nobody has tested.**
