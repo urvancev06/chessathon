@@ -103,8 +103,24 @@ uv run python -m tools.webapp.server
 
 Then open http://localhost:8000. You can play the engine at any time control, watch it against
 Stockfish at a chosen strength, and analyse any finished game move by move if you have Stockfish
-installed locally. The evaluation tables are rendered as heatmaps, which is the fastest way to see
-what the engine actually values.
+installed locally.
+
+![Playing the engine](docs/images/play.png)
+
+Every move it plays comes with the report it wrote about itself: the depth it reached, how many
+positions it looked at, and where its time budget went.
+
+![The evaluation weights](docs/images/weights.png)
+
+The Weights screen reads `weights/pst.json` directly, so the twelve heatmaps are the numbers the
+engine is actually using. It is the fastest way to see what it values and where the generator's
+formula produced something odd.
+
+![Analysing a finished game](docs/images/analysis.png)
+
+If you have Stockfish installed locally, any finished game can be graded move by move: accuracy
+and average centipawn loss per side, the evaluation curve, and what the engine should have played
+at each ply.
 
 Without the web app:
 
