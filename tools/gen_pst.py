@@ -280,11 +280,19 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
         ),
         (
             "search.node_check_interval",
-            str(search.NODE_CHECK_INTERVAL),
-            code,
+            # The COMPILED value: fastsearch.py holds its own, and it is the engine that plays a
+            # rated game. Reading search.NODE_CHECK_INTERVAL here shipped 128 in a row whose note
+            # says "the compiled search", which used 512. tests/test_constant_parity.py records
+            # the divergence as deliberate and guards it.
+            str(fastsearch.NODE_CHECK_INTERVAL),
+            "code (mikhail_letal/fastsearch.py)",
             "none: chosen by measurement (see note)",
-            "how often the compiled search reads the clock; 1024 gave 25 ms mean and 65 ms worst "
-            "overshoot locally, and a perf_counter read costs ~60 ns, so 128 is effectively free",
+            "how often the compiled search reads the clock, in nodes. An objmode clock read costs "
+            "~300 ns, so 512 nodes is well under 1 % of node cost. At the 505 286 nodes/s median "
+            "measured over the round-74 rated game it bounds the overshoot past the hard deadline "
+            "to 1.013 ms, and that game overshot twice, by 1 ms each time "
+            "(handoff/LOG-round-74-zagreus.md). The interpreted reference engine in search.py uses "
+            "128 for the same granularity at its own much lower node rate",
         ),
         (
             "search.max_ply",

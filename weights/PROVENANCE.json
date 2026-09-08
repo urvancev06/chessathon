@@ -297,11 +297,11 @@
   },
   {
     "parameter": "search.node_check_interval",
-    "value_or_shape": "128",
-    "produced_by": "code (mikhail_letal/search.py)",
+    "value_or_shape": "512",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
     "data": "none: chosen by measurement (see note)",
     "run_id": "2026-09-08",
-    "note": "how often the compiled search reads the clock; 1024 gave 25 ms mean and 65 ms worst overshoot locally, and a perf_counter read costs ~60 ns, so 128 is effectively free"
+    "note": "how often the compiled search reads the clock, in nodes. An objmode clock read costs ~300 ns, so 512 nodes is well under 1 % of node cost. At the 505 286 nodes/s median measured over the round-74 rated game it bounds the overshoot past the hard deadline to 1.013 ms, and that game overshot twice, by 1 ms each time (handoff/LOG-round-74-zagreus.md). The interpreted reference engine in search.py uses 128 for the same granularity at its own much lower node rate"
   },
   {
     "parameter": "search.max_ply",
