@@ -874,9 +874,30 @@ would upload better than what is uploaded") and cannot attribute the result to e
    Consequence worth stating plainly: at 300 games this margin is **not the binding constraint** —
    any non-negative point estimate clears it. The conditions that actually decide case 3 below are
    the non-negative point estimate and the clock.
-3. **Interval straddles zero, point estimate at or above zero, lower bound above −40, *and* the
-   lowest-clock figure improves against v1.0 with no loss on time** → promote, and record in
-   `RESULTS.md` and the report that it shipped on the **safety** criterion, not the Elo rule.
+3. **Interval straddles zero, point estimate at or above zero, lower bound above the margin, *and*
+   the safety condition below holds** → promote, and record in `RESULTS.md` and the report that it
+   shipped on the **safety** criterion, not the Elo rule.
+
+   **The safety condition, stated in what this match actually records.** The first draft of this
+   entry said "the lowest-clock figure improves against v1.0". That cannot be evaluated:
+   `arena_openings` records `agent_low_clock_ms`, "the lowest clock **the agent** had", and in a
+   v1.1-versus-v1.0 match the agent is v1.1. The opponent's clock is never written down, so there
+   is no v1.0 figure in the run to compare against, and v1.0's existing rows were played against
+   Stockfish at different game lengths and are not comparable. A criterion that cannot be computed
+   is not a criterion, and discovering that after the number arrived would have meant choosing an
+   interpretation to fit it.
+
+   So the condition is absolute rather than comparative, which is arguably what it should have been
+   from the start — the risk being reduced is running out of clock, not being relatively better at
+   not running out:
+
+   - **no game lost on time**: `flag` appears in no chunk's terminations (it is in
+     `harness.referee.FAILED_TERMINATIONS`, so it is recorded), **and**
+   - **`low_clock_ms` stays above 5 000 ms** across all 300 games — three times `panic_ms` (1 650),
+     the clock below which `get_move` abandons the search and plays a fallback. A run that never
+     comes within three times that of the panic floor did not survive by luck.
+
+   A v1.0 comparison would need its own run and is **not** a condition of this decision.
 
 **Why case 3 is a deviation worth making.** The strict rule assumes the change is trying to buy
 Elo. The timing refit is not: it exists because two of our seven rated games finished on 4.7 s and
