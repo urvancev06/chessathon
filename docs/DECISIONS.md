@@ -854,3 +854,28 @@ its origin is provable from the source.
 **Rejected: tuning `LMR_BASE` and `LMR_DIVISOR`.** They are textbook magnitudes taken as they
 stand. Tuning them against anything other than games would be fitting to the wrong objective, and
 tuning them against games costs the arena time the strength screen needs first.
+
+## 2026-09-08 — The compiled futility prune stops making the move it is about to throw away
+
+`fastsearch.negamax` made every move before it decided whether to futility-prune it, then unmade
+it: a full `make_move`/`unmake_move` bought nothing at every pruned move. The comment said why —
+"no legal move below" has to keep meaning mate or stalemate, and a node that has pruned everything
+must not be mistaken for one that has nothing to play. That reasoning holds only until the node
+has seen one legal move; after that it is neither mate nor stalemate whatever the rest of the list
+does. So the prune now happens before `make_move` as soon as `legal_seen` is set, and only the
+first legal move of a futility node is still made and thrown away.
+
+`search._negamax` never had the problem: `_staged_moves` yields legal moves only, so the Python
+engine could always prune before pushing. This is the compiled port catching up.
+
+**Measured, depth 10, best of three, pairs back to back.** Node counts are identical to the last
+node (141 701 / 1 657 996 / 94 970), which is the check that matters: the same moves are pruned
+and the same tree is searched. Time: 0.203 s → 0.203 s from the start, 2.562 s → 2.493 s in the
+Kiwipete middlegame (−2.7 %), 0.163 s → 0.111 s in the rook ending; totals 2.929 s → 2.808 s.
+Small, because futility only fires at depths 1 and 2, and free.
+
+**One deliberate imprecision.** A quiet move pruned before it is made has not been tested for
+legality, so an illegal one can now set `pruned_any`. That can only raise the node's fail-soft
+score to `futility_bound`, which is at most `alpha_original`, so the node still stores an UPPER
+bound and the bound is still true — a looser upper bound is always sound. Nothing in the three
+measured positions changed by a single node.

@@ -977,19 +977,32 @@ def negamax(
     best_score = -_INFINITY
     best_move = NO_MOVE
     searched = 0
+    legal_seen = 0
     aborted = 0
 
     for i in range(count):
         _pick_best(st, ply, i, count)
         move = st.moves[ply, i]
         quiet = _victim(pos, move) == 0 and ((move >> PROMO_SHIFT) & PROMO_MASK) == 0
+        # A quiet move from a position this far below alpha: its value is at most the futility
+        # bound, which is at most alpha, so it cannot improve on what we have.
+        futile = quiet and move != tt_move and futility_bound > -_INFINITY
+        if futile and legal_seen != 0:
+            # Nothing is made: the node has already found a legal move, so it is neither
+            # checkmate nor stalemate whatever the rest of the list does, and the only reason the
+            # move was ever made before being thrown away was to keep that test honest. This is
+            # the common case -- futility applies at depths 1 and 2, which are most of the
+            # interior nodes, and by the time the quiet moves come up a capture or the table move
+            # has nearly always been searched already.
+            pruned_any = 1
+            continue
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
-        if quiet and move != tt_move and futility_bound > -_INFINITY:
-            # A quiet move from a position this far below alpha: its value is at most the
-            # futility bound, which is at most alpha, so it cannot improve on what we have. The
-            # move is made first only so that "no legal move" below still means mate or stalemate.
+        legal_seen = 1
+        if futile:
+            # The first legal move of the node is still made and then thrown away, because
+            # "no legal move below" has to keep meaning mate or stalemate.
             unmake_move(pos)
             pruned_any = 1
             continue
