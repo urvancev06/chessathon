@@ -215,8 +215,19 @@ trigger the same type signatures the game will, and \code{tests/test\_fasteval.p
 signature appears afterwards under load --- a second signature would mean a compilation deferred onto the
 clock. The warm-up also carries a wall-clock deadline, so that an unexpectedly slow container degrades
 into a shallower first move rather than losing every game: if the budget runs out, the remaining
-compilation is finished on the first real move, which may spend up to \code{cold\_finish\_fraction} of
-its clock doing it, on the fullest clock of the game.
+compilation is finished on the first real move, on the fullest clock of the game. In v1.0 that finish
+is itself bounded, by \code{cold\_finish\_fraction} of the clock.
+
+That bound was later found not to hold. The budget is re-armed for the cold finish, and re-arming
+resets the slowdown measured during the import --- the very number that made the import skip phases in
+the first place --- so the remaining work was predicted at development-machine speed on a machine
+already known to be slower. The bound has been removed rather than repaired: everything left is
+compiled unconditionally, and the cost is subtracted from the clock before the move's budget is
+computed, so the search that follows shrinks to fit it. Between an accounted cost and an unaccounted
+one, the accounted one is preferable --- a phase deferred instead would compile inside
+\code{ENGINE.search}, where numba cannot be interrupted and no deadline applies. \textbf{That change is
+not in v1.0}, the build this report describes; it is recorded here because the bound v1.0 ships with is
+weaker than it appears.
 
 \section{Board representation and move generation}
 \paragraph{What the shipped build uses.} v1.0 has its own board and its own move generator:
@@ -313,7 +324,7 @@ Check extension & In check, search one ply deeper (capped at \code{MAX\_PLY = 12
 Quiescence, stand pat first & Test the static evaluation against $\beta$ before generating any capture; a position with no legal move is still scored as mate or stalemate, never evaluated. Before the change, captures were generated and then discarded at seven quiescence nodes in ten. & +43\,\% nps in isolation (reviewer); all review fixes together 51.7k $\to$ 67.2k nps, identical results \src{DECISIONS.md item K; RESULTS.md, ``review nps''}. \\
 Evasion cap, \code{QS\_EVASION\_PLIES = 4} & In check inside quiescence, every evasion is searched for the first four quiescence plies; deeper checks stand pat like any other node so dense positions cannot explode. & Eight queens a side: one depth-1 iteration fell from hundreds of thousands of nodes to 33k \src{DECISIONS.md item M}. \\
 Transposition table, int-only entries & \code{dict} keyed by position, entry \code{(depth, score, flag, move\_code)} with every field an \code{int} (the move is packed as from $|$ to $\ll 6$ $|$ promotion $\ll 12$ and rebuilt at the probe). Mate scores are stored ply-independent. Cap 250\,000 entries; emptied at move start if above 60\,\% of the cap, and as a backstop when the cap is hit mid-search. Persists across moves within a game. & Worst generation-2 garbage-collection pause in a 60 s search: 143 ms (270k \code{chess.Move} entries) $\to$ 13.7 ms; RSS at the cap 143 MB $\to$ 120 MB; nps on that position 50.3k $\to$ 62.7k \src{RESULTS.md, ``gen-2 gc pause'' and ``RSS at the TT cap''}. A 143 ms stall is invisible to the clock check and would have been about three times longer on the platform's core. \\
-Clock check every \code{NODE\_CHECK\_INTERVAL = 128} nodes & Read \code{perf\_counter()} and abort past the hard deadline or past an optional node limit. & With 1024 the search overshot the hard deadline by 25 ms mean, 65 ms worst locally (9 ms worst in the integration game); a clock read costs about 60 ns, and nps is unchanged at 128 \src{DECISIONS.md item A; RESULTS.md, ``hard-deadline overshoot''}. \\
+Clock check every \code{NODE\_CHECK\_INTERVAL} nodes (128 here; \textbf{512 in the compiled engine}, which is the one that plays --- at 505 k nodes/s that is the same millisecond of granularity, and equal node counts would have meant unequal time) & Read \code{perf\_counter()} and abort past the hard deadline or past an optional node limit. & With 1024 the search overshot the hard deadline by 25 ms mean, 65 ms worst locally (9 ms worst in the integration game); a clock read costs about 60 ns, and nps is unchanged at 128 \src{DECISIONS.md item A; RESULTS.md, ``hard-deadline overshoot''}. \\
 Move ordering & TT move first; captures and promotions by MVV-LVA (victim value $\times 10$ minus attacker value; a promotion counts the promoted piece as the victim); two killer moves per ply (quiet moves that caused a cutoff at the same ply); remaining quiet moves by the history heuristic (bonus $\mathrm{depth}^2$ per cutoff, indexed by colour, from- and to-square). Captures are never stored as killers. & Structural; no separate measurement. \\
 Repetition inside the tree & A node whose position already occurred in the game history or on the current search path scores 0. The side that is ahead therefore avoids repeating and the side behind seeks it, with no root rule \src{DECISIONS.md, ``Two-fold repetition''}. & Pinned by \code{test\_side\_ahead\_avoids\_repetition} and \code{test\_side\_behind\_seeks\_repetition}. \\
 Graph-history mitigation & A draw found through the path is a fact about the line, not the position, so a node whose value depended on one is not stored with its score; only its move is kept as an ordering hint at depth $-1$, never over an entry earned without the repetition. Draws from the game history are permanent within the game and are stored normally. & Cost 0.15\,\% of nps (A/B, three 3 s searches each). Evidence: after a depth-7 search of \code{8/8/8/4k3/8/8/8/R3K3 w} the table held a depth-5 lower bound of 0 for a position whose fresh value is $-628$ \src{DECISIONS.md item E}. \\
@@ -500,7 +511,7 @@ constant & value & origin \\
 \code{iteration\_target\_factor} & 1.35 & \textbf{measured}: 1.0 spends 0.70 of the budget for mean depth 10.83; 1.35 spends 0.80 for 11.17; 1.75 reaches the hard ceiling \\
 \code{unstable\_factor} & 1.5 & hand-chosen, textbook magnitude: half a budget more when the best root move just changed. Bounded by the hard ceiling like every other target \\
 \code{easy\_factor} / \code{stable\_depths} / \code{score\_drop} & 0.7 / 6 / 30\,cp & \textbf{measured} against 0.5 / 4 / 30, which fired on nearly every move and spent less than the fixed rule it replaced \\
-\code{cold\_finish\_fraction} & 0.25 & the share of the first move's clock that may go on finishing a warm-up that ran out of its own budget \\
+\code{cold\_finish\_fraction} & 0.25 & the share of the first move's clock that may go on finishing a warm-up that ran out of its own budget. \textbf{v1.0 only}: the bound it expresses was found not to hold (Section~\ref{sec:arch}) and the constant is deleted in the successor, where the cold finish is unbounded and its cost is charged to the move's clock instead \\
 \bottomrule
 \end{tabular}
 \caption{Time-management constants of build v1.0, calibrated on 8~September against the platform's own
@@ -978,7 +989,37 @@ against the random baseline \src{RESULTS.md, rows \code{numba-vs-v0.2-10s}, \cod
 \paragraph{Validation on the competition platform.} v1.0 was uploaded and validated: verdict \emph{valid},
 two smoke games of 20 plies, one per colour. It reached \textbf{depth 10--12} at 290--569 thousand nodes
 per second on the competition core, against the interpreted v0.2.1's depth 5--8 at 21.6--27.3 thousand
-\src{CALIBRATION.md, 2026-09-08, v1.0 validation}. That is the only platform run of the compiled build to
+\src{CALIBRATION.md, 2026-09-08, v1.0 validation}.
+
+\paragraph{A full rated game, with the per-move search table.} Round 74 (Black against Zagreus 5.0,
+Caro-Kann Advance, won by checkmate) was played by v1.0 and the platform's own per-move log is stored
+\src{handoff/LOG-round-74-zagreus.md}. Seventy of our moves, 145.2~s used of a 155~s budget, 9.8~s left.
+It is the strongest platform evidence in the repository, because unlike the validation it is a real game
+against a rated opponent rather than twenty plies of smoke:
+
+\begin{table}[H]\centering\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+quantity & median & range \\
+\midrule
+depth & 11 & 1--16 \\
+node rate & 505 k & 56 k--646 k \\
+time used $\div$ soft budget & 0.65 & mean 0.82 \\
+\bottomrule
+\end{tabular}
+\caption{Round 74, 70 moves, recomputed from the stored log. The depth-1 and 56\,k-nps entries are the
+final forced mate (\code{d1=Q}, \code{Qd4+}, \code{Qd6\#}), found instantly and spending 2--8~ms of a
+1.1~s budget --- not a collapse under time pressure: the clock \emph{rises} across those moves because
+the increment exceeds what is spent.}
+\end{table}
+
+Two things this settles that the smoke games could not. **The hard deadline holds on the platform.** Two
+of the seventy moves exceeded it, both by exactly 1~ms --- the clock is read every 512 nodes, so a
+millisecond is the granularity of the measurement rather than a breach. Across a full rated game the
+abort path did what Section~\ref{sec:safety} claims for it. And **the soft budget does not hold, by
+design and by a wide margin**: 19 of 70 moves ran past it into the hard window. That is the bimodal
+spending Section~\ref{sec:time} describes, measured on the shipped build in a rated game, and it is the
+defect the successor's iteration control targets. That is the only platform run of the compiled build to
 date; every other platform figure in this report is the interpreted engine and is labelled as such.
 
 \paragraph{The start-up risk, stated plainly.} numba compilation is paid once, at import, inside the 90~s
@@ -1032,7 +1073,7 @@ mop-up weights & edge 10, close 12 & \code{tools/gen\_pst.py} & none & 2026-09-0
 phase weights & N 1, B 1, R 2, Q 4 (total 24) & \code{tools/gen\_pst.py} $\to$ \code{pst.json} (\code{evaluation.py} only validates them) & none & 2026-09-06 & standard tapered-evaluation weighting \\
 \code{MATE\_SCORE}, \code{MATE\_THRESHOLD} & 100\,000, 99\,000 & code & none & 2026-09-06 & arbitrary large constants \\
 TT entry cap & 250\,000 (default of \code{Engine}); \code{dict}, cleared when full and at move start above 60\,\% (\code{TT\_CLEAR\_FRACTION}) & code & none & 2026-09-07 & bounds memory: 120 MB RSS at the cap; int-only entries keep gc pauses $\leq 14$ ms \\
-\code{NODE\_CHECK\_INTERVAL} & 128 & code & none & 2026-09-07 & clock cadence; 1024 gave 25 ms mean / 65 ms max overshoot locally; a read costs about 60 ns \\
+\code{NODE\_CHECK\_INTERVAL} & 128 (Python) / \textbf{512 (compiled)} & code & none & 2026-09-07 & clock cadence. \textbf{The two engines deliberately differ}, the only shared search constant that does: at 505 k nodes/s against 55 k, both are about one millisecond, and 512 is what makes the 1 ms hard-deadline overshoot measured in round 74 the granularity rather than a breach. \emph{Known defect:} \code{weights/PROVENANCE.json} still records 128 for the compiled search, because correcting it means regenerating a frozen file; cite \code{fastsearch.py:164}. 1024 gave 25 ms mean / 65 ms max overshoot locally; a read costs about 60 ns \\
 \code{MAX\_PLY} & 128 & code & none & 2026-09-06 & recursion bound for search, quiescence and extensions \\
 check extension & +1 ply when in check & code & none & 2026-09-06 & textbook; applied before the TT probe \\
 \code{QS\_EVASION\_PLIES} & 4 & code & none & 2026-09-07 & keeps eight-queens-a-side positions under 100k nodes at depth 1 \\
