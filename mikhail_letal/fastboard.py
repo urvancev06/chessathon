@@ -161,6 +161,14 @@ MAX_UNDO: Final = 512  # plies of make/unmake nesting; the referee caps a game a
 MAX_MOVES: Final = 256  # the most pseudo-legal moves a position can have is well under 256
 PIECES_PER_SIDE: Final = 16
 
+# The most moves one piece can contribute to `gen_pseudo`: a queen on an empty board reaches 27
+# squares, and no other piece reaches more (a pawn tops out at twelve -- four quiet promotions
+# and four each way as capture-promotions). `gen_pseudo` reserves this much room before it starts
+# on a piece, which turns a buffer overflow from a silent write past the end of the array into a
+# raised exception. Numbered rather than derived so the guard is one integer comparison.
+MOVES_PER_PIECE_MAX: Final = 27
+CASTLING_MOVES_MAX: Final = 2  # the two castling moves, written after the piece loop
+
 # ----------------------------------------------------------------------------- direction tables
 
 # 0x88 offsets. Adding one to a square moves one file east; adding sixteen moves one rank north.
@@ -366,8 +374,19 @@ def gen_pseudo(pos: Position, out: npt.NDArray[np.int32]) -> int:
     them = 1 - side
     ep = pos.meta[M_EP]
     n = 0
+    # Read from the array rather than from MAX_MOVES so the guard is about the buffer actually
+    # handed in, and so a caller with a shorter buffer is caught too.
+    room = out.shape[0]
 
     for slot in range(pos.meta[M_COUNT + side]):
+        # The overflow guard. One comparison per piece, before anything is written for it: the
+        # writes below add at most MOVES_PER_PIECE_MAX for this piece, so if that much room is
+        # left no write can pass the end. Nothing here is derived from a compile-time constant,
+        # so the compiler cannot prove it away. A raise (rather than a truncated move list) is
+        # deliberate: silently dropping legal moves would make the engine play a wrong move,
+        # while the exception is caught in agent.py and answered with the fallback.
+        if n + MOVES_PER_PIECE_MAX > room:
+            raise IndexError("gen_pseudo: move buffer too small")
         frm = pos.plist[side * PIECES_PER_SIDE + slot]
         kind = board[frm] & PIECE_TYPE_MASK
 
@@ -449,6 +468,8 @@ def gen_pseudo(pos: Position, out: npt.NDArray[np.int32]) -> int:
     # square. The rook may be attacked and may cross an attacked square; only the king may not.
     rights = pos.meta[M_CASTLE]
     if rights != 0:
+        if n + CASTLING_MOVES_MAX > room:  # the same guard for the two moves written below
+            raise IndexError("gen_pseudo: move buffer too small")
         if side == WHITE:
             king_side, queen_side, home = CASTLE_WK, CASTLE_WQ, E1
         else:
@@ -498,6 +519,11 @@ def make_move(pos: Position, move: int) -> int:
 
     ply = meta[M_PLY]
     undo = pos.undo
+    # The undo-stack guard, one comparison per move made. Overflowing it would write past the end
+    # of `undo` and corrupt whatever numpy put after it, which on the platform would show up as
+    # anything at all; the exception reaches agent.py, which answers with the fallback.
+    if ply >= undo.shape[0]:
+        raise IndexError("make_move: undo stack full")
     undo[ply, U_MOVE] = move
     undo[ply, U_CASTLE] = meta[M_CASTLE]
     undo[ply, U_EP] = meta[M_EP]

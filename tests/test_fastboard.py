@@ -490,3 +490,60 @@ def test_in_check_and_has_legal_move_agree_with_python_chess() -> None:
         fb.set_from_board(pos, board)
         assert bool(fb.in_check(pos)) == board.is_check()
         assert bool(fb.has_legal_move(pos, buffer)) == bool(board.legal_moves.count())
+
+
+# ----------------------------------------------------------------- gate 4: the overflow guards
+
+
+def test_move_buffer_guard_fires_instead_of_writing_past_the_end() -> None:
+    """A buffer too small for the position raises rather than corrupting whatever follows it.
+
+    On the platform an out-of-bounds numpy write is silent and its consequences arbitrary, so the
+    guard has to be a real runtime comparison. Passing a deliberately short buffer is the only
+    way to reach it, since no legal position produces 256 pseudo-legal moves.
+    """
+    pos = fb.from_board(chess.Board())
+    for size in (1, 8, 19, 40):
+        short = np.zeros(size, dtype=np.int32)
+        with pytest.raises(IndexError, match="move buffer too small"):
+            fb.gen_pseudo(pos, short)
+        assert not short[size - 1], "a move was written despite the guard"
+
+
+def test_move_buffer_guard_leaves_a_big_enough_buffer_alone() -> None:
+    """The guard must not fire on a real position, however wide: `MAX_MOVES` has to cover the
+    worst case plus the per-piece reserve the guard demands."""
+    widest = "3Q4/1Q4Q1/4Q3/2Q4R/Q4Q2/3Q4/1Q4Rp/1K1BBNNk w - - 0 1"  # 218 legal moves
+    pos = fb.from_board(chess.Board(widest))
+    buffer = fb.new_move_buffer()
+    assert fb.gen_pseudo(pos, buffer) >= 218
+    assert fb.gen_legal(pos, buffer) == 218
+
+
+def test_move_buffer_guard_reserves_room_for_the_widest_piece() -> None:
+    """`MOVES_PER_PIECE_MAX` must really bound one piece's contribution, or the guard leaves too
+    little room. A queen alone on an empty board is the worst case."""
+    pos = fb.from_board(chess.Board("8/8/8/3Q4/8/8/8/K6k w - - 0 1"))
+    buffer = fb.new_move_buffer()
+    queen_moves = sum(
+        1
+        for i in range(int(fb.gen_pseudo(pos, buffer)))
+        if fb.move_from(int(buffer[i])) == fb.sq88(chess.D5)
+    )
+    assert queen_moves == 27
+    assert queen_moves <= fb.MOVES_PER_PIECE_MAX
+
+
+def test_undo_stack_guard_fires_at_max_undo() -> None:
+    """`make_move` refuses the ply after the last undo slot rather than writing past the array."""
+    pos = fb.from_board(chess.Board("8/8/8/8/8/8/8/K6k w - - 0 1"))
+    shuffle = [
+        fb.pack_move(fb.A1, fb.B1),
+        fb.pack_move(fb.H1, fb.G1),
+        fb.pack_move(fb.B1, fb.A1),
+        fb.pack_move(fb.G1, fb.H1),
+    ]
+    with pytest.raises(IndexError, match="undo stack full"):
+        for i in range(fb.MAX_UNDO + 8):
+            fb.make_move(pos, shuffle[i % 4])
+    assert int(pos.meta[fb.M_PLY]) == fb.MAX_UNDO
