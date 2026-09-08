@@ -696,3 +696,52 @@ dribbling into a middlegame move whose whole budget is three seconds. Rejected: 
 compile inside the search, which is where the 15.9 s came from and which leaves single functions
 to compile at unpredictable moments later in the game; and refusing to search at all while the
 jit is cold, which never compiles anything and so plays fallback moves for the whole game.
+
+## 2026-09-08 — Principal variation search at interior nodes
+
+`negamax` searched every child of every interior node with the full window `(-beta, -alpha)`.
+Only the first child needs that. Once the ordering's first move has raised alpha, the question
+asked of every later move is not "how good is it?" but "is it better than alpha?", and a null
+window `(alpha, alpha + 1)` answers that at the first refutation in every subtree. Only a move
+that answers yes is measured, with a re-search inside the real window. Both engines now do it —
+`search._negamax` as the readable version, `fastsearch.negamax` as the compiled one.
+
+**The interaction with late-move reductions, which is where the classic bug lives.** A late quiet
+move can now be searched three times, and the order is fixed: reduced depth with the null window,
+then full depth with the null window, then full depth with the real window. The middle step is
+the one that is easy to drop, and dropping it pays full depth *and* the full window for a move
+that only a shallow search has hinted at. Two guards make the chain terminate: the full-depth
+null-window repeat runs only when a reduction was applied, and the full-window re-search runs
+only when `alpha < score < beta`, which is unsatisfiable when the caller already handed down a
+null window (`beta == alpha + 1`), so a null-window node never re-searches at all.
+
+**Measured, compiled engine, nodes to a fixed depth** (`FastEngine`, fresh table per position).
+Depth 10: standard start 228 763 → 199 510 nodes (0.51 s → 0.37 s); Kiwipete middlegame
+3 007 599 → 3 193 943 (5.76 s → 6.21 s); rook ending 161 025 → 165 683 (0.21 s → 0.25 s). Over
+fifteen positions (those three plus twelve openings drawn from `data/openings.txt`, seed
+20260908) at depth 9: 8 521 852 → 8 313 522 nodes, −2.4 %.
+
+**Why the saving is small here, honestly.** Isolated, principal variation search is worth much
+more than 2 %: with late-move reductions, null-move pruning and futility pruning switched off,
+the Python engine's four-position depth-6 total falls 690 628 → 579 103 nodes, −16 %. With those
+heuristics on they have already taken most of the same tree, and what is left is partly spent on
+the extra re-searches. The change is kept because the two effects are not the same tree — the
+window is exact where the heuristics are approximations — and because the strength screen, not
+the node count, is the verdict.
+
+**Search instability, and the test that had to change.** At a fixed depth the root move and score
+are no longer bit-identical to the old search: the middlegame above answers d5e6/−83 where it
+answered e2a6/−87. Nothing there is unsound. Delta pruning's floor, the futility bound, the
+null-move threshold and the reduced-search re-search test are all comparisons against alpha, so a
+narrower window prunes a different tree and returns a different (still valid) fail-soft bound.
+`test_aspiration_windows_start_at_depth_four_and_keep_the_score_exact` asserted that the aspirated
+and full-window searches return the *same score*; that was always a property of the heuristics
+rather than of aspiration, and it stopped holding. It is now two tests: the move must still match,
+and — the invariant actually worth pinning — with the four window-dependent heuristics switched
+off the two searches agree exactly, which is what says the aspiration re-searches lose nothing.
+
+**Rejected: principal variation search at the root as well.** The root loop still gives every
+move the full window, and that is where the largest single subtree saving would be. It is left
+alone for now because `root_scores` feeds `_break_draw_tie`, which counts moves scoring exactly
+`DRAW_SCORE`, and a null-window root search returns bounds rather than values there; the mop-up
+behaviour that depends on it is tested and would need re-establishing first.

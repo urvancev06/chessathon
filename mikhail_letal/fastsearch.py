@@ -11,10 +11,10 @@ Iterative deepening with aspiration windows from depth 4; fail-soft negamax alph
 transposition table probed and stored with mate scores adjusted by distance from the root;
 quiescence with stand-pat before any move is generated and evasions searched for the first four
 quiescence plies; move ordering by table move, MVV-LVA capture, two killers per ply, then the
-history heuristic; null-move pruning, late-move reductions, futility pruning, delta pruning, a
-check extension and mate-distance pruning; and draws by repetition (against both the game history
-and the current line), by the fifty-move rule and at the referee's 600-ply cap. Every constant is
-the one in ``search.py``.
+history heuristic; principal variation search at interior nodes; null-move pruning, late-move
+reductions, futility pruning, delta pruning, a check extension and mate-distance pruning; and
+draws by repetition (against both the game history and the current line), by the fifty-move rule
+and at the referee's 600-ply cap. Every constant is the one in ``search.py``.
 
 What had to change, and why
 ---------------------------
@@ -900,13 +900,33 @@ def negamax(
             and move != killer_second
             and searched >= LMR_FULL_DEPTH_MOVES
         )
-        if late:
-            # (10) Late-move reduction, with a full-depth re-search if the move surprises.
-            score = -negamax(pos, st, ev, child_depth - LMR_REDUCTION, -beta, -alpha, child_ply, 1)
-            if score > alpha and ints[I_ABORT] == 0:
-                score = -negamax(pos, st, ev, child_depth, -beta, -alpha, child_ply, 1)
-        else:
+        if searched == 0:
+            # (10) The first move searched is the principal variation candidate: the ordering
+            # believes in it, so it gets the full window and its score is the one every later
+            # move is measured against. It is never reduced.
             score = -negamax(pos, st, ev, child_depth, -beta, -alpha, child_ply, 1)
+        else:
+            # (11) Principal variation search. Every later move is expected to be worse than the
+            # first, and proving "worse than alpha" is far cheaper than measuring how much
+            # better a move is: a null window (alpha, alpha+1) cuts off at the first refutation
+            # in every subtree. Only a move that beats alpha has to be measured properly, and
+            # then it is searched again with the real window.
+            #
+            # (12) Late-move reduction rides on the same scan, and the two re-searches compose
+            # in a fixed order: reduced null window, then full-depth null window, then full
+            # window. Skipping the middle step would pay full depth *and* the full window for a
+            # move that the shallow search only hinted at, which is where the classic bug is.
+            reduction = LMR_REDUCTION if late else 0
+            score = -negamax(pos, st, ev, child_depth - reduction, -alpha - 1, -alpha, child_ply, 1)
+            if reduction != 0 and score > alpha and ints[I_ABORT] == 0:
+                # The reduced search surprised us; repeat it at full depth, still null window.
+                score = -negamax(pos, st, ev, child_depth, -alpha - 1, -alpha, child_ply, 1)
+            if alpha < score < beta and ints[I_ABORT] == 0:
+                # The null window only proved the move beats alpha, never by how much, and the
+                # score is inside the real window so the node needs the exact value. When the
+                # caller already gave a null window (beta == alpha + 1) no integer can sit
+                # strictly between the two, so this re-search never happens twice over.
+                score = -negamax(pos, st, ev, child_depth, -beta, -alpha, child_ply, 1)
         unmake_move(pos)
         if ints[I_ABORT] != 0:
             aborted = 1

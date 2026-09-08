@@ -226,8 +226,16 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   (4) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
   probe and store see the same depth; (5) TT probe (depth-sufficient, mate scores adjusted by
   ply); (6) depth ≤ 0 → quiescence; (7) register the position on the path; (8) null-move
-  pruning; (9) the futility decision; then the staged move loop with (10) late-move reductions.
+  pruning; (9) the futility decision; then the staged move loop with (10) the first move at the
+  full window, (11) a null window for every later move and (12) late-move reductions inside it.
   No legal move and nothing pruned → mated or stalemate.
+- Principal variation search: only the first move searched at a node gets the full window
+  `(alpha, beta)`. Every later one is searched with `(alpha, alpha + 1)`, which asks only whether
+  it beats alpha, and is re-searched with the full window when the answer is yes *and* the score
+  lands inside `(alpha, beta)` — unsatisfiable when the node itself was given a null window, so
+  the re-search never cascades. A late-move reduction inside this composes in a fixed order:
+  reduced depth null window → full depth null window → full window. No switch: it changes how the
+  tree is proved, not which moves are believed.
 - Null-move pruning (`NULL_MOVE_PRUNING`): when not in check, `depth >= NULL_MOVE_MIN_DEPTH (3)`,
   the previous ply was not a null move, neither window bound is a mate score, the side to move
   has a piece other than king and pawns, and the static evaluation is ≥ beta, the side passes
@@ -624,7 +632,8 @@ What is the same as `search.py`: iterative deepening; aspiration windows from de
 widen ×4, at most 2 fails); fail-soft negamax alpha-beta; a transposition table probed and stored
 with mate scores adjusted by distance from the root; quiescence with stand-pat before any move is
 generated and evasions searched for the first four quiescence plies; move ordering by table move,
-MVV-LVA capture, two killers per ply and the history heuristic; null-move pruning (min depth 3,
+MVV-LVA capture, two killers per ply and the history heuristic; principal variation search at
+interior nodes; null-move pruning (min depth 3,
 R = 2 + depth//6, never in check, never without a piece, only when the static evaluation already
 holds beta); late-move reductions (quiet non-killer non-table moves after the first three, at
 depth ≥ 3); futility pruning at depths 1–2 (150/300); delta pruning in quiescence (200); the check

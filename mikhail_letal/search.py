@@ -38,6 +38,12 @@ narrow window around the previous score, widen on failure), *futility pruning* (
 skip quiet moves from positions far below alpha) and *delta pruning* in quiescence (skip captures
 that cannot possibly reach alpha). The comments at the switches below explain each one.
 
+Interior nodes also use *principal variation search*: only the first move of a node is searched
+with the full window, and every later one is first tested with a null window that asks the much
+cheaper question "is this move better than the best so far?". A move that answers yes is searched
+again with the real window. It has no switch because it is not a heuristic -- it changes how the
+same tree is proved, not which moves are believed.
+
 Everything is deterministic: identical inputs and limits produce identical output. The only
 clock-dependent behaviour is the abort at the hard deadline.
 """
@@ -688,15 +694,38 @@ class Engine:
                 pruned_any = True
                 continue
             search_board.push(move)
-            if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES:
-                # (10) Late-move reduction, with a full-depth re-search if the move surprises.
-                score = -negamax(
-                    search_board, child_depth - LMR_REDUCTION, -beta, -alpha, child_ply
-                )
-                if score > alpha:
-                    score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
-            else:
+            if searched == 0:
+                # (10) The first move searched is the principal variation candidate: the
+                # ordering believes in it, so it gets the full window and its score is what
+                # every later move is measured against. It is never reduced.
                 score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
+            else:
+                # (11) Principal variation search. Later moves are expected to be worse than the
+                # first, and proving "no better than alpha" is far cheaper than measuring how
+                # much better a move is: the null window (alpha, alpha + 1) cuts off at the
+                # first refutation in every subtree. Only a move that beats alpha is measured
+                # properly, with a re-search inside the real window.
+                #
+                # (12) Late-move reduction rides on the same scan, and the re-searches compose
+                # in a fixed order -- reduced null window, full-depth null window, full window.
+                # Skipping the middle step would spend full depth *and* the full window on a
+                # move the shallow search only hinted at.
+                reduction = (
+                    LMR_REDUCTION
+                    if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES
+                    else 0
+                )
+                score = -negamax(
+                    search_board, child_depth - reduction, -alpha - 1, -alpha, child_ply
+                )
+                if reduction and score > alpha:
+                    score = -negamax(search_board, child_depth, -alpha - 1, -alpha, child_ply)
+                if alpha < score < beta:
+                    # The null window only proved the move beats alpha, never by how much, and
+                    # the score lands inside the real window, so this node needs the exact
+                    # value. When the caller already gave a null window (beta == alpha + 1) no
+                    # integer sits strictly between the two and this never fires.
+                    score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
             search_board.pop()
             searched += 1
             if score > best_score:
