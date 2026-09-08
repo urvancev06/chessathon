@@ -111,7 +111,7 @@ Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.s
 
 | measurement | value | how |
 |---|---|---|
-| import + compile, extracted zip | 18.5 s | `harness.package` smoke games, `init` log line; platform budget is 90 s |
+| import + compile, extracted zip | 17.4–18.6 s | `harness.package` smoke games, `init` log line; platform budget is 90 s, and the calibrated 2.3x core factor puts it at 40–43 s there |
 | import + compile, in place | 16.9–17.3 s | `import agent`, `init` log line |
 | peak RSS after three moves | 349 MB | `resource.getrusage(RUSAGE_SELF).ru_maxrss`; platform cap is 2 GB |
 | compiled evaluation | 204 ns (opening), 129 ns (rook ending) | 500 000 calls inside a jitted loop |
@@ -121,7 +121,7 @@ Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.s
 | compile time if the root is compiled too | 34.2 s total | measured per function before the root was moved to Python: `negamax` 13.4 s, `_search_root` 6.3 s, aspiration 2.7 s, deepening loop 5.4 s |
 | numba-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +279 =19 -2 | 96.2% | ±1.6% | +560 (+495 to +660) | 6.3% | checkmate 281, fifty_moves 1, threefold_repetition 16, insufficient_material 2 | 8 | 0.72 2.63 3.71 / 6.25 7.76 7.59 | data/openings.txt |
 
-### 2026-09-08 — fuzz re-run on the final build, stopped early
+### 2026-09-08 — fuzz re-run on the final build, stopped early, then run to completion
 
 The 200-game fuzz row above (`numba-fuzz-random`) was run at commit `4383d28`, one commit before
 the transposition table gained its generation field. The re-run on the final build was started and
@@ -132,6 +132,10 @@ otherwise covered by the full suite (497 tests, including a legal move required 
 search on 3 000 sampled positions at three node limits, and the property suite driving
 `agent.get_move`). Recorded here rather than dropped, because a gate that was not finished should
 not read as one that was.
+
+**Resolved.** Once the real-clock match finished, the re-run was started again on the free machine
+and completed: the `numba-fuzz-random-final` row below is **200 games, +200 =0 −0, terminations
+checkmate 200, lowest clock 1 647 ms of 3 000**, on the final build. The gate is met.
 
 ### 2026-09-08 — the recorded unconverted wins, replayed with the compiled engine
 
@@ -148,3 +152,4 @@ python-chess. Two of the three are now converted; the third is on a knife edge.
 The Python engine was replayed alongside the compiled one on the third position and mated in 19
 plies as well, so the two are on the same edge, not on opposite sides of it.
 | numba-vs-v0.2-real | . | versions/v0.2 | 120+0.5 s | 60 | +51 =9 -0 | 92.5% | ±4.6% | +436 (+345 to +607) | 15.0% | checkmate 51, fifty_moves 1, threefold_repetition 8 | 4 | 4.18 7.15 7.39 / 2.66 3.75 4.12 | data/openings.txt |
+| numba-fuzz-random-final | . | baselines/random | 3+0.05 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 8 | 1.97 3.47 4.01 / 7.47 8.13 6.81 | data/openings.txt |
