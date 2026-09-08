@@ -696,3 +696,64 @@ dribbling into a middlegame move whose whole budget is three seconds. Rejected: 
 compile inside the search, which is where the 15.9 s came from and which leaves single functions
 to compile at unpredictable moments later in the game; and refusing to search at all while the
 jit is cold, which never compiles anything and so plays fallback moves for the whole game.
+
+## 2026-09-08 — The position key is carried forward by `make_move`, in the undo stack
+
+`fastboard.hash_position` walks both piece lists and XORs up to thirty-two numbers, and the
+compiled search called it once at every node (`quiescence` and `negamax` on entry, twice more at
+the root). That rebuilds from scratch what a move changes in at most five places. `make_move` now
+carries the key forward instead: it XORs out the piece that left its origin and any captured
+piece on its *real* square (which is not the destination for en passant), XORs in the piece that
+arrived (a different piece after a promotion), does the same pair for the rook of a castling
+move, swaps the rights-combination term whenever a right is actually lost, flips the side-to-move
+term, and takes out the old en passant term and puts in the new one. `hash_position` stays as the
+reference implementation: `set_from_board` seeds the key with it, `check_invariants` and the new
+gate 4 check the carried key against it, and no search node calls it.
+
+**Where the key lives, and why that was the interesting question.** The first version put it in a
+sixth array in the `Position` tuple, `key[K_CURRENT]` with a saved value per ply for `unmake_move`
+to restore. It was exact and it was *slower*: perft dropped 14–17%, and a fixed-node search of a
+rook ending lost 6.7%. The ablation says why — a `Position` with a sixth array, allocated but
+never read, already costs 8–10% of perft on its own, because every compiled function taking a
+`Position` passes one more array descriptor through the call. Measured on this machine, perft
+from the standard position and Kiwipete, best CPU time of seven runs in each of three processes:
+
+| | start depth 5 | Kiwipete depth 4 |
+|---|---|---|
+| before | 0.364 s | 0.311 s |
+| + a sixth array, never touched | 0.394 s (0.92x) | 0.340 s (0.92x) |
+| + the key carried in the undo stack | 0.382 s (0.95x) | 0.321 s (0.97x) |
+| + the key in a sixth array | 0.439 s (0.83x) | 0.361 s (0.86x) |
+
+So the key rides in the undo stack, which every position already has, and `undo` becomes int64 to
+hold it. `U_KEY` is the one column that describes the position *at* that ply rather than the move
+played from it: `make_move` reads row `ply` and writes row `ply + 1`, so `unmake_move` restores
+nothing at all — dropping a ply uncovers the key that position already had. That also removes the
+save-and-restore the first version needed, and with it the only place a delta could have been
+undone wrongly.
+
+**Measured.** Exactness first: the carried key equals `hash_position` after every make and every
+unmake over 1,092,414 comparisons — forty-ply walks from 397 starts (the 219 curated openings, 58
+hand-built rule-breaking positions, 120 random-playout positions), every pseudo-legal move made
+and unmade at every ply, with the walk audited for 1,012 promotions, 256 capture-promotions, 47
+en passant captures, 1,637 castling moves and all sixteen castling-rights combinations. Then
+identity: a fixed 200,000-node search from thirty positions returns the same move, score, depth,
+seldepth and **node count** (6,005,770 in total) as the previous build, so the tree is unchanged.
+Then speed, as CPU time for a fixed 600,000 nodes, best of sixty runs across five interleaved
+processes: standard position 0.808 → 0.784 s (1.03x), middlegame 0.865 → 0.814 s (1.06x), rook
+ending 0.713 → 0.668 s (1.07x); at the tenth percentile, 1.045x, 1.044x and 1.042x. In three
+seconds of wall clock the depth reached is unchanged (12, 11 and 14). A rating measurement was
+running on the same machine throughout, which is why the fixed-node CPU comparison is the one
+quoted and the wall-clock nodes-per-second numbers are not.
+
+**Rejected: passing the Zobrist table into `make_move`.** It would change `gen_legal`, `perft`,
+`has_legal_move` and every call site in the search and the tests, and buy nothing: numba freezes
+a module-level array as a compile-time constant and reads it exactly as fast as an argument.
+
+**Rejected: reversing the deltas in `unmake_move`.** Twice as much code that has to be right, in
+the direction that is harder to reason about, and slower than reading a row that is already
+there.
+
+**Rejected: two int32 halves in `meta`.** It avoids the int64 undo stack and keeps "every array is
+int32" intact, but every read and write of the key becomes a shift-and-mask pair, on a value the
+search reads at every node, to save a dtype.

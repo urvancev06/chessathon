@@ -538,3 +538,129 @@ def test_undo_stack_guard_fires_at_max_undo() -> None:
         for i in range(fb.MAX_UNDO + 8):
             fb.make_move(pos, shuffle[i % 4])
     assert int(pos.meta[fb.M_PLY]) == fb.MAX_UNDO
+
+
+# ------------------------------------------------------- gate 4: the running position key
+
+
+def _key_matches(pos: fb.Position) -> bool:
+    """Is the key `make_move` has been maintaining the key the position actually has?"""
+    return fb.running_key(pos) == int(fb.hash_position(pos, fb.ZOBRIST))
+
+
+def _walk_keys(pos: fb.Position, rng: random.Random, plies: int, seen: dict[str, int]) -> int:
+    """Walk one random line, checking the key after every make and every unmake on the way.
+
+    At each ply every *pseudo-legal* move is made and unmade, not just the legal ones: a move
+    that leaves its own king in check goes through exactly the same make/unmake, so it has to
+    restore the key too. The line itself is then extended by one legal move without unmaking it,
+    so the deeper plies are checked with a loaded undo stack; the walk unwinds at the end and the
+    key must come back to what it was at the root.
+    """
+    buffer = fb.new_move_buffer()
+    compared = 0
+    played = 0
+    root_key = fb.running_key(pos)
+    for _ in range(plies):
+        legal = []
+        count = int(fb.gen_pseudo(pos, buffer))
+        for i in range(count):
+            move = int(buffer[i])
+            ok = int(fb.make_move(pos, move))
+            assert _key_matches(pos), f"after make {fb.move_to_uci(move)} in {fb.to_fen(pos)}"
+            promotion = fb.move_promotion(move)
+            if promotion:
+                seen["promotion"] += 1
+                if int(pos.undo[int(pos.meta[fb.M_PLY]) - 1, fb.U_CAPTURED]) != fb.EMPTY:
+                    seen["capture_promotion"] += 1
+            if fb.move_flag(move) == fb.FLAG_EN_PASSANT:
+                seen["en_passant_capture"] += 1
+            if fb.move_flag(move) == fb.FLAG_CASTLE:
+                seen["castling"] += 1
+            fb.unmake_move(pos)
+            assert _key_matches(pos), f"after unmake {fb.move_to_uci(move)} in {fb.to_fen(pos)}"
+            compared += 2
+            if ok:
+                legal.append(move)
+        if not legal:
+            break
+        seen["rights"] |= 1 << int(pos.meta[fb.M_CASTLE])
+        if int(pos.meta[fb.M_EP]) != fb.NO_SQ:
+            seen["en_passant_square"] += 1
+        fb.make_move(pos, rng.choice(legal))
+        played += 1
+    for _ in range(played):
+        fb.unmake_move(pos)
+        assert _key_matches(pos)
+        compared += 1
+    assert fb.running_key(pos) == root_key
+    return compared
+
+
+def test_running_key_matches_a_key_built_from_scratch() -> None:
+    """The gate the incremental key rests on.
+
+    `make_move` carries the key forward by XORing the handful of terms the move changes,
+    and the search reads it instead of walking both piece lists at every node. That is only sound
+    if it is *exactly* what `hash_position` would have produced, so this walks lines from the
+    curated openings and from the hand-built awkward positions, forty plies each, and compares
+    the two after every single make and unmake. The sample is audited afterwards, because a walk
+    that stopped producing en passant captures or capture-promotions would still pass while
+    testing nothing that could break. The starts are the curated openings, the hand-built
+    awkward positions above, and positions sampled from random playouts of both.
+    """
+    openings = load_openings()
+    playouts = [
+        board.fen()
+        for board in playout_boards(
+            120 if FULL_GATES else 40, seed=27182818, starts=sample_starts()
+        )
+    ]
+    starts = [*TRICKY_POSITIONS, *(openings if FULL_GATES else openings[::4]), *playouts]
+    rng = random.Random(16180339)
+    pos = fb.new_position()
+    seen = {
+        "promotion": 0,
+        "capture_promotion": 0,
+        "en_passant_capture": 0,
+        "en_passant_square": 0,
+        "castling": 0,
+        "rights": 0,
+    }
+    compared = 0
+    for fen in starts:
+        fb.set_from_board(pos, chess.Board(fen))
+        assert _key_matches(pos), fen  # set_from_board seeds it
+        compared += _walk_keys(pos, rng, 40, seen)
+    assert len(starts) >= (200 if FULL_GATES else 100)
+    assert compared > (500_000 if FULL_GATES else 100_000), compared
+    for name in ("promotion", "capture_promotion", "en_passant_capture", "castling"):
+        assert seen[name] > 0, f"the walk contained no {name}"
+    assert seen["en_passant_square"] > 0
+    assert bin(seen["rights"]).count("1") == 16, "not every castling-rights combination was walked"
+
+
+def test_the_key_ignores_an_en_passant_square_nobody_can_take() -> None:
+    """The en passant term is in the key only when a capture onto the square is available, so
+    `make_move` has to apply that test to the position the double push *produces*.
+
+    Two identical double pushes, a2a4, one with a black pawn on b4 that can answer it and one
+    with the pawn on h4 that cannot. The first must key differently from the same board with no
+    en passant square; the second must key the same, because for the repetition rule and the
+    table they really are the same position.
+    """
+    push = fb.pack_move(fb.A1 + 0x10, fb.A1 + 0x30, flag=fb.FLAG_DOUBLE_PUSH)
+
+    answerable = fb.from_fen("8/8/8/8/1p6/8/P7/K6k w - - 0 1")
+    fb.make_move(answerable, push)
+    assert _key_matches(answerable)
+    key = fb.running_key(answerable)
+    assert key == fb.running_key(fb.from_fen("8/8/8/8/Pp6/8/8/K6k b - a3 0 1"))
+    assert key != fb.running_key(fb.from_fen("8/8/8/8/Pp6/8/8/K6k b - - 0 1"))
+
+    quiet = fb.from_fen("8/8/8/8/7p/8/P7/K6k w - - 0 1")
+    fb.make_move(quiet, push)
+    assert _key_matches(quiet)
+    assert fb.running_key(quiet) == int(
+        fb.running_key(fb.from_fen("8/8/8/8/P6p/8/8/K6k b - - 0 1"))
+    )

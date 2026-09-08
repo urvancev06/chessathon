@@ -21,7 +21,8 @@ What had to change, and why
 *The table is an array, not a dictionary.* ``search.py`` keys a Python dict on
 ``Board._transposition_key()``, which is exact: two different positions are never the same key.
 A compiled search cannot afford a dict, so this one is a fixed-size, power-of-two, depth-preferred
-table indexed by a Zobrist key (``fastboard.hash_position``). That brings two consequences the
+table indexed by a Zobrist key (``fastboard.hash_position``, which ``make_move`` keeps up to
+date so that no node here has to recompute it). That brings two consequences the
 Python version does not have: entries are *replaced* rather than accumulated, and a key collision
 is possible (about one in 2**64 per probe). A collision can only ever hand the search a wrong
 score or a wrong first move to try, never an illegal move, because the table move is matched
@@ -80,6 +81,7 @@ from mikhail_letal.fastboard import (
     M_EP,
     M_FULL,
     M_HALF,
+    M_PLY,
     M_SIDE,
     MAX_MOVES,
     MOVES_PER_PIECE_MAX,
@@ -94,9 +96,12 @@ from mikhail_letal.fastboard import (
     QUEEN,
     SQ_BITS,
     SQ_MASK,
+    U_KEY,
     WHITE,
+    Z_SIDE,
     ZOBRIST,
     Position,
+    ep_key_index,
     gen_legal,
     gen_pseudo,
     hash_position,
@@ -384,31 +389,47 @@ def _cached_eval(pos: Position, st: SearchState, ev: EvalTables, key: int) -> in
 
 
 @njit(cache=False)
-def _make_null(pos: Position) -> tuple[int, int]:
+def _make_null(pos: Position) -> tuple[int, int, int]:
     """Pass the move: flip the side, clear the en passant square, advance the clocks.
 
     Exactly what `chess.Board.push(Move.null())` does. It touches no piece, so it needs no undo
-    record; the two scalars it changes are returned for `_unmake_null` to put back.
+    record; the three values it changes are returned for `_unmake_null` to put back.
+
+    The position key is one of the three. A pass adds no ply, so it rewrites the key in place in
+    this ply's undo row rather than pushing a new one. Nothing moves, so only two of its terms
+    can change: the side-to-move term, which always flips, and the en passant term, which the
+    pass clears. Getting this wrong would not be caught by `fastboard`'s make/unmake tests,
+    because the null move lives here; `tests/test_fastsearch.py` checks it against
+    `hash_position`.
     """
     meta = pos.meta
     ep = meta[M_EP]
     half = meta[M_HALF]
+    ply = meta[M_PLY]
+    key = int(pos.undo[ply, U_KEY])
+    passed = key ^ ZOBRIST[Z_SIDE]
+    if ep != NO_SQ:
+        index = ep_key_index(pos.board, ep, meta[M_SIDE])
+        if index >= 0:
+            passed ^= ZOBRIST[index]
+    pos.undo[ply, U_KEY] = passed
     meta[M_EP] = NO_SQ
     meta[M_HALF] = half + 1
     if meta[M_SIDE] == BLACK:
         meta[M_FULL] += 1
     meta[M_SIDE] = 1 - meta[M_SIDE]
-    return ep, half
+    return ep, half, key
 
 
 @njit(cache=False)
-def _unmake_null(pos: Position, ep: int, half: int) -> None:
+def _unmake_null(pos: Position, ep: int, half: int, key: int) -> None:
     meta = pos.meta
     meta[M_SIDE] = 1 - meta[M_SIDE]
     if meta[M_SIDE] == BLACK:
         meta[M_FULL] -= 1
     meta[M_EP] = ep
     meta[M_HALF] = half
+    pos.undo[meta[M_PLY], U_KEY] = key
 
 
 @njit(cache=False)
@@ -654,7 +675,7 @@ def quiescence(
     if ply >= MAX_PLY:
         return _static_score(pos, st, ev, ply, in_chk)
 
-    key = hash_position(pos, st.zobrist)
+    key = int(pos.undo[pos.meta[M_PLY], U_KEY])  # carried forward by make_move; see fastboard
     evasions = in_chk != 0 and qs_ply < QS_EVASION_PLIES
     if evasions:
         count = gen_pseudo(pos, st.moves[ply])
@@ -770,7 +791,7 @@ def negamax(
     # draw as far as the engine is concerned. Treating the first repetition as the draw keeps it
     # from drifting when ahead. A draw found on the current line only is flagged, because it is a
     # fact about the line and not about the position.
-    key = hash_position(pos, st.zobrist)
+    key = int(pos.undo[pos.meta[M_PLY], U_KEY])  # carried forward by make_move; see fastboard
     if _in_history(st, key) != 0:
         return DRAW_SCORE
     halfmove = pos.meta[M_HALF]
@@ -848,9 +869,9 @@ def negamax(
     ):
         reduction = NULL_MOVE_BASE_REDUCTION + depth // NULL_MOVE_DEPTH_DIVISOR
         ints[I_NULL_MOVES] += 1
-        saved_ep, saved_half = _make_null(pos)
+        saved_ep, saved_half, saved_key = _make_null(pos)
         null_score = -negamax(pos, st, ev, depth - 1 - reduction, -beta, -beta + 1, child_ply, 0)
-        _unmake_null(pos, saved_ep, saved_half)
+        _unmake_null(pos, saved_ep, saved_half, saved_key)
         if ints[I_ABORT] != 0:
             return 0
         if null_score >= beta and abs(null_score) < MATE_THRESHOLD:
@@ -1083,7 +1104,7 @@ class FastEngine:
             score = -MATE_SCORE if int(in_check(pos)) else DRAW_SCORE
             return SearchResult(None, score, 0, 0, 0, time.perf_counter() - start, False)
 
-        st.path[0] = hash_position(pos, st.zobrist)
+        st.path[0] = pos.undo[pos.meta[M_PLY], U_KEY]
         # Halve every history score so what was learned last move fades rather than saturates.
         # In place on the array itself: `st` is a NamedTuple, so its fields cannot be rebound.
         np.right_shift(st.history, 1, out=st.history)
@@ -1194,7 +1215,7 @@ class FastEngine:
         ev = EVAL_TABLES
         ints = st.ints
         self._partial_move = NO_MOVE
-        key = int(hash_position(pos, st.zobrist))
+        key = int(pos.undo[pos.meta[M_PLY], U_KEY])
         if previous_best == NO_MOVE:
             # First iteration: the table persists through the game, so it may remember this
             # position from the previous move's search. Trying that move first is the ordinary

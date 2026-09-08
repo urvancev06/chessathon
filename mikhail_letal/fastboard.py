@@ -35,8 +35,9 @@ through check all fall out of it for free, with no special case to forget.
 
 Conventions
 -----------
-- Every array is ``int32``. One dtype everywhere means one numba specialisation per function,
-  no implicit casts, and no chance of an int8 piece code wrapping when it is multiplied.
+- Every array is ``int32``, with one exception: the undo stack is ``int64``, because it carries
+  the position's Zobrist key. One dtype means one numba specialisation per function, no implicit
+  casts, and no chance of an int8 piece code wrapping when it is multiplied.
 - Colours are ``WHITE = 0`` and ``BLACK = 1`` (note that `python-chess` uses ``True``/``False``;
   `from_board` and `to_fen` are the only places the two meet).
 - Piece types match `python-chess`: ``PAWN = 1 .. KING = 6``, so a promotion code can be handed
@@ -135,8 +136,9 @@ NO_MOVE: Final = 0  # a1a1 is not a legal move, so zero is a safe "no move" sent
 
 # ----------------------------------------------------------------------------- position layout
 
-# `meta` holds every scalar of the position, so that the whole state is arrays and a position can
-# be copied with three `np.copyto` calls.
+# `meta` holds every scalar of the position except the Zobrist key, which needs 64 bits and so
+# rides in the int64 undo stack, so that the whole state is arrays and a position can be copied
+# with a handful of `np.copyto` calls.
 M_SIDE: Final = 0  # 0 white to move, 1 black
 M_CASTLE: Final = 1  # CASTLE_* bit set
 M_EP: Final = 2  # en passant target square (0x88) or NO_SQ
@@ -150,6 +152,13 @@ META_N: Final = 10
 # One undo record per ply. Everything here is either not derivable from the move (the captured
 # piece, the previous clocks and rights) or expensive to recompute (the piece-list slot the
 # captured piece occupied, which the swap-with-last removal would otherwise lose).
+#
+# `U_KEY` is the exception to the "everything is int32" rule below, and the reason this one array
+# is int64: it holds the Zobrist key (see "position key"), which needs all 64 bits. It is also
+# the one column that describes the position *at* that ply rather than the move played from it,
+# so `undo[meta[M_PLY], U_KEY]` is always the key of the position as it stands. `make_move` reads
+# row `ply` and writes row `ply + 1`, which is why the array has `MAX_UNDO + 1` rows and why
+# `unmake_move` has nothing to put back: dropping a ply uncovers the key that was already there.
 U_MOVE: Final = 0
 U_CAPTURED: Final = 1  # piece code, 0 for a quiet move
 U_CAPTURE_SQ: Final = 2  # differs from the move's destination for en passant
@@ -157,7 +166,8 @@ U_CAPTURE_SLOT: Final = 3
 U_CASTLE: Final = 4
 U_EP: Final = 5
 U_HALF: Final = 6
-UNDO_N: Final = 7
+U_KEY: Final = 7  # the Zobrist key of the position at this ply, not of the move
+UNDO_N: Final = 8
 
 MAX_UNDO: Final = 512  # plies of make/unmake nesting; the referee caps a game at 600 plies
 MAX_MOVES: Final = 256  # the most pseudo-legal moves a position can have is well under 256
@@ -199,7 +209,7 @@ class Position(NamedTuple):
     plist: npt.NDArray[np.int32]  # 32 entries: colour * 16 + slot -> square
     pidx: npt.NDArray[np.int32]  # 128 entries: square -> slot in its colour's list, else -1
     meta: npt.NDArray[np.int32]  # META_N scalars
-    undo: npt.NDArray[np.int32]  # MAX_UNDO x UNDO_N
+    undo: npt.NDArray[np.int64]  # (MAX_UNDO + 1) x UNDO_N; int64 for the position key it carries
 
 
 def new_position() -> Position:
@@ -209,7 +219,7 @@ def new_position() -> Position:
         plist=np.zeros(2 * PIECES_PER_SIDE, dtype=np.int32),
         pidx=np.full(128, -1, dtype=np.int32),
         meta=np.zeros(META_N, dtype=np.int32),
-        undo=np.zeros((MAX_UNDO, UNDO_N), dtype=np.int32),
+        undo=np.zeros((MAX_UNDO + 1, UNDO_N), dtype=np.int64),
     )
 
 
@@ -524,12 +534,29 @@ def make_move(pos: Position, move: int) -> int:
     # The undo-stack guard, one comparison per move made. Overflowing it would write past the end
     # of `undo` and corrupt whatever numpy put after it, which on the platform would show up as
     # anything at all; the exception reaches agent.py, which answers with the fallback.
-    if ply >= undo.shape[0]:
+    if ply + 1 >= undo.shape[0]:
         raise IndexError("make_move: undo stack full")
     undo[ply, U_MOVE] = move
     undo[ply, U_CASTLE] = meta[M_CASTLE]
     undo[ply, U_EP] = meta[M_EP]
     undo[ply, U_HALF] = meta[M_HALF]
+
+    # The position key, carried forward by the handful of terms this move changes rather than
+    # recomputed from all 32 pieces. It is read from this ply's row and written to the next one,
+    # so the row this move came from still holds the key `unmake_move` uncovers. `ZOBRIST` and
+    # `ep_key_index` are defined under "position key" further down the file; numba resolves a
+    # module global when it compiles the function, which `warm_up()` does once the whole module
+    # has been read.
+    zob = ZOBRIST
+    key = undo[ply, U_KEY]
+    # The old en passant term goes out first, while the board it was computed from is still
+    # standing: whether it counted at all depends on there being a pawn of the side to move
+    # placed to take, and both the board and the side to move change below.
+    old_ep = meta[M_EP]
+    if old_ep != NO_SQ:
+        ep_index = ep_key_index(board, old_ep, side)
+        if ep_index >= 0:
+            key ^= zob[ep_index]
 
     piece = board[frm]
     kind = piece & PIECE_TYPE_MASK
@@ -551,6 +578,9 @@ def make_move(pos: Position, move: int) -> int:
     undo[ply, U_CAPTURED] = captured
     undo[ply, U_CAPTURE_SQ] = capture_sq
     undo[ply, U_CAPTURE_SLOT] = capture_slot
+    if captured != EMPTY:
+        # `capture_sq`, not `to`: en passant takes the pawn off a square the move never names.
+        key ^= zob[(them * 7 + (captured & PIECE_TYPE_MASK)) * 128 + capture_sq]
 
     # Move the piece, promoting it if asked.
     slot = pos.pidx[frm]
@@ -561,6 +591,10 @@ def make_move(pos: Position, move: int) -> int:
     pos.plist[side * PIECES_PER_SIDE + slot] = to
     if kind == KING:
         meta[M_KING + side] = to
+    # A promotion arrives as a different piece from the one that left, which is exactly what the
+    # two terms say: the pawn leaves `frm`, the promoted piece arrives on `to`.
+    key ^= zob[(side * 7 + kind) * 128 + frm]
+    key ^= zob[(side * 7 + (kind if promotion == 0 else promotion)) * 128 + to]
 
     # The rook's half of a castling move. The king has already moved two files; the rook jumps
     # over it to the square the king crossed.
@@ -575,8 +609,15 @@ def make_move(pos: Position, move: int) -> int:
         pos.pidx[rook_from] = -1
         pos.pidx[rook_to] = rook_slot
         pos.plist[side * PIECES_PER_SIDE + rook_slot] = rook_to
+        key ^= zob[(side * 7 + ROOK) * 128 + rook_from]
+        key ^= zob[(side * 7 + ROOK) * 128 + rook_to]
 
-    meta[M_CASTLE] = meta[M_CASTLE] & _CASTLE_MASK[frm] & _CASTLE_MASK[to]
+    # One key per rights combination, so a move that gives up two rights at once still costs one
+    # pair of terms; a move that gives up none costs no term at all.
+    rights = meta[M_CASTLE] & _CASTLE_MASK[frm] & _CASTLE_MASK[to]
+    if rights != meta[M_CASTLE]:
+        key ^= zob[Z_CASTLE + meta[M_CASTLE]] ^ zob[Z_CASTLE + rights]
+    meta[M_CASTLE] = rights
     # The en passant target is the square the pawn skipped, set after any double push whether or
     # not a capture is actually available -- that is what `chess.Board.ep_square` holds too.
     meta[M_EP] = (frm + to) // 2 if flag == FLAG_DOUBLE_PUSH else NO_SQ
@@ -585,6 +626,15 @@ def make_move(pos: Position, move: int) -> int:
         meta[M_FULL] += 1
     meta[M_SIDE] = them
     meta[M_PLY] = ply + 1
+
+    # The new en passant term goes in last, once the board and the side to move are the ones its
+    # "can anybody actually take?" test is asked about.
+    key ^= zob[Z_SIDE]
+    if flag == FLAG_DOUBLE_PUSH:
+        ep_index = ep_key_index(board, meta[M_EP], them)
+        if ep_index >= 0:
+            key ^= zob[ep_index]
+    undo[ply + 1, U_KEY] = key
 
     return 0 if attacked(board, meta[M_KING + side], them) != 0 else 1
 
@@ -597,6 +647,8 @@ def unmake_move(pos: Position) -> None:
 
     ply = meta[M_PLY] - 1
     meta[M_PLY] = ply
+    # Nothing puts the position key back: `make_move` wrote the new key one row further up and
+    # left this row's alone, so dropping the ply uncovers the key this position already had.
     undo = pos.undo
     move = undo[ply, U_MOVE]
     meta[M_CASTLE] = undo[ply, U_CASTLE]
@@ -710,6 +762,11 @@ def has_legal_move(pos: Position, out: npt.NDArray[np.int32]) -> int:
 #
 # The numbers are generated here from numpy's PCG64 with a fixed seed, so they are reproducible
 # and provably not copied from anywhere (docs/PROVENANCE.md).
+#
+# `hash_position` below is the reference: it builds the key from nothing, and it is what
+# `set_from_board` and the tests use. The search never calls it. `make_move` carries the key
+# up to date in `undo[meta[M_PLY], U_KEY]` at a cost of a few XORs per move, and the tests assert
+# the two agree after every make and every unmake.
 
 ZOBRIST_SEED: Final = 20260908
 
@@ -734,8 +791,35 @@ ZOBRIST: Final = zobrist_keys()
 
 
 @njit(cache=False)
+def ep_key_index(board: npt.NDArray[np.int32], ep: int, side: int) -> int:
+    """Where `ep` is keyed in the Zobrist table, or -1 if it contributes nothing.
+
+    It contributes nothing when there is no en passant square, and when there is one that no
+    pawn of `side` stands ready to take onto -- the rule stated in the note above. One function
+    so that `hash_position` and `make_move` cannot come to disagree about it: they are compared
+    after every move, and a difference here would be a difference in both at once.
+    """
+    if ep == NO_SQ:
+        return -1
+    pawn = PAWN | (side << COLOUR_SHIFT)
+    if side == WHITE:
+        left, right = ep - 17, ep - 15
+    else:
+        left, right = ep + 15, ep + 17
+    if (left & OFF_BOARD_MASK) == 0 and board[left] == pawn:
+        return Z_EP + (ep & 7)
+    if (right & OFF_BOARD_MASK) == 0 and board[right] == pawn:
+        return Z_EP + (ep & 7)
+    return -1
+
+
+@njit(cache=False)
 def hash_position(pos: Position, zob: npt.NDArray[np.int64]) -> int:
-    """The Zobrist key of `pos`. See the note above for what it includes and why."""
+    """The Zobrist key of `pos`, built from scratch. See the note above for what it includes.
+
+    The reference implementation: `set_from_board` seeds the running key with it and the tests
+    check the running key against it, but no search node calls it.
+    """
     board = pos.board
     meta = pos.meta
     key = np.int64(0)
@@ -749,22 +833,22 @@ def hash_position(pos: Position, zob: npt.NDArray[np.int64]) -> int:
         key ^= zob[Z_SIDE]
     key ^= zob[Z_CASTLE + meta[M_CASTLE]]
 
-    ep = meta[M_EP]
-    if ep != NO_SQ:
-        side = meta[M_SIDE]
-        pawn = PAWN | (side << COLOUR_SHIFT)
-        if side == WHITE:
-            left, right = ep - 17, ep - 15
-        else:
-            left, right = ep + 15, ep + 17
-        taker = ((left & OFF_BOARD_MASK) == 0 and board[left] == pawn) or (
-            (right & OFF_BOARD_MASK) == 0 and board[right] == pawn
-        )
-        if taker:
-            key ^= zob[Z_EP + (ep & 7)]
+    ep_index = ep_key_index(board, meta[M_EP], meta[M_SIDE])
+    if ep_index >= 0:
+        key ^= zob[ep_index]
     # The annotation narrows numba's dispatcher return from `Any` back to `int` for mypy.
     result: int = key
     return result
+
+
+def running_key(pos: Position) -> int:
+    """The key `make_move` carries forward, for the position as it stands.
+
+    Equal to `hash_position(pos, ZOBRIST)` after every make and every unmake, which is what
+    gate 4 of `tests/test_fastboard.py` asserts. The compiled search indexes the array itself;
+    this is for the tests and for anything reading a position from Python.
+    """
+    return int(pos.undo[pos.meta[M_PLY], U_KEY])
 
 
 def position_key(board: chess.Board) -> int:
@@ -791,6 +875,7 @@ def set_from_board(pos: Position, board: chess.Board) -> None:
     pos.pidx[:] = -1
     pos.plist[:] = 0
     pos.meta[:] = 0
+    pos.undo[:] = 0
     pos.meta[M_KING + WHITE] = NO_SQ
     pos.meta[M_KING + BLACK] = NO_SQ
 
@@ -828,6 +913,8 @@ def set_from_board(pos: Position, board: chess.Board) -> None:
     pos.meta[M_HALF] = board.halfmove_clock
     pos.meta[M_FULL] = board.fullmove_number
     pos.meta[M_PLY] = 0
+    # The one place the key is built from scratch; `make_move` carries it forward from here on.
+    pos.undo[0, U_KEY] = hash_position(pos, ZOBRIST)
 
 
 def from_board(board: chess.Board) -> Position:
@@ -992,6 +1079,11 @@ def check_invariants(pos: Position) -> None:
     if occupied != int(pos.meta[M_COUNT + WHITE]) + int(pos.meta[M_COUNT + BLACK]):
         raise AssertionError("piece counts do not match the board")
 
+    running = running_key(pos)
+    expected = int(hash_position(pos, ZOBRIST))
+    if running != expected:
+        raise AssertionError(f"running key {running} is not the key of the position, {expected}")
+
 
 # ----------------------------------------------------------------------------- warm-up
 
@@ -1009,6 +1101,7 @@ JITTED: Final = (
     "unmake_move",
     "perft",
     "has_legal_move",
+    "ep_key_index",
     "hash_position",
 )
 """Every jitted function here, so `agent.py` and the tests can check that all of them were
@@ -1064,9 +1157,14 @@ def warm_up(deadline: float | None = None) -> float:
         unmake_move(drill)
         unmake_move(drill)
         slot = _remove_piece(drill, WHITE, E1)
-        _restore_piece(drill, WHITE, E1, slot)
+        # `int()` because `unmake_move` reads the slot out of the int64 undo stack, and a
+        # numpy int32 here would compile a second specialisation nothing else ever calls.
+        _restore_piece(drill, WHITE, E1, int(slot))
 
     def hashing() -> None:
+        # The same argument types `make_move` and `hash_position` pass, so this compiles the
+        # one specialisation the game uses rather than a second one for a Python int.
+        ep_key_index(drill.board, drill.meta[M_EP], drill.meta[M_SIDE])
         hash_position(pos, ZOBRIST)
         hash_position(drill, ZOBRIST)  # a position with an en passant square, the other branch
 
@@ -1078,7 +1176,11 @@ def warm_up(deadline: float | None = None) -> float:
     # observed slowdown to decide whether the next phase still fits.
     limit.run("fastboard.generate", 2.6, generate)
     limit.run("fastboard.make_unmake", 0.4, make_unmake)
-    limit.run("fastboard.hash", 0.2, hashing)
+    # `hash` is free now: building `pos` and `drill` above already compiled `hash_position` and
+    # `ep_key_index`, because `set_from_board` seeds the position key with them. The phase stays
+    # so that every jitted function in this module is still called by name from here, and its
+    # reference is 0.0 because that is what it now measures (docs/PROVENANCE.md).
+    limit.run("fastboard.hash", 0.0, hashing)
     limit.run("fastboard.perft", 0.5, counting)
 
     global WARM_UP_SECONDS
