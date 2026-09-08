@@ -331,7 +331,9 @@ def _store(
 @njit(cache=False)
 def _in_history(st: SearchState, key: int) -> int:
     """1 if `key` is a position the game has already visited. An open-addressed set, so the probe
-    is one masked index and, with the table a quarter full at worst, almost never a second."""
+    is one masked index and, with the table under a third full at worst, almost never a second.
+    The 64-probe bound cannot be reached at that load factor and is there so a full table could
+    not spin here."""
     mask = st.ints[I_HISTORY_MASK]
     index = key & mask
     for _ in range(64):
