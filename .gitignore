@@ -14,3 +14,10 @@ data/cache/
 data/webapp_games/
 data/webapp_analysis/
 docs/build/
+claude code brief.md
+docs/report.aux
+docs/report.fls
+docs/report.fdb_latexmk
+docs/report.log
+docs/report.out
+docs/report.synctex.gz
