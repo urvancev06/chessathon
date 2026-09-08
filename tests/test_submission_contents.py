@@ -25,7 +25,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from harness.package import DEFAULT_INCLUDES, MAX_UNZIPPED_BYTES, members
+from harness.package import DEFAULT_INCLUDES, members
+from harness.rules import MAX_UNZIPPED_BYTES
 
 ROOT = Path(__file__).resolve().parent.parent
 
