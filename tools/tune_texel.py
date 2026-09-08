@@ -322,8 +322,23 @@ def features(board: chess.Board) -> Vector:
 
 
 def white_evaluation(board: chess.Board) -> int:
-    """``evaluate`` turned to White's point of view."""
-    score = evaluate(board)
+    """``evaluate`` turned to White's point of view, with the king-danger term switched off.
+
+    Why it is switched off here: everything this tuner fits is *linear* in its weights, so that a
+    position can be reduced to a vector of feature counts and the fit is a least-squares problem
+    (``features(board) @ weights`` reproduces the evaluation exactly, which
+    ``test_tuning_features_reproduce_evaluate`` checks). The king-danger term is a capped quadratic
+    in the attack units, so no vector of counts can represent it and it is not among the weights
+    fitted here -- its constants come from the textbook prior in ``evaluation.py`` and are settled
+    in the arena, not by Texel. Leaving it on would silently push its contribution into whichever
+    linear weights happened to correlate with it.
+    """
+    previous = evaluation.KING_DANGER_TERM
+    evaluation.KING_DANGER_TERM = False
+    try:
+        score = evaluate(board)
+    finally:
+        evaluation.KING_DANGER_TERM = previous
     return score if board.turn == chess.WHITE else -score
 
 

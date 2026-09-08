@@ -72,6 +72,36 @@ STRUCTURE_WEIGHTS: dict[str, int] = {
     "king_shield": 10,
 }
 
+# Switch for the king-danger term, separate from STRUCTURE_TERMS so the two can be measured apart.
+KING_DANGER_TERM = True
+
+# How much attacking force bears on the squares around a king, in "attack units". Each enemy
+# knight, bishop, rook or queen whose attacks reach the king's zone contributes its unit weight
+# once, however many zone squares it hits; the penalty is then quadratic in the total, because
+# what mates a king is several pieces arriving together rather than any one of them.
+#
+# These are textbook magnitudes relative to each other (a queen is the piece that mates, a rook
+# next, minors least), on the same footing as the 100/320/330/500/900 piece values: a hand-chosen
+# prior, not a fit, and not copied from another engine's table. Index by python-chess piece type.
+KING_ATTACK_UNITS: list[int] = [0, 0, 2, 2, 3, 5, 0]  # -  P  N  B  R  Q  K
+
+# Centipawns per unit squared. With three pieces on the zone (N+B+Q = 9 units) this is 162 cp,
+# about a minor piece: enough to refuse the position Yan's round-70 analysis found us walking into,
+# and not so large that it outweighs real material.
+KING_DANGER_SCALE = 2
+
+# The term never exceeds this, so that a pile-up of attackers cannot swamp the material it is
+# meant to qualify. 500 cp is just under a rook: a king can be in serious danger, but a positional
+# term should not on its own claim more than the exchange plus a pawn.
+KING_DANGER_CAP = 500
+
+# Yan's transferable result (handoff/FINDING-king-safety.md): skipping the whole term while the
+# king still sits behind this many of its own shield pawns took the cost from -23% to -5% on the
+# interpreted engine, because in ordinary middlegames it then never runs. Whether the gate is still
+# worth its blindness now that an evaluation costs 204 ns rather than 8.3 us is a question for the
+# arena, so it is a named constant rather than an inlined 2.
+KING_DANGER_SHELTERED_PAWNS = 2
+
 # Pawn-structure results (passed, doubled, isolated pawns for both sides, from White's view) by
 # (white pawns, black pawns) bitboards. Pawn structures change far less often than positions,
 # so most evaluations find their structure here. Emptied when it reaches this many entries.
@@ -110,6 +140,10 @@ def _shield_masks(colour: chess.Color) -> list[int]:
 
 
 _SHIELD = (_shield_masks(chess.BLACK), _shield_masks(chess.WHITE))  # indexed by colour
+
+# The king's zone: the king's own square and the up-to-eight squares around it. Enemy attacks
+# reaching into this 3x3 box are what the king-danger term counts.
+_KING_ZONE: list[int] = [chess.BB_KING_ATTACKS[sq] | chess.BB_SQUARES[sq] for sq in range(64)]
 
 # Piece letters in python-chess piece-type order (PAWN = 1 .. KING = 6); index 0 is unused.
 _PIECE_LETTERS = " PNBRQK"
@@ -401,6 +435,59 @@ def _structure(
     return mg, eg
 
 
+def _king_danger_one(board: chess.Board, colour: chess.Color, own_pawns: int) -> int:
+    """The middlegame penalty, as a positive number, for enemy force bearing on ``colour``'s king.
+
+    Why this term exists: the engine could see far enough and still walk into a mating attack,
+    because nothing in the evaluation knew what an attack looked like. Round 70 was lost by
+    castling long into a queen that already stood on b3 (handoff/FINDING-king-safety.md); the
+    search was not short of depth, it was short of a reason to dislike the position.
+
+    Counted per attacking piece, not per attacked square: a piece that hits three squares of the
+    zone is one attacker, because what decides a king hunt is how many pieces arrive, not how much
+    of the box each one touches. The total is squared so that the third attacker costs far more
+    than the first, which is the whole of the textbook insight about attacks.
+    """
+    king_square = (board.kings & board.occupied_co[colour]).bit_length() - 1
+    if king_square < 0:  # no king: only reachable from a hand-built position, never from play
+        return 0
+
+    # The shelter gate. A king still behind its own pawns is not the king this term is about, and
+    # skipping it here is what keeps the term affordable (see KING_DANGER_SHELTERED_PAWNS).
+    shield = _SHIELD[colour][king_square]
+    if (own_pawns & shield).bit_count() >= KING_DANGER_SHELTERED_PAWNS:
+        return 0
+
+    zone = _KING_ZONE[king_square]
+    enemy = board.occupied_co[not colour]
+    units = 0
+    # Pawns and the enemy king are deliberately not counted: a pawn beside our king is a storm
+    # already paid for by king_shield, and the enemy king is never part of a mating attack.
+    attackers = enemy & (board.knights | board.bishops | board.rooks | board.queens)
+    while attackers:
+        lsb = attackers & -attackers
+        square = lsb.bit_length() - 1
+        if board.attacks_mask(square) & zone:
+            piece_type = board.piece_type_at(square)
+            if piece_type is not None:
+                units += KING_ATTACK_UNITS[piece_type]
+        attackers ^= lsb
+
+    penalty = KING_DANGER_SCALE * units * units
+    return penalty if penalty < KING_DANGER_CAP else KING_DANGER_CAP
+
+
+def king_danger(board: chess.Board, white_pawns: int, black_pawns: int) -> int:
+    """The king-danger term from White's view: Black's danger less White's own.
+
+    Middlegame only, like ``king_shield``: the phase blend in ``evaluate_running`` tapers it away
+    by itself, because an attack needs the pieces that a king-and-pawn endgame no longer has.
+    """
+    black_danger = _king_danger_one(board, chess.BLACK, black_pawns)
+    white_danger = _king_danger_one(board, chess.WHITE, white_pawns)
+    return black_danger - white_danger
+
+
 def material_pst(board: chess.Board) -> tuple[int, int, int]:
     """The three running totals of the evaluation, computed from scratch.
 
@@ -480,6 +567,10 @@ def evaluate_running(board: chess.Board, mg: int, eg: int, phase: int) -> int:
         structure_mg, structure_eg = _structure(white, black, pawns, board.bishops, rooks, kings)
         mg += structure_mg
         eg += structure_eg
+
+    # Middlegame only, so it is added to mg alone and the phase blend below tapers it out.
+    if KING_DANGER_TERM:
+        mg += king_danger(board, pawns & white, pawns & black)
 
     # Blend the two phases. Truncate toward zero rather than floor so that a position and its
     # colour-swapped mirror get exactly opposite scores (floor division would bias negatives).

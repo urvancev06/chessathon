@@ -41,18 +41,29 @@ from numba import njit
 from mikhail_letal import warmup
 from mikhail_letal.evaluation import (
     DRAW_SCORE,
+    KING_ATTACK_UNITS,
+    KING_DANGER_CAP,
+    KING_DANGER_SCALE,
+    KING_DANGER_SHELTERED_PAWNS,
+    KING_DANGER_TERM,
     PHASE_TOTAL,
     STRUCTURE_TERMS,
     STRUCTURE_WEIGHTS,
     load_tables,
 )
 from mikhail_letal.fastboard import (
+    _KNIGHT_DIRS,
+    _SLIDER_DIRS,
+    _SLIDER_N,
     BISHOP,
     BLACK,
+    COLOUR_SHIFT,
+    EMPTY,
     KNIGHT,
     M_COUNT,
     M_KING,
     M_SIDE,
+    OFF_BOARD_MASK,
     PAWN,
     PIECE_TYPE_MASK,
     PIECES_PER_SIDE,
@@ -63,6 +74,10 @@ from mikhail_letal.fastboard import (
     from_board,
     sq64,
 )
+
+# Attack-unit weight per piece type, as a numba-typed array of the list in ``evaluation``. Shared
+# rather than restated, so the two implementations cannot drift apart.
+_ATTACK_UNITS = np.array(KING_ATTACK_UNITS, dtype=np.int32)
 
 # ----------------------------------------------------------------------------- table layout
 
@@ -93,7 +108,8 @@ E_MOPUP_EDGE: Final = 0
 E_MOPUP_CLOSE: Final = 1
 E_MOPUP_MIN_MATERIAL: Final = 2
 E_STRUCTURE_ON: Final = 3  # mirrors evaluation.STRUCTURE_TERMS, so both switch together
-E_COUNT: Final = 4
+E_KING_DANGER_ON: Final = 4  # mirrors evaluation.KING_DANGER_TERM, so both switch together
+E_COUNT: Final = 5
 
 # Layout of the per-file pawn summary in `scratch`, as [group + colour * 8 + file].
 S_COUNT: Final = 0  # pawns of that colour on that file
@@ -153,6 +169,7 @@ def load_eval_tables(path: Path | None = None) -> EvalTables:
     # "At least a rook's worth" of non-pawn material triggers the mop-up (evaluation.py).
     misc[E_MOPUP_MIN_MATERIAL] = tables.piece_values_mg[chess.ROOK]
     misc[E_STRUCTURE_ON] = 1 if STRUCTURE_TERMS else 0
+    misc[E_KING_DANGER_ON] = 1 if KING_DANGER_TERM else 0
 
     centre = np.zeros(128, dtype=np.int32)
     for square in range(128):
@@ -279,6 +296,10 @@ def evaluate(pos: Position, ev: EvalTables) -> int:
         structure_mg, structure_eg = _structure(pos, ev)
         mg += structure_mg
         eg += structure_eg
+
+    # Middlegame only, so it joins mg alone and the phase blend below tapers it out.
+    if ev.misc[E_KING_DANGER_ON] != 0:
+        mg += _king_danger(pos)
 
     # Blend the two phases, truncating toward zero rather than flooring, so that a position and
     # its colour-swapped mirror get exactly opposite scores.
@@ -444,6 +465,98 @@ def _structure(pos: Position, ev: EvalTables) -> tuple[int, int]:
 
 
 @njit(cache=False)
+def _king_danger(pos: Position) -> int:
+    """The king-danger term from White's view: Black's danger less White's own.
+
+    The port of ``evaluation.king_danger``. It has to agree with it integer for integer, so the
+    definitions are kept deliberately literal: a piece counts once however many zone squares it
+    reaches, a slider's ray stops *after* including the first square it is blocked on (that square
+    is attacked -- it is the capture), and pawns and kings never count.
+
+    Unlike ``fastboard.attacked``, this scans over the attacking pieces rather than outward from
+    the square, because the question is how many distinct pieces bear on the zone; scanning
+    outward from the nine zone squares would find the same piece repeatedly and counting it once
+    would cost more than this loop does.
+    """
+    board = pos.board
+    meta = pos.meta
+    plist = pos.plist
+    total = 0
+    for colour in range(2):
+        king = meta[M_KING + colour]
+        if king < 0:  # only reachable from a hand-built position, never from play
+            continue
+        king_file = king & 7
+        king_rank = king >> 4
+
+        # The shelter gate: own pawns on the king's file or a neighbour, one or two ranks towards
+        # the enemy -- the same squares king_shield counts, so the two agree on what "sheltered"
+        # means.
+        step = 1 if colour == WHITE else -1
+        own_pawn = PAWN | (colour << COLOUR_SHIFT)
+        first = king_file - 1 if king_file > 0 else 0
+        last = king_file + 1 if king_file < 7 else 7
+        sheltered = 0
+        for ahead in range(1, 3):
+            rank_index = king_rank + step * ahead
+            if rank_index < 0 or rank_index > 7:
+                continue
+            for neighbour in range(first, last + 1):
+                if board[rank_index * 16 + neighbour] == own_pawn:
+                    sheltered += 1
+        if sheltered >= KING_DANGER_SHELTERED_PAWNS:
+            continue
+
+        enemy = 1 - colour
+        base = enemy * PIECES_PER_SIDE
+        units = 0
+        for slot in range(meta[M_COUNT + enemy]):
+            square = plist[base + slot]
+            kind = board[square] & PIECE_TYPE_MASK
+            # Only the four pieces that take part in an attack. A pawn beside the king is a storm
+            # already priced by king_shield, and a king never joins a mating attack on another.
+            if kind != KNIGHT and kind != BISHOP and kind != ROOK and kind != QUEEN:
+                continue
+
+            reaches = False
+            if kind == KNIGHT:
+                for i in range(8):
+                    target = square + _KNIGHT_DIRS[i]
+                    if (target & OFF_BOARD_MASK) != 0:
+                        continue
+                    if abs((target & 7) - king_file) <= 1 and abs((target >> 4) - king_rank) <= 1:
+                        reaches = True
+                        break
+            else:
+                for i in range(_SLIDER_N[kind]):
+                    direction = _SLIDER_DIRS[kind, i]
+                    target = square + direction
+                    while (target & OFF_BOARD_MASK) == 0:
+                        in_zone = (
+                            abs((target & 7) - king_file) <= 1
+                            and abs((target >> 4) - king_rank) <= 1
+                        )
+                        if in_zone:
+                            reaches = True
+                            break
+                        if board[target] != EMPTY:
+                            break  # blocked; the blocker's square was tested above
+                        target += direction
+                    if reaches:
+                        break
+
+            if reaches:
+                units += _ATTACK_UNITS[kind]
+
+        penalty = KING_DANGER_SCALE * units * units
+        if penalty > KING_DANGER_CAP:
+            penalty = KING_DANGER_CAP
+        # A penalty on Black's king is a bonus from White's point of view, and the reverse.
+        total += penalty if colour == BLACK else -penalty
+    return total
+
+
+@njit(cache=False)
 def _mopup(pos: Position, ev: EvalTables) -> int:
     """Bonus (from White's view) for the side hunting a bare king in a pawnless ending, else 0.
 
@@ -507,7 +620,7 @@ def evaluate_board(board: chess.Board) -> int:
 WARM_UP_SECONDS: float = 0.0
 """How long `warm_up()` spent compiling, filled in by the call below."""
 
-JITTED: Final = ("evaluate", "_has_insufficient_material", "_structure", "_mopup")
+JITTED: Final = ("evaluate", "_has_insufficient_material", "_structure", "_king_danger", "_mopup")
 """Every jitted function here; see `fastboard.JITTED`."""
 
 _WARM_UP_FENS: Final = (
@@ -520,6 +633,11 @@ _WARM_UP_FENS: Final = (
     "8/8/4k3/8/8/8/4B3/4K3 w - - 0 1",
     # A king with a full shield, and a knight-only ending for the other branch of the draw test.
     "8/8/8/8/8/5N2/PPP5/2K4k b - - 0 1",
+    # An exposed king with queen, rook, bishop and knight bearing on its zone, so the king-danger
+    # term's knight branch, slider branch and cap are all compiled here rather than on the clock.
+    "r2q1rk1/pp3ppp/2n1b3/8/1b1PP3/2N1BN2/PP2QPPP/R3K2R w KQ - 0 1",
+    # Opposite-side castling with the shelter gate open on both kings.
+    "2kr3r/ppp2ppp/2n1bq2/8/3PP1b1/1QN1B3/PPP2PPP/2KR2NR w - - 0 1",
 )
 
 

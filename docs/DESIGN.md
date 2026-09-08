@@ -70,6 +70,7 @@ def evaluate_running(board, mg, eg, phase) -> int     # everything that is not t
 def evaluate(board: chess.Board) -> int               # static evaluation, side-to-move perspective
 def is_mate_score(score: int) -> bool
 def pawn_structure(white_pawns: int, black_pawns: int) -> tuple[int, int]  # (mg, eg), White's view
+def king_danger(board, white_pawns: int, black_pawns: int) -> int          # mg only, White's view
 
 STRUCTURE_TERMS: bool                 # feature_flag("LETAL_EVAL_TERMS", True)
 STRUCTURE_WEIGHTS: dict[str, int]     # every structural weight, one line of rationale each
@@ -117,6 +118,15 @@ Behaviour:
     one or two ranks ahead of it (precomputed 64-square masks per colour).
   The pawn-only part is a pure function of the two pawn bitboards and is cached in
   `_PAWN_CACHE` (cap `PAWN_CACHE_MAX_ENTRIES = 50 000`, emptied when full).
+- **King danger** (`king_danger`, middlegame only, behind `KING_DANGER_TERM`). Separate from
+  `_structure` because it needs the board rather than bitboards alone, and separate from
+  `STRUCTURE_TERMS` so the two groups can be measured apart. For each king: skip entirely while it
+  still has `KING_DANGER_SHELTERED_PAWNS` (2) of its own shield pawns; otherwise count each enemy
+  knight, bishop, rook or queen whose attacks reach the king's zone (its own square and the up to
+  eight around it) once, weighted by `KING_ATTACK_UNITS`, and charge
+  `KING_DANGER_SCALE × units²` capped at `KING_DANGER_CAP`. Counted per attacking *piece*, not per
+  attacked square. Added to `mg` alone, so the phase blend tapers it out — which is why its test
+  positions live in `MIDDLEGAME_TERM_POSITIONS` and must carry non-zero phase to prove anything.
 - No randomness. `evaluate` itself is a pure function of the board; the searcher caches its
   results by piece placement and side to move (`Engine._evaluate`, below).
 
@@ -728,7 +738,7 @@ def get_move(fen, time_left_ms) -> str:
             move = result.move if result.move in legal else fallback_move(board, legal)
     except Exception: log one line with the exception class; move = fallback_move(board or chess.Board(fen), legal or list(...))
     board.push(move); STATE.record_own_move(board)
-    print one compact line (≤ 120 bytes): move, depth/seldepth, nodes, nps, elapsed ms, soft/hard ms, clock
+    print one compact line (≤ 120 bytes): move, depth/seldepth, nodes, elapsed ms, score, soft/hard ms, clock
     return move.uci()
 ```
 
@@ -765,8 +775,13 @@ opening's full clock. Measured import from the extracted zip: 19–29 s, against
 
 - No `random`, no `HARNESS_SEED`, no time-dependent ordering except the deadline itself.
 - Each move prints one line, for example
-  `m e2e4 d 5/9 n 31240 nps 10413 t 3001 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
-  nodes, nps, elapsed ms, soft ms, hard ms, clock ms). Init prints one line with the load time,
+  `m e2e4 d 5/9 n 31240 t 3001 e +45 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
+  nodes, elapsed ms, score, soft ms, hard ms, clock ms). The score is from the side to move, with
+  the sign always written, and a mate is `e #+3` or `e #-3` — a distance in moves that cannot be
+  read as centipawns. It is left out entirely when no search ran (a forced move, a panic clock or
+  an error). The node rate used to sit where the score is: it was `n / t`, and the platform keeps
+  only the first and last 4 KB of our output, so a redundant token costs moves off the end of a
+  long game's log. Init prints one line with the load time,
   the compile time, the warm-up budget, how many phases it had to skip and the measured node
   rate, and `get_move` adds one `jit:` line if any compiled function gains a specialisation
   after the warm-up.

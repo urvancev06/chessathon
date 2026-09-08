@@ -21,6 +21,7 @@ import pytest
 
 from mikhail_letal import fasteval as fe
 from mikhail_letal.evaluation import evaluate as python_evaluate
+from mikhail_letal.evaluation import game_phase
 from mikhail_letal.fastboard import Position, new_position, set_from_board
 from tests.test_fastboard import TRICKY_POSITIONS, playout_boards, sample_starts
 
@@ -50,11 +51,8 @@ TERM_POSITIONS = [
     "8/8/8/8/8/8/1P6/KR5k w - - 0 1",
     "8/1p6/8/8/8/8/8/KR5k w - - 0 1",
     "8/1p6/8/8/8/8/1P6/KR5k w - - 0 1",
-    # King shields: full, partial, on the edge file, and for Black.
-    "8/8/8/8/8/8/5PPP/6K1 w - - 0 1",
-    "8/8/8/8/8/5P1P/6P1/6K1 w - - 0 1",
-    "8/8/8/8/8/8/PP6/K7 w - - 0 1",
-    "6k1/5ppp/8/8/8/8/8/6K1 b - - 0 1",
+    # King shield and king danger live in MIDDLEGAME_TERM_POSITIONS below: both are middlegame-only
+    # terms, so a position without pieces to carry the phase compares them as zero on both sides.
     # Every insufficient-material combination python-chess recognises, and the near misses.
     "8/8/4k3/8/8/8/8/4K3 w - - 0 1",  # bare kings
     "8/8/4k3/8/8/8/4N3/4K3 w - - 0 1",  # KN vs K
@@ -102,6 +100,47 @@ def test_nothing_compiles_after_import() -> None:
         set_from_board(pos, board)
         fe.evaluate(pos, fe.TABLES)
     assert list(fe.evaluate.signatures) == before
+
+
+# Positions for the terms that exist only in the middlegame half of the score: the king pawn
+# shield and king danger. Both are added to ``mg`` alone, and the phase blend is
+# ``(mg * phase + eg * (24 - phase)) / 24`` -- so at phase 0 the term's whole contribution is
+# multiplied away and the comparison below would pass even if one implementation omitted it.
+# Every entry therefore needs real pieces on the board, which
+# ``test_middlegame_positions_carry_phase`` enforces. The four king-shield positions that used to
+# live in TERM_POSITIONS were kings and pawns only, and proved nothing for exactly this reason.
+MIDDLEGAME_TERM_POSITIONS = [
+    # King shields: full for both sides, partial where the shield pawns have advanced, and on the
+    # edge file where the king's zone runs off the board.
+    "r2q1rk1/pp3ppp/2n1b3/8/8/2N1B3/PP3PPP/R2Q1RK1 w - - 0 1",
+    "r2q1rk1/pp3p1p/2n1b1p1/8/8/2N1B1P1/PP3P1P/R2Q1RK1 w - - 0 1",
+    "2rq1r1k/pp4pp/2n1b3/8/8/2N1B3/PP4PP/2RQ1R1K w - - 0 1",
+    # King danger. The first is round 70 immediately after 8...O-O-O -- the position this term
+    # exists because of (handoff/FINDING-king-safety.md); it scores 90 against the black king.
+    "2kr1b1r/pp1qpppp/2n2n2/3p4/3P1Bb1/1QPB4/PP1N1PPP/R3K1NR w KQ - 7 9",
+    # The penalty against White instead of Black, so the sign is compared in both directions.
+    "1nb3nr/1p1p1k2/8/1pp1p2P/1PP2ppq/r4P1P/PB1KP3/2Q2BNR w - - 0 20",
+    # A small penalty at full phase, and one driven by pieces that reach the zone by a long ray.
+    "rnbq1b2/ppppkp1r/4pn1p/6p1/P3Q3/1PP1P3/3P1PPP/RNB1KBNR w KQ - 1 7",
+    "3r1b2/Ppk3p1/2p1p1Pr/4p3/3Q3p/B2P3P/b4PBR/RN3K2 w - - 0 36",
+    # Queen, two rooks, two bishops and a knight on one bare king: 17 attack units, so the
+    # quadratic overshoots KING_DANGER_CAP and the clamp is what is compared.
+    "8/2N5/7R/4k3/7R/B7/8/KB1Q4 b - - 0 1",
+]
+
+TERM_POSITIONS += MIDDLEGAME_TERM_POSITIONS
+
+
+@pytest.mark.parametrize("fen", MIDDLEGAME_TERM_POSITIONS)
+def test_middlegame_positions_carry_phase(fen: str) -> None:
+    """A middlegame-only term is compared as zero at phase 0, so its positions must have pieces.
+
+    This is the guard on the guard: without it, a position added here in the shape of a pawn
+    ending would make the parity comparison above pass whatever the compiled port computed.
+    """
+    board = chess.Board(fen)
+    assert board.is_valid(), fen
+    assert game_phase(board) > 0, fen
 
 
 @pytest.mark.parametrize("fen", TERM_POSITIONS)

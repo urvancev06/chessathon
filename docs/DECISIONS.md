@@ -775,3 +775,48 @@ Every constant above is now also in `weights/PROVENANCE.json`, which is the only
 artefact that ships (docs/ does not). Its rows are generated from `TimeParams` itself by
 `tools/gen_pst.py:timing_rows`, and `tests/test_timing.py` fails if the shipped file and the
 constants disagree, so the record cannot go stale the next time one of them is tuned.
+
+## 2026-09-08 — A king-danger term, counting attackers rather than open files
+
+The evaluation had exactly one king term, `king_shield`, and nothing that knew what an attack
+looked like. Round 70 was lost by castling long into a queen already standing on b3
+(`handoff/FINDING-king-safety.md`, Yan): the search was not short of depth — Yan re-ran the
+critical positions with sixteen times the node rate and four to five extra plies and none of the
+three decisions changed — it was short of a reason to dislike the position.
+
+**Chosen:** attack units into the king's 3×3 zone. Each enemy knight, bishop, rook or queen whose
+attacks reach the zone contributes a weight once, however many zone squares it touches; the
+penalty is `KING_DANGER_SCALE × units²`, capped, middlegame only, and skipped entirely while the
+king still has two of its own shield pawns.
+
+**Rejected: the open-file term** (Yan's `ks1`), which was the cheaper option and the one the
+compiled evaluation could compute almost for free, because `fasteval` already builds per-file pawn
+summaries. Two reasons. It had the wrong polarity in Yan's own measurement — after `cxd4` the
+c-file still held our pawn on c6, so "no own pawn on the king's file" never fired — and, decisively,
+**it would not have fired in the game it was meant to explain.** Round 70 was not lost down an open
+file; it was lost to pieces arriving. A term that is cheap and silent on the one position we have
+evidence for is worse than a dearer term that speaks.
+
+**Rejected: counting attacked squares** rather than attackers. What decides a king hunt is how many
+pieces arrive, not how much of the box each one covers; counting squares would let one long-range
+bishop outweigh a knight and a queen together.
+
+**Why the cost objection no longer holds.** Yan measured four variants and rejected three on node
+rate, the textbook attacker-count shape (`ks5`) worst at −22 %/−26 %. Those figures were taken on
+the interpreted engine, where an evaluation cost **8.3 µs**; it now costs **204 ns**, so evaluation
+went from roughly half the cost of a node to about a fifth of it. Re-measured on the compiled
+engine at a **fixed node count** (so search shape cannot confound it), median of five runs: −0.6 %
+from the start position, +2.4 % in a quiet middlegame, −2.0 % in the round-70 position and
+**+11.0 % with both kings open**. The first and third are inside the noise. The term is free where
+the shelter gate skips it and costs about a tenth of the node rate where it actually runs, which is
+the trade the gate exists to make.
+
+**Kept from Yan's work:** the shelter gate, which was his one transferable result, as a named
+constant (`KING_DANGER_SHELTERED_PAWNS`) rather than an inlined 2 — whether its blindness is still
+worth paying for at 204 ns is a question for the arena, not for a comment.
+
+**Status: unmeasured in games.** On the three round-70 positions the compiled engine now declines
+`8...O-O-O` and plays `h6` instead; it still plays `Ne2+` at move 20 and `Nxd4` at move 22, which
+were tactical losses rather than king-safety ones. That is the right shape of result and it is
+still n = 1. This earns a promotion match against `versions/v1.0`, not a place in the zip, and the
+term sits behind `KING_DANGER_TERM` / `E_KING_DANGER_ON` so the match can switch it off.
