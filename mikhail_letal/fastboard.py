@@ -691,6 +691,85 @@ def has_legal_move(pos: Position, out: npt.NDArray[np.int32]) -> int:
     return 0
 
 
+# ----------------------------------------------------------------------------- position key
+#
+# A Zobrist key: one random 64-bit number per (piece, square), one for "Black to move", one per
+# castling-rights combination and one per en passant file, exclusive-ORed together. Two positions
+# with the same key are the same position up to a collision of about one in 2**64.
+#
+# The key is what the search uses for its transposition table and for repetition detection, so
+# what it includes has to match what "the same position" means to the referee: piece placement,
+# side to move, castling rights, and the en passant square *only when a capture onto it is
+# actually available*. python-chess's own repetition key (`Board._transposition_key`) applies the
+# stricter test of a fully legal en passant capture; here it is a pawn of the side to move
+# standing on one of the two squares that could take, which differs only when that pawn is
+# pinned. Both sides of the engine call this one function, so the search and the game history it
+# is handed can never disagree about which positions are equal.
+#
+# The numbers are generated here from numpy's PCG64 with a fixed seed, so they are reproducible
+# and provably not copied from anywhere (docs/PROVENANCE.md).
+
+ZOBRIST_SEED: Final = 20260908
+
+Z_PIECES: Final = 2 * 7 * 128  # [(colour * 7 + piece type) * 128 + square]
+Z_SIDE: Final = Z_PIECES  # exclusive-ORed in when Black is to move
+Z_CASTLE: Final = Z_SIDE + 1  # + the four castling-rights bits, so sixteen entries
+Z_EP: Final = Z_CASTLE + 16  # + the file of the en passant square, eight entries
+Z_LEN: Final = Z_EP + 8
+
+
+def zobrist_keys(seed: int = ZOBRIST_SEED) -> npt.NDArray[np.int64]:
+    """The random numbers behind the position key, drawn once at import."""
+    rng = np.random.default_rng(seed)
+    info = np.iinfo(np.int64)
+    keys = rng.integers(info.min, info.max, size=Z_LEN, dtype=np.int64, endpoint=True)
+    # A key of exactly zero would collide with the "empty slot" marker in the search's tables.
+    keys[keys == 0] = 1
+    return keys
+
+
+ZOBRIST: Final = zobrist_keys()
+
+
+@njit(cache=False)
+def hash_position(pos: Position, zob: npt.NDArray[np.int64]) -> int:
+    """The Zobrist key of `pos`. See the note above for what it includes and why."""
+    board = pos.board
+    meta = pos.meta
+    key = np.int64(0)
+    for colour in range(2):
+        base = colour * PIECES_PER_SIDE
+        for slot in range(meta[M_COUNT + colour]):
+            square = pos.plist[base + slot]
+            kind = board[square] & PIECE_TYPE_MASK
+            key ^= zob[(colour * 7 + kind) * 128 + square]
+    if meta[M_SIDE] == BLACK:
+        key ^= zob[Z_SIDE]
+    key ^= zob[Z_CASTLE + meta[M_CASTLE]]
+
+    ep = meta[M_EP]
+    if ep != NO_SQ:
+        side = meta[M_SIDE]
+        pawn = PAWN | (side << COLOUR_SHIFT)
+        if side == WHITE:
+            left, right = ep - 17, ep - 15
+        else:
+            left, right = ep + 15, ep + 17
+        taker = ((left & OFF_BOARD_MASK) == 0 and board[left] == pawn) or (
+            (right & OFF_BOARD_MASK) == 0 and board[right] == pawn
+        )
+        if taker:
+            key ^= zob[Z_EP + (ep & 7)]
+    # The annotation narrows numba's dispatcher return from `Any` back to `int` for mypy.
+    result: int = key
+    return result
+
+
+def position_key(board: chess.Board) -> int:
+    """`hash_position` for a `chess.Board`. The boundary helper the game history uses."""
+    return int(hash_position(from_board(board), ZOBRIST))
+
+
 # ----------------------------------------------------------------------------- python-chess edge
 
 _PIECE_FROM_CHESS: Final = {
@@ -959,6 +1038,8 @@ def warm_up() -> float:
     _restore_piece(drill, WHITE, E1, slot)
 
     perft(pos, stack, 2, 0)
+    hash_position(pos, ZOBRIST)
+    hash_position(drill, ZOBRIST)  # a position with an en passant square, for the other branch
 
     global WARM_UP_SECONDS
     WARM_UP_SECONDS = time.perf_counter() - started
