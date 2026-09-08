@@ -1,13 +1,20 @@
 # Mikhail LeTal
 
-A chess engine in plain Python, written for [AI Chessathon 2026](https://aichessathon.com). The
-name is a pun on Mikhail Tal. The engine is nowhere near as brave as he was.
+A chess engine written for [AI Chessathon 2026](https://aichessathon.com) in Python, with its
+board, evaluation and search compiled by numba. The name is a pun on Mikhail Tal. The engine is
+nowhere near as brave as he was.
 
-It plays at roughly **2050 on the CCRL 40/4 scale**, measured over 300 games against
-rating-limited Stockfish at the competition's time control (interval 1940–2170, and see the
-caveats in [docs/RESULTS.md](docs/RESULTS.md) before quoting that number anywhere). On one core
-it searches over 50,000 positions per second and reaches depth 9 in three seconds from the
+The interpreted build (v0.2) plays at roughly **2050 on the CCRL 40/4 scale**, measured over 300
+games against rating-limited Stockfish at the competition's time control (interval 1940–2170, and
+see the caveats in [docs/RESULTS.md](docs/RESULTS.md) before quoting that number anywhere). On one
+core it searches over 50,000 positions per second and reaches depth 9 in three seconds from the
 starting position.
+
+The compiled build searches **700,000–900,000 positions per second and reaches depth 12** from the
+same position in the same three seconds — three to four plies deeper — and beats the interpreted
+one by **+560 Elo (95% interval +495 to +660)** over 300 games. It has not been re-rated against
+the Stockfish yardstick, so the CCRL figure above still belongs to v0.2 and no rating is claimed
+for the compiled build.
 
 ## The problem
 
@@ -22,9 +29,12 @@ The competition fixes the environment, and most of the interesting decisions fol
 | Start-up | 90 s before the clock starts |
 | Losing for free | An illegal move, a crash, running out of memory or flagging loses the game outright |
 
-One slow core and no compiler means node counts in the tens of thousands per second, not the
-millions a C engine gets. That changes the trade: move ordering and evaluation quality buy more
-than raw depth does, and every wasted node is expensive.
+One slow core and no native binaries means node counts far below what a C engine gets. numba is
+the one compiled-code route the rules leave open, and taking it is worth more than any evaluation
+term: it costs about eighteen seconds of the 90-second start-up budget and buys three to four
+plies. Everything below the root — the board, move generation, make and unmake, the evaluation and
+the whole alpha-beta tree — is compiled; python-chess stays in the wrapper as the legality oracle
+and the fallback, so no safety guarantee depends on the compiled code being right.
 
 ## What's inside
 
@@ -151,11 +161,13 @@ rejected and why. [docs/PROVENANCE.md](docs/PROVENANCE.md) says where every cons
 
 ## What I would do next
 
-The obvious thing is speed. Everything above runs in interpreted Python, and numba is the only
-route to compiled code that the rules allow. A jitted board representation and search should be
-worth several plies, which is worth more than any evaluation term I could add by hand. I ran out
-of time to do it safely, and a fast engine that plays one illegal move scores worse than a slow
-one that never does.
+Speed was the obvious thing and it is done: `mikhail_letal/fastboard.py`, `fasteval.py` and
+`fastsearch.py` are the compiled engine, and `evaluation.py` and `search.py` stay in the
+repository as the readable specification each was ported from and gated against. The next steps
+from here are bitboards with magic move generation (several times faster again than the 0x88
+mailbox, and now safe to attempt because there is a proven engine to check against), 3- and 4-man
+Syzygy tablebases, and a Texel fit done properly — a better leaf evaluation compounds with depth,
+so it is worth more now than it was.
 
 Known weaknesses, all measured rather than guessed: rook endgame technique is poor, and the engine
 does not convert the Lucena position at five seconds a move. King and queen against king can still
