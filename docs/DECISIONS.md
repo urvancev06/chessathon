@@ -1224,3 +1224,35 @@ small for the old bound", which is exactly the fix. The verdict tool's answer wa
 games", which is now its refusal. **A check whose author cannot name its failing input has not been
 designed, only written.** That question is the standard for anything added here that exists to catch
 something; running the check against broken code is how it is confirmed.
+
+### The attribution run's expected outcome, recorded before it runs
+
+The bundle match confounds two changes deliberately, because the shipping question is "is what we
+would upload better than what is uploaded". `handoff/READY-attribution-match.md` holds the runbook
+for separating them afterwards: `KING_DANGER_TERM` is a plain constant at `evaluation.py:76`
+imported by `fasteval.py:47`, so flipping it in one file switches both engines, and a timing-alone
+build is one visible edit on a named commit in a worktree.
+
+**What that run is expected to return, written down now so it cannot be reinterpreted later: "not
+proven", and that is not a failure of the run.** At 300 games the interval resolves to about
+±37 Elo. The timing refit's effect is concentrated in the minority of games long enough for
+`moves_to_go` to bite — the ladder games that ran 210 and 226 plies, not the ones that ended in 36.
+An effect that lives in a subset of games is diluted across the whole sample, so the instrument is
+mismatched to the quantity in exactly the way the pre-registration already argues for case 3.
+
+**Two claims must be kept apart when that number arrives**, because they will be easy to conflate at
+five in the morning:
+
+- *the instrument cannot resolve an effect of this size and shape* — supportable, and the expected
+  result;
+- *the change is worth nothing* — a different claim, and one this run cannot support at any sample
+  size we can afford before the cutoff.
+
+Writing this down beforehand is the only thing that keeps them separate afterwards. A null result
+read as the second claim would revert a change whose justification was never Elo: two of our first
+eight rated games finished on 4.7 s and 6.0 s, and a flag loses the game outright.
+
+**Attributing the king-danger half needs its own run**, not arithmetic. Subtracting two confidence
+intervals does not give the interval of the difference, so "bundle minus timing-alone" is not a
+measurement of king safety. It is a second match of `main` against the timing-only worktree, and
+whether there is a slot for it depends on what the bundle result requires first.
