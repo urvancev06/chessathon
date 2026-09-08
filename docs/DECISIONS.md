@@ -774,3 +774,45 @@ no gain.
 
 **Rejected: also clamping in `quiescence`.** Quiescence has no depth left to shorten and its
 stand-pat score is never a mate score, so the clamp could only ever cost the comparison.
+
+## 2026-09-08 — The compiled quiescence gets the cheap legality test the Python one already had
+
+`search.Engine._has_legal_move` (v0.3) answers "does the side to move have a move at all?" without
+generating one: with no check on the board, a piece that is not shielding its king cannot expose
+it by moving, so any pseudo-legal move of such a piece is legal, and one pawn that can step
+forward settles it. The compiled port never got that. `fastsearch._has_legal` ran a full
+`gen_pseudo` plus a make/unmake, and the quiescence stand-pat cutoff asks it at **36 % of all
+nodes** in the Kiwipete middlegame (1 155 753 calls in a 3.19 M-node depth-10 search) — the most
+common path in the whole tree, and it exists only so that a mate or a stalemate is never scored as
+a stand-pat.
+
+`_has_unpinned_move` is the compiled twin. It differs from the Python original in two ways: the
+caller passes `in_chk` in rather than the function recomputing it, and "not shielding the king" is
+the cruder test that the piece is not on a rank, file or diagonal *through* the king, because an
+0x88 board has no bitboard to compute python-chess's exact slider-blocker set from. The crude test
+is the generous one on purpose — a piece wrongly called "possibly pinned" costs the scan of one
+more piece, a piece wrongly called free would be a stalemate scored as a stand-pat. En passant is
+left out, being the one move that can uncover a check from a piece the mover never stood in front
+of. It answers "yes" for 97 % of the positions of a random playout and 99 % of the search's calls,
+and each yes costs reading one piece's destinations: no make/unmake, no attack scan.
+
+**Measured, best of four runs each, alternating between the two builds** (the box was busy, so
+absolute times drift; the pairs were taken back to back). Depth 10: standard start 0.271 s →
+0.247 s; Kiwipete middlegame **5.282 s → 4.791 s, −9.3 %**; rook ending 0.195 s → 0.185 s. Node
+counts are unchanged to the last node (199 510 / 3 193 943 / 165 683), which is the point: this is
+the same search, done faster. An unsound build with the test deleted outright ran the middlegame
+in 5.213 s against 6.250 s in the same session, so the probe recovers essentially all of the
+available saving.
+
+**Rejected: probing the king's moves instead**, with `attacked()` on each square the king could go
+to and the king lifted off the board. It is sound and it hits 98.7 % of the time, but `attacked()`
+scans eight rays to the edge of the board, so one or two calls cost about what the whole
+`gen_pseudo` cost: measured 6.313 s against 6.250 s, i.e. nothing.
+
+**Rejected: hoisting the call so it runs once per node.** It already does — the stand-pat branch
+returns immediately either way. The cost is that the branch is taken at a third of all nodes, not
+that it is taken twice at any of them.
+
+**Rejected: skipping the test when the side to move has little material.** There is no material
+bound on stalemate: the six named stalemates in `tests/test_fastsearch.py` run from a bare king to
+a side with every piece still on the board and none of it mobile.

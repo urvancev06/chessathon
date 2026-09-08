@@ -80,6 +80,7 @@ from mikhail_letal.fastboard import (
     M_EP,
     M_FULL,
     M_HALF,
+    M_KING,
     M_SIDE,
     MAX_MOVES,
     MOVES_PER_PIECE_MAX,
@@ -594,9 +595,87 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
 
 
 @njit(cache=False)
-def _has_legal(pos: Position, st: SearchState, ply: int) -> int:
-    """1 if the side to move has any legal move. Uses this ply's buffer, which is free wherever
-    this is called: the node either has not generated its moves yet or is about to return."""
+def _has_unpinned_move(pos: Position) -> int:
+    """1 if the side to move certainly has a legal move; 0 if this test could not tell.
+
+    The compiled half of `search.Engine._has_legal_move`, whose docstring is the readable
+    argument: with no check on the board, a piece that is not shielding its king cannot expose it
+    by moving, so any pseudo-legal move of such a piece is legal outright, and one pawn that can
+    step forward or one piece with a square to go to settles the question. Finding it needs no
+    make/unmake and no attack scan -- only reading that piece's destinations. One-way: a 0 means
+    this test found nothing, never that the position is over, and the caller then asks properly.
+
+    Two things differ from the Python version. It is only called when the side is not in check
+    (the caller has that answer already and passes it in), and "not shielding the king" is the
+    cruder test that the piece does not stand on a rank, file or diagonal *through* the king,
+    rather than python-chess's exact slider-blocker set, because an 0x88 board has no bitboard to
+    compute that from. The crude test is deliberately the generous one: a piece wrongly called
+    "possibly pinned" costs the scan of one more piece, while a piece wrongly called free would
+    be a stalemate scored as a stand-pat.
+
+    A slider needs only the first square of each direction: every longer move down a direction
+    passes over it, so if the slider can move at all it can move one step. En passant is skipped
+    on purpose: it is the one move that can uncover a check from a piece the mover never stood in
+    front of, so "cannot be pinned" does not settle it.
+    """
+    board = pos.board
+    side = pos.meta[M_SIDE]
+    king = pos.meta[M_KING + side]
+    king_file = king & 7
+    king_rank = king >> 4
+    forward = 16 if side == WHITE else -16
+    for slot in range(pos.meta[M_COUNT + side]):
+        frm = pos.plist[side * PIECES_PER_SIDE + slot]
+        kind = board[frm] & PIECE_TYPE_MASK
+        if kind == KING:
+            continue  # the king is never pinned, but its own moves need the attack scan
+        file_gap = (frm & 7) - king_file
+        rank_gap = (frm >> 4) - king_rank
+        if file_gap == 0 or rank_gap == 0 or file_gap == rank_gap or file_gap == -rank_gap:
+            continue
+        if kind == PAWN:
+            # A pawn never stands on the last rank, so the square in front of it is on the board.
+            if board[frm + forward] == EMPTY:
+                return 1
+            for step in (-1, 1):
+                to = frm + forward + step
+                if (to & OFF_BOARD_MASK) == 0:
+                    target = board[to]
+                    if target != EMPTY and (target >> COLOUR_SHIFT) != side:
+                        return 1
+        elif kind == KNIGHT:
+            for i in range(8):
+                to = frm + _KNIGHT_DIRS[i]
+                if (to & OFF_BOARD_MASK) == 0:
+                    target = board[to]
+                    if target == EMPTY or (target >> COLOUR_SHIFT) != side:
+                        return 1
+        else:
+            for i in range(_SLIDER_N[kind]):
+                to = frm + _SLIDER_DIRS[kind, i]
+                if (to & OFF_BOARD_MASK) == 0:
+                    target = board[to]
+                    if target == EMPTY or (target >> COLOUR_SHIFT) != side:
+                        return 1
+    return 0
+
+
+@njit(cache=False)
+def _has_legal(pos: Position, st: SearchState, ply: int, in_chk: int) -> int:
+    """1 if the side to move has any legal move.
+
+    The cheap test comes first, because this sits on the hottest path in the whole tree: the
+    quiescence stand-pat cutoff asks it at roughly a third of all nodes, and it exists only to
+    stop a checkmate or a stalemate being scored as a stand-pat. `_has_unpinned_move` answers
+    "yes" for nearly every position without generating a move (97 % of the positions of a random
+    playout, 99 % of the calls in a measured middlegame search; DECISIONS.md), and the full
+    generation below runs for the rest.
+
+    That generation uses this ply's buffer, which is free wherever this is called: the node has
+    either not generated its moves yet or is about to return.
+    """
+    if in_chk == 0 and _has_unpinned_move(pos) != 0:
+        return 1
     buffer = st.moves[ply]
     n = gen_pseudo(pos, buffer)
     for i in range(n):
@@ -610,7 +689,7 @@ def _has_legal(pos: Position, st: SearchState, ply: int) -> int:
 @njit(cache=False)
 def _game_over_score(pos: Position, st: SearchState, ply: int, in_chk: int) -> int:
     """Score where the referee would stop the game: checkmate wins, anything else draws."""
-    if in_chk != 0 and _has_legal(pos, st, ply) == 0:
+    if in_chk != 0 and _has_legal(pos, st, ply, in_chk) == 0:
         return -(MATE_SCORE - ply)
     return DRAW_SCORE
 
@@ -620,7 +699,7 @@ def _static_score(pos: Position, st: SearchState, ev: EvalTables, ply: int, in_c
     """Score for a node that may not recurse further (the MAX_PLY guard). Rare enough that
     generating moves here costs nothing, and it keeps the promise that a position with no legal
     move is never handed to the evaluation."""
-    if _has_legal(pos, st, ply) == 0:
+    if _has_legal(pos, st, ply, in_chk) == 0:
         return -(MATE_SCORE - ply) if in_chk != 0 else DRAW_SCORE
     score: int = static_evaluate(pos, ev)
     return score
@@ -665,7 +744,7 @@ def quiescence(
         if best_score >= beta:
             # The cutoff is real only if the side to move has a move at all; without one the
             # position is over (a mate if in check, a stalemate otherwise).
-            if _has_legal(pos, st, ply) != 0:
+            if _has_legal(pos, st, ply, in_chk) != 0:
                 return best_score
             return -(MATE_SCORE - ply) if in_chk != 0 else DRAW_SCORE
         if best_score > alpha:
@@ -721,7 +800,7 @@ def quiescence(
         # No legal evasion is checkmate; there is no stand-pat score to fall back on.
         if legal_seen == 0:
             return -(MATE_SCORE - ply)
-    elif legal_seen == 0 and _has_legal(pos, st, ply) == 0:
+    elif legal_seen == 0 and _has_legal(pos, st, ply, in_chk) == 0:
         # Nothing was searched, and there is no legal move at all: the position is over and its
         # value is the mate or the stalemate, never the stand-pat evaluation.
         return -(MATE_SCORE - ply) if in_chk != 0 else DRAW_SCORE
@@ -1030,7 +1109,9 @@ def _break_draw_tie(pos: Position, st: SearchState, ev: EvalTables, count: int, 
             continue
         # The evaluation is from the opponent's view after the move; negate it. A position with
         # no legal move is never evaluated (it is stalemate here: a mate would not score 0).
-        static = -static_evaluate(pos, ev) if _has_legal(pos, st, 1) != 0 else -_INFINITY
+        static = (
+            -static_evaluate(pos, ev) if _has_legal(pos, st, 1, in_check(pos)) != 0 else -_INFINITY
+        )
         unmake_move(pos)
         if static > best_static:
             best = move
@@ -1371,6 +1452,7 @@ JITTED: Final = (
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
+    "_has_unpinned_move",
     "_has_legal",
     "_game_over_score",
     "_static_score",
@@ -1426,7 +1508,9 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
         _score_moves(pos, st, 1, count, NO_MOVE)
         _pick_best(st, 1, 0, count)
         _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)
-        _has_legal(pos, st, 1)
+        _has_unpinned_move(pos)
+        _has_legal(pos, st, 1, 0)
+        _has_legal(pos, st, 1, 1)
         _game_over_score(pos, st, 1, 0)
         _static_score(pos, st, ev, 1, 0)
 

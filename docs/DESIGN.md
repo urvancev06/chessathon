@@ -657,7 +657,12 @@ What had to change:
 - **Moves are generated whole, not in stages.** One `gen_pseudo` call, a score per move, and the
   best remaining one selected on each iteration of the loop — the same order as `search.py`'s four
   stages, reached in the way that suits a compiled generator with nothing to allocate. Illegal
-  moves fall out of `make_move` returning 0.
+  moves fall out of `make_move` returning 0. The one place that hurts is the "is the position
+  over?" test behind the stand-pat cutoff, asked at about a third of all nodes, where a whole
+  generation buys one legal move: `_has_unpinned_move` is the compiled twin of
+  `search._has_legal_move` and answers it for nearly every position by reading the destinations
+  of one unpinned piece, with "not on a rank, file or diagonal through the king" standing in for
+  python-chess's exact slider-blocker set.
 - **The root is Python.** Iterative deepening, the aspiration window and the loop over the legal
   root moves live in `FastEngine`, not in compiled code (see DECISIONS.md 2026-09-08): they run a
   few hundred times a move, not millions, and compiling them costs fourteen seconds of the
