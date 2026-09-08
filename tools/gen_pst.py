@@ -538,6 +538,16 @@ def display(path: Path) -> str:
         return str(path)
 
 
+def read_provenance(path: Path) -> dict[str, object] | None:
+    """The `_provenance` header of an existing tables file, or None if there is not one to read."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    header = document.get("_provenance")
+    return header if isinstance(header, dict) else None
+
+
 def git_commit() -> str:
     """Current commit hash, or 'unknown' when not in a git checkout."""
     try:
@@ -583,12 +593,22 @@ def main() -> None:
     }
     # A hash of the table content alone (not of the date or commit) so a hand edit is detectable.
     tables_sha256 = hashlib.sha256(json.dumps(tables, sort_keys=True).encode()).hexdigest()
-    commit = git_commit()
     today = datetime.date.today().isoformat()
+    # `git_commit` and `date` describe the commit that produced *these tables*, so they may only
+    # move when the tables do. Stamping HEAD unconditionally silently rewrote them on every
+    # regeneration: the shipped record spent today claiming the tables came from `621afb5`, a
+    # documentation-only commit, while `versions/v0.2` and `versions/v1.0` both correctly name
+    # `4109710`. `tables_sha256` is over the table content alone, so it is the honest test of
+    # whether anything actually changed.
+    commit, stamped = git_commit(), today
+    previous = read_provenance(out_path)
+    if previous is not None and previous.get("tables_sha256") == tables_sha256:
+        commit = str(previous.get("git_commit", commit))
+        stamped = str(previous.get("date", today))
     provenance = {
         "generator": GENERATOR,
         "git_commit": commit,
-        "date": today,
+        "date": stamped,
         "note": (
             "textbook piece values 100/320/330/500/900, "
             "PST from parametric geometric prior, untuned"
