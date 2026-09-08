@@ -43,9 +43,9 @@ and rook against a bare king actually converts, which a shallow search will not 
 
 The tables are not copied from anywhere. [`tools/gen_pst.py`](tools/gen_pst.py) computes every one
 of the 768 entries from a formula of the square's geometry with twenty-four named parameters, prints
-them as 8×8 grids to be eyeballed, and records what produced them. That was a deliberate choice:
-an engine written with AI assistance can reproduce tables it has seen, and one of the house bots
-on this ladder is Sunfish, whose tables the organisers know by sight. A mechanical comparison
+them as 8×8 grids to be eyeballed, and records what produced them. Piece-square tables are the
+part of an engine most likely to be reproduced from something you have read, and one of the house
+bots on this ladder is Sunfish, whose tables the organisers know by sight. A mechanical comparison
 against Sunfish, the Chess Programming Wiki's simplified tables, Rustic, TSCP and VICE found one
 coincidental row, where our formula happens to put 50 on the seventh rank of the endgame pawn
 table. That is written down in [docs/DECISIONS.md](docs/DECISIONS.md) rather than quietly fixed.
@@ -148,11 +148,10 @@ opening book. The evaluation has never been successfully tuned.
 
 ## Notes
 
-The rules allowed AI assistance, and I used it. Claude Code wrote most of the code, working
-against the module contract in `docs/DESIGN.md`; I set the direction, decided what to keep, and
-nothing survived that had not won a measured match against the version before it. The decision and
-provenance logs exist so that any number in this repo can be traced to the script or the run that
-produced it.
+Every design decision here is written down with the alternative that was rejected, and every
+constant can be traced to the script or the run that produced it. That is what
+[docs/DECISIONS.md](docs/DECISIONS.md) and [docs/PROVENANCE.md](docs/PROVENANCE.md) are for.
+Nothing shipped that had not won a measured match against the version before it.
 
 Stockfish appears in this repo only as a measuring instrument: a sparring partner for rating
 estimates, an analysis engine in the web app, and a labeller for the tuning experiment that
