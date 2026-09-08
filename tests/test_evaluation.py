@@ -458,6 +458,15 @@ def test_tuning_features_reproduce_evaluate() -> None:
 
 
 def test_provenance_json_covers_every_parameter_group() -> None:
+    """Every evaluation parameter group has a record in the file that ships in the zip.
+
+    A superset, not an equality. `weights/PROVENANCE.json` is the only provenance the zip itself
+    carries, so the search and time-management constants are recorded there too (`search_rows` and
+    `timing_rows` in `tools/gen_pst.py`); `tests/test_search_provenance.py` and
+    `tests/test_timing.py` own those against the live code, and this test owns the tables. What
+    must never happen is an evaluation group losing its record, and the schema below is checked on
+    every entry whatever it describes.
+    """
     records = json.loads((ROOT / "weights" / "PROVENANCE.json").read_text())
     names = {record["parameter"] for record in records}
     expected = {"piece_values_mg", "piece_values_eg", "phase_weights", "mopup"}
@@ -466,10 +475,7 @@ def test_provenance_json_covers_every_parameter_group() -> None:
     tuned = provenance["generator"] == "tools/tune_texel.py"
     if tuned:
         expected.add("structure_weights")
-    # The file also carries the time-management constants, which ship in the same zip and are
-    # checked against the live TimeParams in tests/test_timing.py; this test owns the tables.
-    assert {name for name in names if not name.startswith("timing.")} == expected
-    records = [r for r in records if not r["parameter"].startswith("timing.")]
+    assert expected <= names
     for record in records:
         assert set(record) == {
             "parameter",
@@ -479,6 +485,8 @@ def test_provenance_json_covers_every_parameter_group() -> None:
             "data",
             "note",
         }
+        if record["parameter"] not in expected:
+            continue  # a search or timing constant: no generating script and no data set
         if not tuned or record["parameter"] in ("phase_weights", "mopup"):
             assert record["data"] == "none: parametric prior"
             assert record["produced_by"].startswith("tools/gen_pst.py")
