@@ -699,11 +699,22 @@ jit is cold, which never compiles anything and so plays fallback moves for the w
 
 ## 2026-09-08 — The next depth is started on a prediction, not on a fixed share of the budget
 
-The platform's log for v1.0 shows per-move times in two lumps and nothing between: 1.5–3.0 s when
-an iteration finished and the engine stopped with a third of its budget unspent, or 8.9–10.1 s
-when it started a depth that ran into the hard ceiling. `next_iteration_fraction = 0.45` is the
-direct cause: iteration costs grow by 4–5x a depth, so a depth begun at 0.45 of the budget cannot
-finish inside it, and the rule has no way to tell the two cases apart.
+The platform's rated logs for **v0.2.1** show per-move times in two lumps and nothing between:
+1.5–3.0 s when an iteration finished and the engine stopped with a third of its budget unspent, or
+8.9–10.1 s when it started a depth that ran into the hard ceiling (`docs/CALIBRATION.md`, the four
+rated games of rounds 67–70). `next_iteration_fraction = 0.45` is the direct cause: iteration costs
+grow by 4–5x a depth, so a depth begun at 0.45 of the budget cannot finish inside it, and the rule
+has no way to tell the two cases apart.
+
+The build matters here and this entry named the wrong one when it was written. The measurement is
+the **interpreted** v0.2.1, not the compiled v1.0 — corrected in place rather than appended,
+because it was an error at the time rather than something that later became stale. It does not
+weaken the argument: `timing.py` was byte-identical in v1.0, so the flaw shipped unchanged
+(`handoff/FINDING-flagging.md`), and v1.0's own platform validation independently reproduced the
+pattern — three moves at 8.9–10.1 s against a soft target of 3.4 s while six others finished under
+it (`docs/CALIBRATION.md`, the v1.0 validation). Two builds, sixteen times apart in node rate, both
+bimodal, which is stronger evidence for a structural cause than either alone. But the reasoning
+below is built on the v0.2.1 numbers and the record has to say so.
 
 So the decision to start depth d+1 is now a prediction: `ratio × time(d)`, with the ratio measured
 from the last two completed iterations, clamped to 2.0–8.0 and defaulting to 4.5 before there is
@@ -1008,3 +1019,80 @@ the live agent for the whole run.** So while a match is up: no merge to `main`, 
 of which game ran which. `docs/` is safe apart from `RESULTS.md`, which each chunk appends to as it
 finishes. This is also why the three chunks run sequentially rather than at once: 24 processes on 16
 cores would manufacture exactly the flags the safety gate exists to detect.
+
+## 2026-09-08 — What actually gates `main`, and what does not
+
+Recorded because it was nearly recorded the other way round. A session checked CI, found only
+other teams' fork pull requests sitting in `action_required`, and concluded that nothing runs on
+pushes to `main` — that the suite gating the repository was a fiction and the real gate was
+somebody remembering to run `pytest`. That would have been a strange and false thing for a judge
+to read, and it was wrong for a reason worth writing down.
+
+**`gh` resolves to the wrong repository here.** `gh repo view` returns
+`advitrocks9/aichessathon-starter` — upstream, the starter kit — because this repository is a
+clone of upstream rather than a fork (see the 2026-09-06 entry) and `gh` picks the remote it
+finds. Every run it lists is another team's fork PR against the starter, awaiting approval, which
+is exactly what "nothing of ours ever runs" looks like. Anyone verifying CI here has to pass
+`--repo urvancev06/chessathon`; the bare command answers a question about somebody else's project.
+
+**With the right repository, CI runs on every push to `main`, and it works.** It caught tonight's
+failure: the merge of pull request #1 went red at 18:10:55 with eight ruff errors in
+`handoff/probe.py`, and `564e88e` fixed it at 18:19:12. The suite is not a fiction. What is true
+is that nobody was watching it for those nine minutes, which is a different problem with a
+different fix.
+
+**The real gap, which is larger than the one that was nearly recorded.** At the time of writing,
+`main` is **14 commits ahead of `origin/main`**. Everything after the 19:09 merge is local only,
+including `82b20e2` (the timing refit) and `897e1e2` (the king-danger term) — *both halves of the
+build the bundle match is measuring, and of the build we would upload*. CI has never seen either.
+Not because the gate is broken, but because nothing has been pushed to it.
+
+So the accurate statement of the verification story is: the suite gates `main` on push and caught
+a real failure today; the gap is that the commits that matter most have not reached it. The fix is
+a push, which is safe during a match because it touches `origin` rather than the working tree that
+the arena spawns each game from. It is an outward-facing action on the operator's repository and
+is left to the operator.
+
+**Why this is in the decision record at all.** The claim was checked before it was written down,
+by looking at the one field — the repository name — that the conclusion depended on. A verification
+story is exactly the kind of claim a reader cannot check for themselves and therefore has to trust,
+which makes it the kind most worth getting right.
+
+### Amendment 6: the safety gate is n-dependent, and how that is being handled
+
+**The defect.** The gate says `low_clock_ms` above 5 000 ms over all completed games. `low_clock_ms`
+is a **minimum over the games played**, and a minimum is monotonically non-increasing in `n`: 300
+games can only ever score worse on it than 100, never better. So the gate becomes strictly harder
+as the sample grows, while the same rule requires the decision to be taken on the pooled 300. We
+mandated the larger sample and then wrote a criterion the larger sample can only fail harder. It is
+the optional-stopping defect pointed the other way: there, more looks made promotion too easy;
+here, more games make it impossible. The 5 000 was chosen as three times `panic_ms` without a
+distributional model, which is the root of it.
+
+**Who found it, and why that matters more than the fix.** `chessathon-5a` raised it partway through
+chunk A, having seen partial results, and said so unprompted: that it was proposing a change to a
+pre-registered gate at the moment it looked like failing, that this is exactly the move a
+pre-registration exists to prevent, and that it would rather lose the change than launder it through
+an amendment. It declined to make the change itself. That is the correct instinct and it is recorded
+here because the reasoning deserves to survive whatever is decided.
+
+**This session is compromised too.** 5a reported the figures before the structural flaw was
+understood, so `chessathon-bb` cannot claim to be authoring a replacement blind either. Worth
+stating plainly: had the observed clocks been comfortable, nobody would have noticed this defect at
+all. That asymmetry — a rule is examined precisely when it bites — is the bias, and no amount of
+good faith removes it from the person who has seen the data.
+
+**The process being used instead.** `chessathon-64` has not seen the match output. It has been asked
+to author a scale-free replacement **blind**: the request states the structural problem and what the
+gate was trying to buy, withholds every figure, and tells it explicitly that "keep the original" is
+an acceptable answer. It was also told not to infer the direction from the framing.
+
+**The commitment, which is the part that makes this defensible.** Whatever gate is adopted, the
+pooled result will be recorded in `RESULTS.md` against **both** the original gate and the
+replacement, with the dates each was written. A judge can then apply either and see exactly what the
+amendment changed rather than taking anyone's word that it was principled. If the two disagree, that
+disagreement is the finding and goes in the report.
+
+**If 64 declines, or does not answer before the pooled result exists, the original gate stands and
+the bundle fails it.** Losing the change is an acceptable outcome. A rule amended by people who
+already knew the answer is not.
