@@ -26,10 +26,14 @@
       }
       if (!state || state.kind !== 'play') {
         LT.storage.session(GAME_KEY, null);
-        root.append(el('div', { class: 'empty-line' }, el('span', { text: gameId ? 'That game is no longer on the server.' : 'No game is running.' }), el('a', { class: 'quiet', href: '#/new', text: 'New game' })));
+        root.append(
+          el('div', { class: 'empty-line' }, el('span', { text: gameId ? 'That game is no longer on the server.' : 'No game is running.' }), el('a', { class: 'quiet', href: '#/new', text: 'New game' })),
+          el('p', { class: 'empty-note', text: 'New game picks the engine build, your colour and the time control. The board, the clocks, the engine’s thinking and the move list appear here.' }));
         return () => {};
       }
       LT.storage.session(GAME_KEY, state.id);
+      // The Analyse link needs /api/info; the nav bar asks for it at boot, so this normally resolves at once.
+      if (!LT.info) { try { LT.info = await LT.api.cached('/api/info'); } catch (error) { /* the nav shows the failure */ } }
       const human = state.human || 'white';
       const engine = human === 'white' ? 'black' : 'white';
 
@@ -159,10 +163,12 @@
         const engineMoves = state.moves.filter((move) => move.by === engine);
         const lastEngineMove = engineMoves.length ? engineMoves[engineMoves.length - 1] : null;
         if (state.thinking) {
-          think.title.textContent = 'Thinking…';
+          LT.clear(think.title).append('Thinking…');
           for (const key of ['depth', 'nodes', 'nps', 'time']) think[key].textContent = '·';
         } else {
-          think.title.textContent = lastEngineMove ? `Last move · ${numberOf(lastEngineMove.ply)} ${lastEngineMove.san}` : 'Engine · idle';
+          LT.clear(think.title);
+          if (lastEngineMove) think.title.append('Last move · ', el('span', { class: 'notation', text: `${numberOf(lastEngineMove.ply)} ${lastEngineMove.san}` }));
+          else think.title.append('Engine · idle');
           think.depth.textContent = known.depth || '—';
           think.nodes.textContent = known.nodes != null ? fmt.count(known.nodes) : '—';
           think.nps.textContent = known.nps != null ? fmt.rate(known.nps) : '—';

@@ -33,12 +33,22 @@
     main.append(root);
     document.title = `${screen.label} · Mikhail LeTal`;
     for (const listener of navListeners) listener(id);
+    // A screen mounts after its data arrives; on a slow answer say so rather than showing nothing.
+    let placeholder = null;
+    const pending = setTimeout(() => {
+      if (currentId !== id) return;
+      placeholder = LT.el('div', { class: 'loading', text: 'Loading…' });
+      root.prepend(placeholder);
+    }, 200);
     try {
       const result = await screen.mount(root, params);
       if (currentId !== id) { if (typeof result === 'function') result(); return; }
       unmount = typeof result === 'function' ? result : null;
     } catch (error) {
       root.append(LT.el('div', { class: 'empty-line' }, LT.el('span', { class: 'notice', text: `${screen.label} could not load: ${error.message || error}` })));
+    } finally {
+      clearTimeout(pending);
+      if (placeholder) placeholder.remove();
     }
   }
   LT.router = {

@@ -202,7 +202,7 @@
         toggle.textContent = state.paused ? 'Resume' : 'Stop';
         toggle.disabled = busy || state.status === 'starting';
         restart.disabled = busy;
-        analyse.hidden = !(finished && state.moves.length && LT.info && LT.info.analysis && LT.info.analysis.available);
+        analyse.hidden = !(finished && state.moves.length && info.analysis && info.analysis.available);
         summaryText.textContent = `${state.white.label} vs ${state.black.label}`;
         startButton.textContent = 'Start another';
       }
