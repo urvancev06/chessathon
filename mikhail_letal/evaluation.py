@@ -401,25 +401,26 @@ def _structure(
     return mg, eg
 
 
-def evaluate(board: chess.Board) -> int:
-    """Static evaluation in centipawns from the side to move's point of view.
+def material_pst(board: chess.Board) -> tuple[int, int, int]:
+    """The three running totals of the evaluation, computed from scratch.
 
-    Iterates each colour's bitboard for each piece type with an inlined lowest-set-bit scan (the
-    same loop as ``chess.scan_forward`` without the generator overhead) and sums the combined
-    material-plus-square tables for both phases, adds the structural terms when they are switched
-    on, then blends the two phases by the game phase.
+    Returns ``(mg, eg, phase)``: the middlegame and endgame sums of the combined
+    material-plus-square tables from **White's** point of view (White's pieces added, Black's
+    subtracted), and the raw phase weight of the pieces on the board. ``phase`` is not clamped
+    here — promotions can push it past ``PHASE_TOTAL`` and the blend below clamps it.
+
+    Each colour's bitboard for each piece type is walked with an inlined lowest-set-bit scan (the
+    same loop as ``chess.scan_forward`` without the generator overhead).
+
+    ``mikhail_letal.searchboard.SearchBoard`` keeps exactly these three numbers up to date across
+    make and unmake, so the search rarely calls this; it is the definition they are checked
+    against (``tests/test_searchboard.py``).
     """
     pawns = board.pawns
-    rooks = board.rooks
-    queens = board.queens
-    # Only knights and bishops can be insufficient material, so skip python-chess's two-colour
-    # check whenever a pawn, rook or queen is on the board (the semantics are unchanged).
-    if not (pawns | rooks | queens) and board.is_insufficient_material():
-        return DRAW_SCORE
-
     knights = board.knights
     bishops = board.bishops
-    kings = board.kings
+    rooks = board.rooks
+    queens = board.queens
     white = board.occupied_co[True]
     black = board.occupied_co[False]
 
@@ -429,13 +430,11 @@ def evaluate(board: chess.Board) -> int:
         + _PHASE_R * rooks.bit_count()
         + _PHASE_Q * queens.bit_count()
     )
-    if phase > PHASE_TOTAL:
-        phase = PHASE_TOTAL
 
     mg = 0
     eg = 0
     for type_bb, (mg_w, eg_w, mg_b, eg_b) in zip(
-        (pawns, knights, bishops, rooks, queens, kings), _ROWS, strict=True
+        (pawns, knights, bishops, rooks, queens, board.kings), _ROWS, strict=True
     ):
         bb = type_bb & white
         while bb:
@@ -451,9 +450,34 @@ def evaluate(board: chess.Board) -> int:
             mg -= mg_b[sq]
             eg -= eg_b[sq]
             bb ^= lsb
+    return mg, eg, phase
+
+
+def evaluate_running(board: chess.Board, mg: int, eg: int, phase: int) -> int:
+    """The evaluation, given the three running totals of ``material_pst`` for ``board``.
+
+    Everything that is *not* a per-piece table sum happens here: the insufficient-material draw,
+    the structural terms, the phase blend and the mop-up bonus. Split out so that a caller which
+    maintains ``mg``/``eg``/``phase`` incrementally (see ``searchboard.SearchBoard``) and the
+    from-scratch ``evaluate`` below run exactly the same arithmetic on the same inputs, and so
+    can never disagree.
+    """
+    pawns = board.pawns
+    rooks = board.rooks
+    queens = board.queens
+    # Only knights and bishops can be insufficient material, so skip python-chess's two-colour
+    # check whenever a pawn, rook or queen is on the board (the semantics are unchanged).
+    if not (pawns | rooks | queens) and board.is_insufficient_material():
+        return DRAW_SCORE
+
+    kings = board.kings
+    white = board.occupied_co[True]
+    black = board.occupied_co[False]
+    if phase > PHASE_TOTAL:
+        phase = PHASE_TOTAL
 
     if STRUCTURE_TERMS:
-        structure_mg, structure_eg = _structure(white, black, pawns, bishops, rooks, kings)
+        structure_mg, structure_eg = _structure(white, black, pawns, board.bishops, rooks, kings)
         mg += structure_mg
         eg += structure_eg
 
@@ -466,3 +490,14 @@ def evaluate(board: chess.Board) -> int:
         score += _mopup(board, white, black, kings)
 
     return score if board.turn else -score
+
+
+def evaluate(board: chess.Board) -> int:
+    """Static evaluation in centipawns from the side to move's point of view.
+
+    Sums the combined material-plus-square tables for both phases over every piece, adds the
+    structural terms when they are switched on, then blends the two phases by the game phase.
+    A pure function of the position, and the reference the incremental sums are tested against.
+    """
+    mg, eg, phase = material_pst(board)
+    return evaluate_running(board, mg, eg, phase)

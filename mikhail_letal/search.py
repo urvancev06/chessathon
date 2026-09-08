@@ -44,6 +44,7 @@ clock-dependent behaviour is the abort at the hard deadline.
 
 from __future__ import annotations
 
+import operator
 import time
 from collections.abc import Hashable, Iterator, Mapping
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ from mikhail_letal.evaluation import (
     evaluate,
     is_mate_score,
 )
+from mikhail_letal.searchboard import SearchBoard
 
 Key = Hashable
 
@@ -192,6 +194,27 @@ _NO_MOVE_CODE = -1
 # Squares a pawn must stand on to promote with its next push, per colour.
 _PROMOTION_RANK = {chess.WHITE: chess.BB_RANK_7, chess.BLACK: chess.BB_RANK_2}
 
+# The two squares a promotion lands on.
+_BACK_RANKS = chess.BB_RANK_1 | chess.BB_RANK_8
+
+# python-chess's precomputed attack and ray tables, bound once. ``_capture_moves`` reads them
+# directly rather than calling ``attacks_mask``, because it has to know the attacking piece's
+# type for the MVV-LVA key anyway, and one branch can then produce both.
+_SQUARES = chess.BB_SQUARES
+_RAYS = chess.BB_RAYS  # RAYS[a][b] is the whole line through a and b, or 0 if they are not on one
+_KNIGHT_ATTACKS = chess.BB_KNIGHT_ATTACKS
+_KING_ATTACKS = chess.BB_KING_ATTACKS
+_PAWN_ATTACKS = chess.BB_PAWN_ATTACKS
+_DIAG_ATTACKS = chess.BB_DIAG_ATTACKS
+_DIAG_MASKS = chess.BB_DIAG_MASKS
+_RANK_ATTACKS = chess.BB_RANK_ATTACKS
+_RANK_MASKS = chess.BB_RANK_MASKS
+_FILE_ATTACKS = chess.BB_FILE_ATTACKS
+_FILE_MASKS = chess.BB_FILE_MASKS
+
+# Sorts the (key, move) pairs ``_capture_moves`` builds without ever comparing two moves.
+_ORDER_KEY = operator.itemgetter(0)
+
 # Which stage of Engine._staged_moves a move came from. The search loop needs to know whether a
 # move is quiet (killers and history are updated for quiet cutoffs only) and the tag says so
 # without asking the board again. Every tag at or above STAGE_KILLER is a quiet move.
@@ -308,6 +331,10 @@ class Engine:
         # aborted in the middle of a line. ``stack=False`` drops the move history, which the
         # search does not need (repetitions come from ``history``, the ply from the counters).
         board = board.copy(stack=False)
+        # The search makes and unmakes its moves through a SearchBoard, which keeps the running
+        # material-plus-square sums and the phase beside the board so that a static evaluation
+        # costs no per-piece loop (see mikhail_letal/searchboard.py).
+        search_board = SearchBoard(board)
         root_moves = list(board.generate_legal_moves())
         self._nodes = 0
         self._seldepth = 0
@@ -340,7 +367,7 @@ class Engine:
         for depth in range(1, depth_limit + 1):
             try:
                 score, move = self._search_root_aspirated(
-                    board, root_moves, depth, best_move, best_score, completed_depth
+                    search_board, root_moves, depth, best_move, best_score, completed_depth
                 )
             except SearchAborted:
                 aborted = True
@@ -375,7 +402,7 @@ class Engine:
 
     def _search_root_aspirated(
         self,
-        board: chess.Board,
+        board: SearchBoard,
         root_moves: list[chess.Move],
         depth: int,
         previous_best: chess.Move | None,
@@ -420,7 +447,7 @@ class Engine:
 
     def _search_root(
         self,
-        board: chess.Board,
+        search_board: SearchBoard,
         root_moves: list[chess.Move],
         depth: int,
         previous_best: chess.Move | None,
@@ -431,6 +458,7 @@ class Engine:
         ``(alpha, beta)``. With the full window the returned score is exact; with a narrower one
         it may be a bound, which the caller detects and re-searches."""
         self._partial = None
+        board = search_board.board
         root_key = board._transposition_key()
         if previous_best is None:
             # First iteration: the table persists through the game, so it may remember this
@@ -451,9 +479,9 @@ class Engine:
         scores: list[int] = []  # one per move of ``ordered``, for the draw tie-break below
         self._path_draw = False
         for move in ordered:
-            board.push(move)
-            score = -negamax(board, depth - 1, -beta, -alpha, 1)
-            board.pop()
+            search_board.push(move)
+            score = -negamax(search_board, depth - 1, -beta, -alpha, 1)
+            search_board.pop()
             scores.append(score)
             if score > best_score:
                 best_score = score
@@ -470,7 +498,7 @@ class Engine:
 
         exact = alpha_original < best_score < beta
         if exact and best_score == DRAW_SCORE:
-            best_move = self._break_draw_tie(board, ordered, scores, best_move)
+            best_move = self._break_draw_tie(search_board, ordered, scores, best_move)
         if best_score >= beta:
             flag = LOWER
         elif best_score <= alpha_original:
@@ -484,7 +512,11 @@ class Engine:
         return best_score, best_move
 
     def _break_draw_tie(
-        self, board: chess.Board, moves: list[chess.Move], scores: list[int], best: chess.Move
+        self,
+        search_board: SearchBoard,
+        moves: list[chess.Move],
+        scores: list[int],
+        best: chess.Move,
     ) -> chess.Move:
         """Choose among root moves that all score a draw when the position is clearly won.
 
@@ -496,16 +528,17 @@ class Engine:
         towards the mate the shallow search cannot yet see. A move that stalemates the opponent
         is never chosen this way.
         """
+        board = search_board.board
         tied = [move for move, score in zip(moves, scores, strict=True) if score == DRAW_SCORE]
         if len(tied) < 2 or evaluate(board) < DRAW_TIEBREAK_MARGIN:
             return best
         best_static = -_INFINITY
         for move in tied:
-            board.push(move)
+            search_board.push(move)
             # ``evaluate`` is from the opponent's view after the move; negate it. A position with
             # no legal moves is never evaluated (it is stalemate here: a mate would not score 0).
             static = -evaluate(board) if any(board.generate_legal_moves()) else -_INFINITY
-            board.pop()
+            search_board.pop()
             if static > best_static:
                 best, best_static = move, static
         return best
@@ -514,7 +547,7 @@ class Engine:
 
     def _negamax(
         self,
-        board: chess.Board,
+        search_board: SearchBoard,
         depth: int,
         alpha: int,
         beta: int,
@@ -528,6 +561,7 @@ class Engine:
         records with the LOWER/UPPER flags. ``null_allowed`` is False directly after a null move,
         so two sides never pass in a row.
         """
+        board = search_board.board
         nodes = self._nodes + 1
         self._nodes = nodes
         if nodes % NODE_CHECK_INTERVAL == 0:
@@ -592,7 +626,7 @@ class Engine:
 
         # (6) Horizon: resolve captures before evaluating.
         if depth <= 0:
-            return self._quiescence(board, alpha, beta, ply, in_check, 0)
+            return self._quiescence(search_board, alpha, beta, ply, in_check, 0)
 
         # (7) Interior node. Register the position on the current line for repetition checks,
         # and start a fresh path-draw flag for the subtree (the caller's is restored after).
@@ -617,13 +651,15 @@ class Engine:
             and depth >= NULL_MOVE_MIN_DEPTH
             and not mate_bounds
             and board.occupied_co[board.turn] & ~(board.pawns | board.kings)
-            and self._evaluate(board) >= beta
+            and self._evaluate(search_board) >= beta
         ):
             reduction = NULL_MOVE_BASE_REDUCTION + depth // NULL_MOVE_DEPTH_DIVISOR
             self._null_moves += 1
-            board.push(chess.Move.null())
-            null_score = -negamax(board, depth - 1 - reduction, -beta, -beta + 1, child_ply, False)
-            board.pop()
+            search_board.push_null()
+            null_score = -negamax(
+                search_board, depth - 1 - reduction, -beta, -beta + 1, child_ply, False
+            )
+            search_board.pop_null()
             if null_score >= beta and not is_mate_score(null_score):
                 del path[key]
                 tainted = self._path_draw
@@ -635,7 +671,7 @@ class Engine:
         # (9) Futility: decided once for the node, applied to its quiet moves in the loop.
         futility_bound = -_INFINITY
         if FUTILITY_PRUNING and depth < len(FUTILITY_MARGINS) and not in_check and not mate_bounds:
-            bound = self._evaluate(board) + FUTILITY_MARGINS[depth]
+            bound = self._evaluate(search_board) + FUTILITY_MARGINS[depth]
             if bound <= alpha:
                 futility_bound = bound
         pruned_any = False
@@ -645,21 +681,23 @@ class Engine:
         best_move: chess.Move | None = None
         searched = 0
 
-        for stage, move in self._staged_moves(board, tt_move, ply):
+        for stage, move in self._staged_moves(board, tt_move, ply, in_check):
             if stage >= STAGE_KILLER and futility_bound > -_INFINITY:
                 # A quiet move from a position this far below alpha: its value is at most the
                 # futility bound, which is at most alpha, so it cannot improve on what we have.
                 pruned_any = True
                 continue
-            board.push(move)
+            search_board.push(move)
             if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES:
                 # (10) Late-move reduction, with a full-depth re-search if the move surprises.
-                score = -negamax(board, child_depth - LMR_REDUCTION, -beta, -alpha, child_ply)
+                score = -negamax(
+                    search_board, child_depth - LMR_REDUCTION, -beta, -alpha, child_ply
+                )
                 if score > alpha:
-                    score = -negamax(board, child_depth, -beta, -alpha, child_ply)
+                    score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
             else:
-                score = -negamax(board, child_depth, -beta, -alpha, child_ply)
-            board.pop()
+                score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
+            search_board.pop()
             searched += 1
             if score > best_score:
                 best_score = score
@@ -701,7 +739,7 @@ class Engine:
         return best_score
 
     def _staged_moves(
-        self, board: chess.Board, tt_move: chess.Move | None, ply: int
+        self, board: chess.Board, tt_move: chess.Move | None, ply: int, in_check: bool
     ) -> Iterator[tuple[int, chess.Move]]:
         """Yield ``(stage, move)`` pairs in search order, generating each stage only when the
         search asks for it.
@@ -728,7 +766,7 @@ class Engine:
             tt_code = _move_code(tt_move)
             yield STAGE_TT, tt_move
 
-        for move in self._capture_moves(board, False):
+        for move in self._capture_moves(board, False, in_check):
             if move.from_square | move.to_square << 6 | (move.promotion or 0) << 12 != tt_code:
                 yield STAGE_CAPTURE, move
 
@@ -776,17 +814,208 @@ class Engine:
             if code != tt_code and code != killer_first and code != killer_second:
                 yield STAGE_QUIET, move
 
-    def _capture_moves(self, board: chess.Board, quiescence: bool) -> list[chess.Move]:
+    def _capture_moves(
+        self, board: chess.Board, quiescence: bool, in_check: bool
+    ) -> list[chess.Move]:
         """Legal captures and promotions, best first by MVV-LVA.
 
-        Three bitboard-masked generator calls produce only the wanted moves: moves onto enemy
-        pieces, pushes by pawns standing on the promotion rank, and en passant. The order before
-        sorting is python-chess's own order for these moves, so the stable sort gives exactly the
-        order the full legal list would sort into. In quiescence, under-promotions are dropped:
-        they are almost never the point of a capture sequence.
-
         The MVV-LVA key is ``10 * gain - attacker`` where gain is the rank of the captured piece
-        plus, for a promotion, the rank of the promoted piece.
+        plus, for a promotion, the rank of the promoted piece. In quiescence, under-promotions are
+        dropped: they are almost never the point of a capture sequence.
+
+        Where the side to move is not in check this walks the bitboards itself instead of asking
+        python-chess for a masked legal-move list, because the two jobs fold into one: the branch
+        that says which piece stands on the from-square gives both its attack set and its rank in
+        the ordering key, so no move needs a ``piece_type_at`` afterwards, and the pawn pushes,
+        castling and en passant machinery inside ``generate_pseudo_legal_moves`` is never entered.
+
+        Legality is python-chess's own rule, not a new one. With no check on the board a move is
+        legal unless it is the king walking into an attacked square, or a piece that shields the
+        king from a slider stepping off that line: exactly ``Board._is_safe``. The second case is
+        applied here as one mask — a pinned piece may only move along the line through the king,
+        which is ``BB_RAYS[king][from_square]`` — which is the same test as ``_is_safe``'s
+        ``ray(from, to) & king``, because three squares lie on a line whichever pair names it.
+        In check (and in the impossible case of a board with no king) the evasion rules apply
+        instead and the whole list comes from python-chess, below.
+
+        The order is python-chess's generation order — pieces from the high square down, each
+        piece's targets from the high square down, then pawn captures, then promotion pushes, then
+        en passant — so the stable sort by key leaves ties exactly where the previous version left
+        them, and the search tree is unchanged.
+        """
+        turn = board.turn
+        own = board.occupied_co[turn]
+        king_bb = board.kings & own
+        if in_check or not king_bb:
+            return self._capture_moves_in_check(board, quiescence)
+
+        enemy = board.occupied_co[not turn]
+        king = king_bb.bit_length() - 1
+        blockers = board._slider_blockers(king)
+        king_rays = _RAYS[king]
+        occupied = board.occupied
+        pawns = board.pawns
+        own_pawns = pawns & own
+        knights = board.knights
+        bishops = board.bishops
+        rooks = board.rooks
+        squares = _SQUARES
+        # The victim's type, tested in one place: anything of the enemy's that is none of these
+        # is the queen (its king is never a legal target).
+        enemy_pawns = pawns & enemy
+        enemy_knights = knights & enemy
+        enemy_bishops = bishops & enemy
+        enemy_rooks = rooks & enemy
+
+        scored: list[tuple[int, chess.Move]] = []
+        append = scored.append
+
+        piece_bb = own & ~own_pawns
+        while piece_bb:
+            from_square = piece_bb.bit_length() - 1
+            from_bb = squares[from_square]
+            piece_bb ^= from_bb
+            if knights & from_bb:
+                attacker = chess.KNIGHT
+                targets = _KNIGHT_ATTACKS[from_square]
+            elif bishops & from_bb:
+                attacker = chess.BISHOP
+                targets = _DIAG_ATTACKS[from_square][_DIAG_MASKS[from_square] & occupied]
+            elif rooks & from_bb:
+                attacker = chess.ROOK
+                targets = _RANK_ATTACKS[from_square][_RANK_MASKS[from_square] & occupied]
+                targets |= _FILE_ATTACKS[from_square][_FILE_MASKS[from_square] & occupied]
+            elif board.queens & from_bb:
+                attacker = chess.QUEEN
+                targets = _DIAG_ATTACKS[from_square][_DIAG_MASKS[from_square] & occupied]
+                targets |= _RANK_ATTACKS[from_square][_RANK_MASKS[from_square] & occupied]
+                targets |= _FILE_ATTACKS[from_square][_FILE_MASKS[from_square] & occupied]
+            else:
+                attacker = chess.KING
+                targets = _KING_ATTACKS[from_square]
+            targets &= enemy
+            if not targets:
+                continue
+            if attacker == chess.KING:
+                # The king may not step onto a square the enemy attacks.
+                attackers_mask = board.attackers_mask
+                enemy_colour = not turn
+                while targets:
+                    to_square = targets.bit_length() - 1
+                    to_bb = squares[to_square]
+                    targets ^= to_bb
+                    if attackers_mask(enemy_colour, to_square):
+                        continue
+                    if enemy_pawns & to_bb:
+                        victim = chess.PAWN
+                    elif enemy_knights & to_bb:
+                        victim = chess.KNIGHT
+                    elif enemy_bishops & to_bb:
+                        victim = chess.BISHOP
+                    elif enemy_rooks & to_bb:
+                        victim = chess.ROOK
+                    else:
+                        victim = chess.QUEEN
+                    append((10 * victim - chess.KING, chess.Move(from_square, to_square)))
+                continue
+            if blockers & from_bb:
+                targets &= king_rays[from_square]  # pinned: only along the line through the king
+            key_base = -attacker
+            while targets:
+                to_square = targets.bit_length() - 1
+                to_bb = squares[to_square]
+                targets ^= to_bb
+                if enemy_pawns & to_bb:
+                    victim = chess.PAWN
+                elif enemy_knights & to_bb:
+                    victim = chess.KNIGHT
+                elif enemy_bishops & to_bb:
+                    victim = chess.BISHOP
+                elif enemy_rooks & to_bb:
+                    victim = chess.ROOK
+                else:
+                    victim = chess.QUEEN
+                append((key_base + 10 * victim, chess.Move(from_square, to_square)))
+
+        pawn_attacks = _PAWN_ATTACKS[turn]
+        piece_bb = own_pawns
+        while piece_bb:
+            from_square = piece_bb.bit_length() - 1
+            from_bb = squares[from_square]
+            piece_bb ^= from_bb
+            targets = pawn_attacks[from_square] & enemy
+            if not targets:
+                continue
+            if blockers & from_bb:
+                targets &= king_rays[from_square]
+            while targets:
+                to_square = targets.bit_length() - 1
+                to_bb = squares[to_square]
+                targets ^= to_bb
+                if enemy_pawns & to_bb:
+                    victim = chess.PAWN
+                elif enemy_knights & to_bb:
+                    victim = chess.KNIGHT
+                elif enemy_bishops & to_bb:
+                    victim = chess.BISHOP
+                elif enemy_rooks & to_bb:
+                    victim = chess.ROOK
+                else:
+                    victim = chess.QUEEN
+                if to_bb & _BACK_RANKS:
+                    # A capture that promotes: the promoted piece counts toward the gain, and
+                    # python-chess yields queen, rook, bishop, knight in that order.
+                    append((10 * (victim + 5) - 1, chess.Move(from_square, to_square, chess.QUEEN)))
+                    if not quiescence:
+                        append(
+                            (10 * (victim + 4) - 1, chess.Move(from_square, to_square, chess.ROOK))
+                        )
+                        append(
+                            (
+                                10 * (victim + 3) - 1,
+                                chess.Move(from_square, to_square, chess.BISHOP),
+                            )
+                        )
+                        append(
+                            (
+                                10 * (victim + 2) - 1,
+                                chess.Move(from_square, to_square, chess.KNIGHT),
+                            )
+                        )
+                else:
+                    append((10 * victim - 1, chess.Move(from_square, to_square)))
+
+        pushers = own_pawns & _PROMOTION_RANK[turn]
+        if pushers:
+            singles = (pushers << 8 if turn else pushers >> 8) & ~occupied
+            while singles:
+                to_square = singles.bit_length() - 1
+                to_bb = squares[to_square]
+                singles ^= to_bb
+                from_square = to_square - 8 if turn else to_square + 8
+                if blockers & squares[from_square] and not king_rays[from_square] & to_bb:
+                    continue
+                append((49, chess.Move(from_square, to_square, chess.QUEEN)))
+                if not quiescence:
+                    append((39, chess.Move(from_square, to_square, chess.ROOK)))
+                    append((29, chess.Move(from_square, to_square, chess.BISHOP)))
+                    append((19, chess.Move(from_square, to_square, chess.KNIGHT)))
+
+        if board.ep_square is not None:
+            # Rare and full of corner cases (the captured pawn is not on the target square and
+            # the capture can uncover a rank check), so python-chess rules on it.
+            for move in board.generate_legal_ep():
+                append((9, move))  # a pawn takes a pawn
+
+        if len(scored) > 1:
+            scored.sort(key=_ORDER_KEY, reverse=True)
+        return [pair[1] for pair in scored]
+
+    def _capture_moves_in_check(self, board: chess.Board, quiescence: bool) -> list[chess.Move]:
+        """``_capture_moves`` for a side in check: python-chess generates the evasions.
+
+        Three bitboard-masked generator calls produce only the wanted moves: moves onto enemy
+        pieces, pushes by pawns standing on the promotion rank, and en passant.
         """
         turn = board.turn
         moves = list(board.generate_legal_moves(chess.BB_ALL, board.occupied_co[not turn]))
@@ -820,7 +1049,13 @@ class Engine:
     # ------------------------------------------------------------------ quiescence
 
     def _quiescence(
-        self, board: chess.Board, alpha: int, beta: int, ply: int, in_check: bool, qs_ply: int
+        self,
+        search_board: SearchBoard,
+        alpha: int,
+        beta: int,
+        ply: int,
+        in_check: bool,
+        qs_ply: int,
     ) -> int:
         """Captures-only search that settles tactics before the static evaluation is trusted.
 
@@ -837,6 +1072,7 @@ class Engine:
         with no legal move at all is checkmate or stalemate and is scored as such, never on the
         static evaluation.
         """
+        board = search_board.board
         if ply > self._seldepth:
             self._seldepth = ply
         if ply >= MAX_PLY:
@@ -850,18 +1086,18 @@ class Engine:
                 self._order_moves(board, moves, _NO_MOVE_CODE, ply)
             best_score = -_INFINITY
         else:
-            best_score = self._evaluate(board)  # stand pat
+            best_score = self._evaluate(search_board)  # stand pat
             if best_score >= beta:
                 # The cutoff is real only if the side to move has a move at all; without one
                 # the position is over (a mate if in check, a stalemate otherwise).
-                if any(board.generate_legal_moves()):
+                if self._has_legal_move(board, in_check):
                     return best_score
                 return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
             if best_score > alpha:
                 alpha = best_score
-            moves = self._capture_moves(board, True)
+            moves = self._capture_moves(board, True, in_check)
             if not moves:
-                if not any(board.generate_legal_moves()):
+                if not self._has_legal_move(board, in_check):
                     return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
                 return best_score
 
@@ -898,14 +1134,16 @@ class Engine:
                     gain += promotion_gain
                 if gain < delta_floor:
                     continue
-            board.push(move)
+            search_board.push(move)
             nodes = self._nodes + 1
             self._nodes = nodes
             if nodes % NODE_CHECK_INTERVAL == 0:
                 self._check_limits()
             child_in_check = board.is_check()
-            score = -quiescence(board, -beta, -alpha, child_ply, child_in_check, child_qs_ply)
-            board.pop()
+            score = -quiescence(
+                search_board, -beta, -alpha, child_ply, child_in_check, child_qs_ply
+            )
+            search_board.pop()
             if score > best_score:
                 best_score = score
                 if score >= beta:
@@ -913,6 +1151,52 @@ class Engine:
                 if score > alpha:
                     alpha = score
         return best_score
+
+    @staticmethod
+    def _has_legal_move(board: chess.Board, in_check: bool) -> bool:
+        """Whether the side to move has a legal move at all.
+
+        Quiescence asks this to tell a real stand-pat cutoff from a checkmate or a stalemate, and
+        it asks at a third of all nodes, where generating one legal move costs most of a move
+        generation. The answer is nearly always yes, and with no check on the board there is a
+        cheap sufficient reason: a piece that is not shielding its king from a slider cannot
+        expose it by moving, so any pseudo-legal move of such a piece is legal (this is exactly
+        the ``not blockers & from_square`` branch of ``Board._is_safe``). One pawn that can step
+        forward, or one piece with a square to go to, settles it.
+
+        When that finds nothing — the side is in check, or every piece is pinned or has nowhere
+        to go — python-chess's own generator answers, so the result is always exact.
+        """
+        if not in_check:
+            turn = board.turn
+            own = board.occupied_co[turn]
+            king_bb = board.kings & own
+            if king_bb:
+                free = own & ~board._slider_blockers(king_bb.bit_length() - 1) & ~king_bb
+                pawns = board.pawns & free
+                occupied = board.occupied
+                if pawns and (pawns << 8 if turn else pawns >> 8) & ~occupied:
+                    return True
+                not_own = ~own
+                others = free & ~pawns
+                while others:
+                    square = others.bit_length() - 1
+                    square_bb = _SQUARES[square]
+                    others ^= square_bb
+                    if board.knights & square_bb:
+                        attacks = _KNIGHT_ATTACKS[square]
+                    elif board.bishops & square_bb:
+                        attacks = _DIAG_ATTACKS[square][_DIAG_MASKS[square] & occupied]
+                    elif board.rooks & square_bb:
+                        attacks = _RANK_ATTACKS[square][_RANK_MASKS[square] & occupied]
+                        attacks |= _FILE_ATTACKS[square][_FILE_MASKS[square] & occupied]
+                    else:
+                        attacks = _DIAG_ATTACKS[square][_DIAG_MASKS[square] & occupied]
+                        attacks |= _RANK_ATTACKS[square][_RANK_MASKS[square] & occupied]
+                        attacks |= _FILE_ATTACKS[square][_FILE_MASKS[square] & occupied]
+                    if attacks & not_own:
+                        return True
+        return any(board.generate_legal_moves())
 
     # ------------------------------------------------------------------ move ordering
 
@@ -977,13 +1261,16 @@ class Engine:
 
     # ------------------------------------------------------------------ helpers
 
-    def _evaluate(self, board: chess.Board) -> int:
-        """``evaluate`` with a cache keyed on the piece placement and the side to move.
+    def _evaluate(self, search_board: SearchBoard) -> int:
+        """The static evaluation, with a cache keyed on the piece placement and the side to move.
 
         The static evaluation depends on nothing else (castling rights, the en passant square
         and the clocks play no part in it), so the key is exact: a hit returns precisely what
-        ``evaluate`` would have computed. The cache is emptied when it reaches its cap.
+        ``evaluate`` would have computed. The cache is emptied when it reaches its cap. A miss
+        costs only the structural terms and the phase blend, because the per-piece sums come
+        from the SearchBoard's running totals.
         """
+        board = search_board.board
         key = (
             board.pawns,
             board.knights,
@@ -999,7 +1286,7 @@ class Engine:
         if score is None:
             if len(cache) >= EVAL_CACHE_MAX_ENTRIES:
                 cache.clear()
-            score = cache[key] = evaluate(board)
+            score = cache[key] = search_board.evaluate()
         return score
 
     def _store(

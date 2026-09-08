@@ -61,6 +61,7 @@ import numpy.typing as npt
 from mikhail_letal import evaluation
 from mikhail_letal.evaluation import MATE_SCORE, PHASE_TOTAL, evaluate, game_phase, is_mate_score
 from mikhail_letal.search import Engine
+from mikhail_letal.searchboard import SearchBoard
 from tools import gen_pst
 
 Vector = npt.NDArray[np.float64]
@@ -357,7 +358,7 @@ def quiescence_score(engine: Engine, board: chess.Board) -> int:
     engine._node_limit = None
     engine._hard_deadline = INFINITY
     return engine._quiescence(
-        board.copy(stack=False), -MATE_SCORE, MATE_SCORE, 0, board.is_check(), 0
+        SearchBoard(board.copy(stack=False)), -MATE_SCORE, MATE_SCORE, 0, board.is_check(), 0
     )
 
 

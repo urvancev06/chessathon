@@ -14,6 +14,7 @@ import pytest
 import mikhail_letal.search as search_module
 from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, evaluate, is_mate_score
 from mikhail_letal.search import NODE_CHECK_INTERVAL, Engine, SearchResult
+from mikhail_letal.searchboard import SearchBoard
 
 # Mate in one: a rook to the back rank against a king boxed in by its own pawns.
 MATE_IN_ONE_WHITE = "6k1/5ppp/8/8/8/8/8/R3K3 w - - 0 1"
@@ -389,13 +390,16 @@ def test_stand_pat_cutoff_never_trusts_a_position_without_moves() -> None:
     stalemate = chess.Board(STALEMATE_ROOT)
     assert stalemate.is_stalemate()
     low_beta = -50_000  # far below any static evaluation: the stand pat would cut off
-    assert engine._quiescence(stalemate, -MATE_SCORE, low_beta, 1, False, 0) == DRAW_SCORE
+    assert engine._quiescence(SearchBoard(stalemate), -MATE_SCORE, low_beta, 1, False, 0) == (
+        DRAW_SCORE
+    )
     mate = chess.Board(CHECKMATE_ROOT)
     assert mate.is_checkmate()
     # (M) Beyond QS_EVASION_PLIES a check is handled like any other node: still a mate here.
     deep = search_module.QS_EVASION_PLIES
-    assert engine._quiescence(mate, -MATE_SCORE, low_beta, 1, True, deep) == -(MATE_SCORE - 1)
-    assert engine._quiescence(mate, -MATE_SCORE, MATE_SCORE, 1, True, 0) == -(MATE_SCORE - 1)
+    quiet_mate = SearchBoard(mate)
+    assert engine._quiescence(quiet_mate, -MATE_SCORE, low_beta, 1, True, deep) == -(MATE_SCORE - 1)
+    assert engine._quiescence(quiet_mate, -MATE_SCORE, MATE_SCORE, 1, True, 0) == -(MATE_SCORE - 1)
 
 
 def test_check_extension_is_applied_before_the_table_probe() -> None:
@@ -408,10 +412,10 @@ def test_check_extension_is_applied_before_the_table_probe() -> None:
     engine._path = {}
     engine._tt.clear()
     key = board._transposition_key()
-    engine._negamax(board.copy(stack=False), 3, -MATE_SCORE, MATE_SCORE, 1)
+    engine._negamax(SearchBoard(board.copy(stack=False)), 3, -MATE_SCORE, MATE_SCORE, 1)
     assert engine._tt[key][0] == 4  # stored at the extended depth
     before = engine._nodes
-    engine._negamax(board.copy(stack=False), 4, -MATE_SCORE, MATE_SCORE, 1)
+    engine._negamax(SearchBoard(board.copy(stack=False)), 4, -MATE_SCORE, MATE_SCORE, 1)
     assert engine._nodes - before > 1  # not a table hit: this node is depth 5 once extended
     assert engine._tt[key][0] == 5
 
