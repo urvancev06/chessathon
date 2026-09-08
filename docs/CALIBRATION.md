@@ -211,10 +211,20 @@ platform figure in this file is the interpreted v0.2.1.
 | per-move node rate | 456 733 – 493 209 | 290 923 – 568 917 |
 | slowest move | 3.0 s | 10.1 s |
 
-**What this settles.** The compiled engine reaches **depth 10–12 at 330 000–460 000 nodes/s on the
-platform**, against v0.2.1's depth 5–8 at 21 600–27 300. The warm-up deadline (`WARM_UP_BUDGET_S`,
-70 s) never fired: both games completed every phase, so the degraded path has still never run in
-anger.
+**What this settles.** The compiled engine reaches **depth 8-12 at 291 000-569 000 nodes/s in the
+opening on the platform**, against v0.2.1's depth 5-8 at 21 600-27 300. The warm-up deadline
+(`WARM_UP_BUDGET_S`, 70 s) never fired: both games completed every phase, so the degraded path has
+still never run in anger.
+
+Corrected 8 September, having originally read "depth 10-12 at 330 000-460 000 nodes/s". Two errors,
+both mine. The node rate was taken from the *node rate reported at import* row (329 618 and
+459 460) rather than from the *per-move node rate* row directly beneath it, which is the figure
+that describes searching; the table above was right and the sentence summarising it was not. And
+both numbers come from **20-ply smoke games**, so they describe the opening and cannot bound a
+whole game. `handoff/LOG-round-74-zagreus.md`, a full 70-move rated game, gives median 505 000
+nodes/s peaking at 646 000, and depth median 11 peaking at 16 - consistent with this table once the
+phase is accounted for, since node rate and depth both rise as pieces come off. **Quote the opening
+figures for the opening and the round-74 log for a game.**
 
 **What it leaves open.** The two start-up times differ by **15 seconds for identical code on
 identical hardware**, 35.8 against 50.7. That variance, not the mean, is the risk: the budget is
