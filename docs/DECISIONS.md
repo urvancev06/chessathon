@@ -1385,3 +1385,31 @@ root to the tree.
 closed positions may simply be what closed positions are; we have established that we shuffle
 normally for how locked our positions are and that the field's kings wander the same way. Acting
 needs a change that is measurably better, and there is not one.
+
+### Interim, chunk A: futility says continue, and a warning about how thin the gate is
+
+At 95 of 100 games in chunk A the pre-registered futility test was evaluated and **does not fire**:
++40 =23 −32, score 54.2 %, 95 % interval 45.5 % to 63.0 %. The rule stops the match only if the
+upper bound is at or below 50 %; it is 63.0 %. Reproduced independently from
+`tools.arena_openings.statistics`. **No promotion is read from this and none is available**: chunk
+looks are reject-only (amendment 4), and the interval above exists solely to evaluate futility.
+
+Terminations so far: checkmate 72, threefold 19, insufficient material 3, fifty moves 1, **flag 0**.
+Clock: minimum 3 729 ms, p10 11 962, median 28 043, **2 games below 5 000 ms, none below
+`panic_ms`**.
+
+**The warning, recorded before the pooled result exists because it cannot be said credibly
+afterwards.** The adopted gate allows 2 % of games below 5 000 ms — **six** of 300. The observed
+rate is 2 of 95, which projects to **6.3** of 300. So the safety gate may be decided by a single
+game either way.
+
+That has a consequence for how the verdict should be read, and it is not a reason to change
+anything: **whichever side of the line it falls, the gate's outcome carries little information.**
+A pass at 6 and a fail at 7 differ by one game out of three hundred and by nothing else. If the
+bundle promotes on a 6, nobody should treat the safety condition as having been demonstrated
+robustly; if it fails on a 7, nobody should treat the build as having been shown unsafe. The
+figure to weigh in both cases is the one that is not marginal: **no game below `panic_ms`**, and
+**no flag** — which is the floor the safety argument actually rests on, and it is not close.
+
+This is stated now so that it constrains the write-up in either direction rather than being
+available afterwards to whichever side needs it.
