@@ -46,6 +46,7 @@ from mikhail_letal import (  # noqa: E402
     fasteval,
     fastsearch,
 )
+from mikhail_letal.evaluation import MATE_SCORE, MATE_THRESHOLD  # noqa: E402
 from mikhail_letal.fallback import fallback_move  # noqa: E402
 from mikhail_letal.fastsearch import FastEngine  # noqa: E402
 from mikhail_letal.gamestate import GameState  # noqa: E402
@@ -81,7 +82,8 @@ def get_move(fen: str, time_left_ms: int) -> str:
     """
     t0 = perf_counter()
     move: chess.Move | None = None
-    depth = seldepth = nodes = nps = 0
+    depth = seldepth = nodes = 0
+    score: int | None = None  # None when no search ran: forced move, panic clock, or an error
     soft_ms = hard_ms = 0.0
     try:
         board = chess.Board(fen)
@@ -119,8 +121,7 @@ def get_move(fen: str, time_left_ms: int) -> str:
                 params=PARAMS,
             )
             depth, seldepth, nodes = result.depth, result.seldepth, result.nodes
-            # Node rate over the search's own clock: the number calibration compares.
-            nps = int(nodes / result.elapsed) if result.elapsed > 0 else 0
+            score = result.score
             if result.move in legal:
                 move = result.move
             else:
@@ -133,11 +134,30 @@ def get_move(fen: str, time_left_ms: int) -> str:
     uci = _validated(fen, move)
     _check_signatures()  # a jitted function compiled on the clock would cost a move; say so
     elapsed_ms = (perf_counter() - t0) * 1000.0
+    # The score replaces the node rate, which was `n / t` and so said nothing the line did not
+    # already carry. The platform keeps only the first and last 4 KB of our output: at 62 bytes a
+    # move that is 132 moves, where the longest game we have played was 113.
     _say(
-        f"m {uci} d {depth}/{seldepth} n {nodes} nps {nps} t {elapsed_ms:.0f}"
+        f"m {uci} d {depth}/{seldepth} n {nodes} t {elapsed_ms:.0f}{_score_token(score)}"
         f" s {soft_ms:.0f} h {hard_ms:.0f} c {time_left_ms}"
     )
     return uci
+
+
+def _score_token(score: int | None) -> str:
+    """` e +45`, or ` e #-3` for a mate three of our moves away, or nothing when no search ran.
+
+    The score is from the side to move, the search's own convention, and the sign is always
+    explicit so a reader never has to guess. A mate is printed as a distance in moves behind a
+    `#`, which cannot be read as centipawns by mistake; `tools/arena_openings.py` reads these
+    tokens by name and stamps the centipawn ones into the PGN beside the referee's clocks.
+    """
+    if score is None:
+        return ""
+    if abs(score) >= MATE_THRESHOLD:
+        moves = (MATE_SCORE - abs(score) + 1) // 2
+        return f" e #{'+' if score > 0 else '-'}{moves}"
+    return f" e {score:+d}"
 
 
 def _fifty_move_room(board: chess.Board) -> int | None:

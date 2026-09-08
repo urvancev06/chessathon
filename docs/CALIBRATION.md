@@ -48,7 +48,8 @@ Local node rate: see RESULTS.md.
 | import time | 0.6 s | 0.033 s | mostly fixed container and interpreter cost, not compute |
 | clock left at end, 113-move game | 4.7 s | — | survived, but thin (round 68) |
 
-Read from the `m … d … n … nps … t … s … h … c …` lines the agent prints, paired with the
+Read from the `m … d … n … t … e … s … h … c …` lines the agent prints (v1.0 printed `nps`
+where `e` now is), paired with the
 platform's own per-move clock column. Overhead is `(clock before − clock after) + increment − t`.
 
 **What this changes.** The 150 ms overhead reserve is far larger than the measured 1.1 ms, so the
@@ -188,7 +189,7 @@ move 50.
 1. Extract init time, every per-move time, the clock left after each move, and any stderr.
 2. Pair each platform-measured move time with the self-measured `t` from our log line; the
    difference is the platform overhead for that move. Set `overhead_ms = max(difference) + 50`.
-3. Compute platform nps from our `nps` log tokens; divide by the local nps from the same build
+3. Compute platform nps as `n / t` from our log tokens; divide by the local nps from the same build
    and positions to get the speed factor; rescale any node cap.
 4. Record init time from the log against the local measurement from the zip.
 5. Commit the new constants with the log excerpt in this file.
