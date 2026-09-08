@@ -620,12 +620,36 @@ def results_row(record: RunRecord) -> str:
     return "| " + " | ".join(markdown_cell(cell) for cell in cells) + " |"
 
 
+def _ends_with_table_row(text: str) -> bool:
+    """Does the file already end inside a Markdown table, so a row appended now renders as one?"""
+    for line in reversed(text.split("\n")):
+        if line.strip():
+            return line.startswith("|")
+    return False
+
+
 def append_results_row(path: Path, record: RunRecord) -> None:
-    """Append the row, writing the table header first when the file is new or empty."""
+    """Append the row, writing a fresh table header above it whenever the file does not end in one.
+
+    ``docs/RESULTS.md`` is append-only and chronological: each run is a dated section of prose with
+    its rows beneath, and that ordering is the point -- a row means little apart from the paragraph
+    saying what was run and why. So rows keep landing at the end of the file rather than being
+    collected into one table elsewhere.
+
+    What was wrong was only the rendering. A row appended straight after a paragraph has no table
+    header above it, and Markdown shows it as a line of literal pipes: the measurement is in the
+    file but invisible in the rendered document, which is how twenty-five rows accumulated
+    unnoticed. Emitting the header whenever the file does not already end inside a table fixes that
+    without moving a single measurement.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    has_content = path.exists() and path.stat().st_size > 0
+    text = path.read_text() if path.exists() else ""
     with path.open("a") as handle:
-        if not has_content:
+        if not _ends_with_table_row(text):
+            if text and not text.endswith("\n"):
+                handle.write("\n")
+            if text:
+                handle.write("\n")
             handle.write("| " + " | ".join(RESULTS_COLUMNS) + " |\n")
             handle.write("|" + "---|" * len(RESULTS_COLUMNS) + "\n")
         handle.write(results_row(record) + "\n")

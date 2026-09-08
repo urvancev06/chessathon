@@ -49,6 +49,9 @@ Probed with the reviewer's driver (`endgame_probe.py`, 5 000 ms per move, so the
 | Lucena `1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1` | not converted | rook-endgame technique beyond a depth-6 horizon; Stage 2 |
 | `8/8/8/8/3k4/8/8/4KQ2 w - - 82 60` (KQ vs K, 18 plies of fifty-move room) | **not converted**: draw by fifty moves, mate two moves short | the Syzygy tablebase (lichess, queried by hand) gives mate in 13 plies with 18 plies of room, so it is winnable; after the 2026-09-07 fixes the engine makes steady progress (weak king driven to the edge, `Kg6`/`Qe5` vs `Kf8` at the draw) but not at tablebase pace, and depth 6 at 1 250 ms per move never sees the mate in time; see DECISIONS.md |
 | `8/8/8/3K4/8/8/8/q6k b - - 0 291` (KQ vs K, 19 plies before the 600-ply cap) | **converted** (mate in 9 moves, 17 plies) | drawn at the cap before the 2026-09-07 fixes |
+
+| label | agent | opponent | tc | games | +W =D -L | score | 95% interval | Elo (95%) | draws | terminations | workers | load start/end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | fuzz-random-v0.1 | . | baselines/random | 3+0.05 s | 300 | +300 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 300 | 12 | 0.10 0.27 0.22 / 7.45 2.31 0.93 | data/openings.txt |
 | fuzz-greedy-v0.1 | . | baselines/greedy | 10+0.1 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 12 | 7.45 2.31 0.93 / 10.55 5.77 2.43 | data/openings.txt |
 | v0.1-vs-minimax-real-clock | . | baselines/minimax | 120+0.5 s | 40 | +39 =1 -0 | 98.8% | ±2.4% | - | 2.5% | checkmate 39, threefold_repetition 1 | 4 | 1.48 3.05 2.04 / 2.66 3.91 3.34 | data/openings.txt |
@@ -69,6 +72,9 @@ Probed with the reviewer's driver (`endgame_probe.py`, 5 000 ms per move, so the
 
 The 40-game run above (4 workers, load ≈ 3 on 16 cores) is the strength number; this solo pass is
 the time-management check the brief's §7.4 asks for. Both are on the dev box, not the platform core.
+
+| label | agent | opponent | tc | games | +W =D -L | score | 95% interval | Elo (95%) | draws | terminations | workers | load start/end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | v0.1-vs-sf1400-10s | . | tools/yardstick (YARDSTICK_ELO=1400) | 10+0.1 s | 16 | +15 =1 -0 | 96.9% | ±6.1% | - | 6.2% | checkmate 15, threefold_repetition 1 | 4 | 0.22 0.24 0.95 / 2.67 1.44 1.31 | data/openings.txt |
 | v0.1-vs-sf1600-10s | . | tools/yardstick (YARDSTICK_ELO=1600) | 10+0.1 s | 16 | +5 =2 -9 | 37.5% | ±22.8% | -89 (-306 to +73) | 12.5% | checkmate 14, threefold_repetition 2 | 4 | 2.67 1.44 1.31 / 3.31 2.12 1.58 | data/openings.txt |
 | v0.1-vs-sf1800-10s | . | tools/yardstick (YARDSTICK_ELO=1800) | 10+0.1 s | 16 | +3 =4 -9 | 31.2% | ±19.8% | -137 (-355 to +7) | 25.0% | checkmate 12, threefold_repetition 4 | 4 | 3.31 2.12 1.58 / 4.21 2.76 1.87 | data/openings.txt |
@@ -95,6 +101,9 @@ the time-management check the brief's §7.4 asks for. Both are on the dev box, n
 | Stockfish 19 UCI_Elo 2400 | 60 | +18 =16 −26 | 43.3% |
 
 Maximum-likelihood fit over all 300 games, draws as ½: **CCRL-40/4-scale ≈ 2050 (95% interval 1940–2170, bootstrap 2000–2110 plus ±100 yardstick calibration in quadrature); FIDE-equivalent ≈ 1840–2360 (Route A: CCRL−100 lower bound, TalkChess 2800−0.7×(2800−CCRL) upper bound); chess.com Rapid-equivalent ≈ 1820–2340; chess.com Blitz-equivalent ≈ 1730–2700 (ChessGoals table, interpolated). Route B (Sunfish) not run. Estimates built on a rating-limited reference engine and a survey table; honest uncertainty ±200 or more on the human scales.** Caveats: Stockfish's UCI_Elo is calibrated for 120 s + 1 s and anchored to CCRL 40/4; 60 games per level; the 2200 and 2400 scores are not monotonic (limited-strength noise); games shared the machine six at a time; zero flags, lowest clock 1 889 ms.
+
+| label | agent | opponent | tc | games | +W =D -L | score | 95% interval | Elo (95%) | draws | terminations | workers | load start/end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | v0.3-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +159 =65 -76 | 63.8% | ±4.8% | +99 (+64 to +136) | 21.7% | checkmate 235, threefold_repetition 40, insufficient_material 17, fifty_moves 7, stalemate 1 | 12 | 0.87 0.97 0.81 / 10.91 11.49 7.26 | data/openings.txt |
 | v0.3-vs-v0.2-real | . | versions/v0.2 | 120+0.5 s | 60 | +29 =13 -18 | 59.2% | ±11.0% | +64 (-13 to +149) | 21.7% | checkmate 47, threefold_repetition 9, insufficient_material 3, fifty_moves 1 | 4 | 7.19 10.57 7.06 / 2.84 3.76 4.21 | data/openings.txt |
 | numba-fuzz-random | . | baselines/random | 3+0.05 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 8 | 0.50 0.60 1.45 / 7.32 7.51 5.22 | data/openings.txt |
@@ -121,6 +130,9 @@ Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.s
 | `numba.objmode` clock read | 301 ns | 100 000 reads inside a jitted loop; hence `NODE_CHECK_INTERVAL = 512` |
 | Python → jitted call boundary | 4.0 µs | 20 000 calls of `negamax` at depth 0; why the root is Python (DECISIONS.md) |
 | compile time if the root is compiled too | 34.2 s total | measured per function before the root was moved to Python: `negamax` 13.4 s, `_search_root` 6.3 s, aspiration 2.7 s, deepening loop 5.4 s |
+
+| label | agent | opponent | tc | games | +W =D -L | score | 95% interval | Elo (95%) | draws | terminations | workers | load start/end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | numba-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +279 =19 -2 | 96.2% | ±1.6% | +560 (+495 to +660) | 6.3% | checkmate 281, fifty_moves 1, threefold_repetition 16, insufficient_material 2 | 8 | 0.72 2.63 3.71 / 6.25 7.76 7.59 | data/openings.txt |
 
 ### 2026-09-08 — fuzz re-run on the final build, stopped early
@@ -149,3 +161,10 @@ python-chess. Two of the three are now converted; the third is on a knife edge.
 
 The Python engine was replayed alongside the compiled one on the third position and mated in 19
 plies as well, so the two are on the same edge, not on opposite sides of it.
+
+| label | agent | opponent | tc | games | +W =D -L | score | 95% interval | Elo (95%) | draws | terminations | workers | load start/end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| v1.0-vs-sf1800-real | . | tools/yardstick (YARDSTICK_ELO=1800) | 120+0.5 s | 16 | +13 =1 -2 | 84.4% | ±17.3% | - | 6.2% | checkmate 15, threefold_repetition 1 | 5 | 1.11 0.87 1.29 / 1.80 3.75 3.26 | data/openings.txt |
+| v1.0-vs-sf2000-real | . | tools/yardstick (YARDSTICK_ELO=2000) | 120+0.5 s | 16 | +11 =2 -3 | 75.0% | ±20.0% | +191 (+35 to +512) | 12.5% | checkmate 14, threefold_repetition 2 | 5 | 1.80 3.75 3.26 / 3.19 5.48 4.85 | data/openings.txt |
+| v1.0-vs-sf2200-real | . | tools/yardstick (YARDSTICK_ELO=2200) | 120+0.5 s | 16 | +10 =1 -5 | 65.6% | ±23.2% | +112 (-53 to +360) | 6.2% | checkmate 15, threefold_repetition 1 | 5 | 3.19 5.48 4.85 / 4.45 6.11 5.96 | data/openings.txt |
+| v1.0-vs-sf2400-real | . | tools/yardstick (YARDSTICK_ELO=2400) | 120+0.5 s | 16 | +8 =2 -6 | 56.2% | ±23.5% | +44 (-125 to +238) | 12.5% | threefold_repetition 2, checkmate 14 | 5 | 4.45 6.11 5.96 / 5.53 6.35 6.48 | data/openings.txt |
