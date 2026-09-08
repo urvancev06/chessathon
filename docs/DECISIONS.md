@@ -425,3 +425,114 @@ run is 143 tests in 168 s, or 171 s with bounds checking on.
 Not yet done, and deliberately: nothing calls this module at runtime. The compiled search and
 evaluation are the next phase, and `agent.py` keeps the python-chess engine until they exist and
 win a match under the promotion rule.
+
+## 2026-09-08 — Stage 1 phase 2: the compiled evaluation is a port gated on exact equality
+
+`mikhail_letal/fasteval.py` is `evaluation.py` rewritten for the 0x88 board, and the only
+acceptance test is that the two return **the same integer** on 20,000 positions from playouts of
+the curated openings, on all 219 openings, on the 58 rule-breakers, on one hand-built position per
+term, and on 2,000 colour-swapped mirrors. Both compute the same integer arithmetic on the same
+weights, so there is no rounding to blame a difference on, and one centipawn of drift would change
+which move the search picks.
+
+**Chosen: per-file pawn summaries instead of bitboard fills.** `evaluation.py` computes passed,
+doubled and isolated pawns with `bb >> 8`, `bb << 32` and friends on Python's arbitrary-precision
+integers. Inside numba those are 64-bit machine words, where a signed right shift sign-extends and
+a left shift silently overflows — the classic way to get an evaluation that is right in Python and
+wrong when compiled. So each fill is restated as a statement about three numbers per colour and
+file (how many pawns, their highest rank, their lowest rank), which the mailbox already knows.
+**Rejected: uint64 bitboards inside numba**, which would have matched `evaluation.py` line for
+line and needed `np.uint64(...)` on every literal to avoid numba's silent promotion of
+`uint64 + int64` to `float64`. That is a bug waiting in every arithmetic expression, checked only
+by the same gate; the summaries are checkable by reading.
+
+**Chosen: one scratch buffer in `EvalTables` rather than `np.zeros` per call.** An 8×2 array
+allocated per evaluation cost 730 ns of the 930 ns the first version spent — four fifths of the
+evaluation. The evaluation cannot recurse and the engine is single-threaded by rule, so one shared
+buffer is safe. Measured after: 204 ns from the opening position, against 8.3 µs for the Python
+evaluation (40x).
+
+## 2026-09-08 — Stage 1 phase 2: fixed-size transposition table, Zobrist keys, depth-preferred
+
+`search.py` keys a Python dict on `Board._transposition_key()`, which is *exact*: two different
+positions are never the same key, and the table only ever grows until it is cleared. A compiled
+search cannot afford a dict, so `fastsearch` uses a fixed 2²¹-entry array indexed by a Zobrist key
+(`fastboard.hash_position`, numbers drawn from numpy's PCG64 with a recorded seed), with
+depth-preferred replacement.
+
+Two consequences the Python version does not have, and why both are acceptable: entries are
+**replaced** rather than accumulated, which changes which nodes prune but never what is legal; and
+a key **collision** is possible, about one in 2⁶⁴ per probe. A collision can hand the search a
+wrong score or a wrong first move to try — never an illegal move, because the table move is
+matched against the generated move list rather than played on trust, and because `agent.py`
+validates the final move against python-chess whatever happens.
+
+**Rejected: keeping the exact dict.** It is the single most expensive thing in the Python engine's
+node cost and cannot be compiled at all. **Rejected: always-replace.** Depth-preferred keeps the
+expensive deep entries that the shallow iterations of the next move would otherwise evict.
+
+## 2026-09-08 — Stage 1 phase 2: the search aborts by flag, not by exception
+
+`search.py` raises `SearchAborted` at the deadline and unwinds through `board.pop()` in `finally`-
+shaped code. In `fastsearch` the deadline sets `I_ABORT` and every function returns as soon as it
+sees it, always immediately *after* its `unmake_move`, so the position is left exactly as it was
+found. `tests/test_fastsearch.py::test_negamax_leaves_the_position_exactly_as_it_found_it` pins
+that on five node limits by comparing all four arrays byte for byte.
+
+**Rejected: numba exceptions.** They work, but an exception raised through a deeply recursive
+compiled call stack is the part of numba least covered by its own tests, and a half-unmade
+position is exactly the failure that produces an illegal move. The flag costs one predictable
+branch a node.
+
+## 2026-09-08 — Stage 1 phase 2: the root runs in Python, everything below it is compiled
+
+Compiling iterative deepening, the aspiration window and the root move loop cost **fourteen
+seconds** of the platform's 90-second start-up budget, measured function by function: numba links
+a callee's whole compiled module into its caller and optimises the result again, so every layer
+stacked on `negamax` (which already contains the evaluation, the generator and make/unmake) pays
+for the entire engine to be optimised once more — 6.3 s for `_search_root`, 2.7 s for the
+aspiration wrapper, 5.4 s for the deepening loop.
+
+Running them in Python costs one boundary crossing per root move per iteration, measured at 4.0 µs
+(numba has to unbox thirteen arrays). With forty root moves and fifteen iterations that is under
+three milliseconds a move, against seconds bought back at start-up. Total import from the
+extracted zip fell from 34 s to 17 s. Everything that runs millions of times a move is still
+compiled; only the part that runs a few hundred times is not — and that part now mirrors
+`search.Engine` almost statement for statement, which is what makes the port checkable by eye.
+
+**Rejected: merging the three root functions into one compiled function.** Saves the same time and
+costs the readability the project's own rules ask for. **Rejected: `NUMBA_OPT=1`,** which cut
+compile time by 15 % and node rate by rather more; **`NUMBA_OPT=0`** compiled in 23 s and searched
+at 57k nodes/s, no faster than the interpreted engine. **Rejected: `cache=True`,** for the reason
+already recorded: `/tmp` is wiped between games.
+
+## 2026-09-08 — Stage 1 phase 2: two independent limits inside the compiled search
+
+The wall clock is read inside the tree through `numba.objmode` every 512 nodes (a read costs
+300 ns, so the cadence is under one percent of node cost at a million nodes a second, and bounds
+the overshoot past the hard deadline to about half a millisecond). A node cap derived from the
+**measured** node rate — twice what the hard budget can buy, `FastEngine.node_rate` updated after
+every move long enough to measure — backs it up. Both mechanisms, always: the clock is what the
+referee cares about, the cap is what still stops the search if a clock read stops working.
+
+**Rejected: the clock alone.** `objmode` drops into the interpreter, which is the one place inside
+the compiled search where something outside our control can go wrong. **Rejected: the cap alone.**
+It is a guess about speed, and the platform's core is not this one.
+
+## 2026-09-08 — Runtime guards on the two fixed-size buffers
+
+Phase 1 left `gen_pseudo`'s 256-move buffer and the 512-ply undo stack unguarded: the sizes are
+comfortably above anything a legal position produces (218 legal moves is the known maximum, and
+the referee caps a game at 600 plies with search nesting far below that), but "comfortably above"
+is not a check. On the platform an out-of-bounds numpy write is silent and its consequences
+arbitrary, so both now raise `IndexError`, which `agent.py` answers with the fallback move.
+
+The move-buffer guard is one integer comparison **per piece**, not per move: the widest piece a
+generator can produce moves for is a queen on an empty board with 27 destinations, so reserving
+`MOVES_PER_PIECE_MAX = 27` slots before starting on a piece is sufficient and costs nothing
+measurable (perft throughput unchanged at 13 M nodes/s). Nothing in either guard is derived from a
+compile-time constant, so the compiler cannot prove it away.
+
+**Rejected: truncating the move list instead of raising.** Silently dropping legal moves would
+make the engine play a wrong move in a position it had every chance to get right; the exception is
+caught one frame up and costs a fallback move at worst.

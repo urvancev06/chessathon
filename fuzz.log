@@ -1,0 +1,49 @@
+. vs baselines/random: 200 games at 3000+50 ms, ply cap 600, 8 worker(s), openings from data/openings.txt (219), seed offset 0, load 0.50 0.60 1.45
+Game 1/200 (seed 0), Petroff Defence as white, white by checkmate, 30 plies, low clock 1648 ms, 29.3 s
+Game 2/200 (seed 1), Petroff Defence as black, black by checkmate, 13 plies, low clock 1654 ms, 29.6 s
+Game 3/200 (seed 2), Sicilian Closed as white, white by checkmate, 16 plies, low clock 1693 ms, 28.2 s
+Game 4/200 (seed 3), Sicilian Closed as black, black by checkmate, 35 plies, low clock 1648 ms, 29.6 s
+Game 5/200 (seed 4), London System as white, white by checkmate, 22 plies, low clock 1648 ms, 26.4 s
+Game 6/200 (seed 5), London System as black, black by checkmate, 23 plies, low clock 1649 ms, 30.3 s
+Game 7/200 (seed 6), London System as white, white by checkmate, 42 plies, low clock 1648 ms, 30.0 s
+Game 8/200 (seed 7), London System as black, black by checkmate, 23 plies, low clock 1649 ms, 29.4 s
+Game 9/200 (seed 8), Sicilian Closed as white, white by checkmate, 14 plies, low clock 1670 ms, 28.8 s
+Game 10/200 (seed 9), Sicilian Closed as black, black by checkmate, 35 plies, low clock 1648 ms, 29.3 s
+Game 11/200 (seed 10), Sicilian Najdorf as white, white by checkmate, 18 plies, low clock 1717 ms, 28.2 s
+Game 12/200 (seed 11), Sicilian Najdorf as black, black by checkmate, 17 plies, low clock 1648 ms, 29.8 s
+Game 13/200 (seed 12), Sicilian Classical as white, white by checkmate, 18 plies, low clock 1648 ms, 30.2 s
+Game 14/200 (seed 13), Sicilian Classical as black, black by checkmate, 25 plies, low clock 1649 ms, 29.2 s
+Game 15/200 (seed 14), Pirc Defence as white, white by checkmate, 6 plies, low clock 2479 ms, 28.4 s
+Game 16/200 (seed 15), Pirc Defence as black, black by checkmate, 33 plies, low clock 1649 ms, 29.8 s
+Game 17/200 (seed 16), Queen's Indian Defence as white, white by checkmate, 34 plies, low clock 1648 ms, 30.7 s
+Game 18/200 (seed 17), Queen's Indian Defence as black, black by checkmate, 19 plies, low clock 1649 ms, 29.2 s
+Game 19/200 (seed 18), Nimzo-Indian Defence as white, white by checkmate, 13 plies, low clock 1649 ms, 30.2 s
+Game 20/200 (seed 19), Nimzo-Indian Defence as black, black by checkmate, 30 plies, low clock 1649 ms, 29.4 s
+Game 21/200 (seed 20), London System as white, white by checkmate, 30 plies, low clock 1649 ms, 29.6 s
+Game 22/200 (seed 21), London System as black, black by checkmate, 21 plies, low clock 1649 ms, 29.6 s
+Game 23/200 (seed 22), King's Indian Classical as white, white by checkmate, 26 plies, low clock 1649 ms, 30.7 s
+Game 24/200 (seed 23), King's Indian Classical as black, black by checkmate, 41 plies, low clock 1648 ms, 28.7 s
+Game 25/200 (seed 24), Sicilian Closed as white, white by checkmate, 44 plies, low clock 1648 ms, 30.6 s
+Game 26/200 (seed 25), Sicilian Closed as black, black by checkmate, 37 plies, low clock 1648 ms, 30.9 s
+Game 27/200 (seed 26), King's Indian Classical as white, white by checkmate, 20 plies, low clock 1727 ms, 29.1 s
+Game 28/200 (seed 27), King's Indian Classical as black, black by checkmate, 25 plies, low clock 1649 ms, 31.0 s
+Game 29/200 (seed 28), Catalan Opening as white, white by checkmate, 25 plies, low clock 1649 ms, 29.1 s
+Game 30/200 (seed 29), Catalan Opening as black, black by checkmate, 24 plies, low clock 1664 ms, 30.1 s
+Game 31/200 (seed 30), Sicilian Closed as white, white by checkmate, 19 plies, low clock 1649 ms, 30.4 s
+Game 32/200 (seed 31), Sicilian Closed as black, black by checkmate, 22 plies, low clock 1661 ms, 29.5 s
+Game 33/200 (seed 32), Caro-Kann Advance as white, white by checkmate, 32 plies, low clock 1649 ms, 28.9 s
+Game 34/200 (seed 33), Caro-Kann Advance as black, black by checkmate, 27 plies, low clock 1649 ms, 29.5 s
+Game 35/200 (seed 34), Slav Defence as white, white by checkmate, 24 plies, low clock 1648 ms, 30.4 s
+Game 36/200 (seed 35), Slav Defence as black, black by checkmate, 17 plies, low clock 1648 ms, 31.5 s
+Game 37/200 (seed 36), Reti Opening as white, white by checkmate, 17 plies, low clock 1649 ms, 29.3 s
+Game 38/200 (seed 37), Reti Opening as black, black by checkmate, 20 plies, low clock 1649 ms, 30.3 s
+Game 39/200 (seed 38), Sicilian Closed as white, white by checkmate, 24 plies, low clock 1648 ms, 29.5 s
+Game 40/200 (seed 39), Sicilian Closed as black, black by checkmate, 33 plies, low clock 1649 ms, 30.4 s
+Game 41/200 (seed 40), Sicilian Closed as white, white by checkmate, 24 plies, low clock 1649 ms, 29.5 s
+Game 42/200 (seed 41), Sicilian Closed as black, black by checkmate, 37 plies, low clock 1648 ms, 30.5 s
+Game 43/200 (seed 42), Caro-Kann Classical as white, white by checkmate, 28 plies, low clock 1648 ms, 30.7 s
+Game 44/200 (seed 43), Caro-Kann Classical as black, black by checkmate, 39 plies, low clock 1648 ms, 29.3 s
+Game 45/200 (seed 44), London System as white, white by checkmate, 16 plies, low clock 1684 ms, 30.0 s
+Game 46/200 (seed 45), London System as black, black by checkmate, 21 plies, low clock 1649 ms, 30.8 s
+Game 47/200 (seed 46), Italian Game as white, white by checkmate, 34 plies, low clock 1648 ms, 27.9 s
+Game 48/200 (seed 47), Italian Game as black, black by checkmate, 11 plies, low clock 1649 ms, 28.9 s
