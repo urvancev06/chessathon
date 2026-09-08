@@ -787,13 +787,29 @@ def negamax(
     if halfmove >= 100:
         return _game_over_score(pos, st, ply, in_chk)
 
-    # (4) Check extension: a side in check has few sensible replies and the position is
+    # (4) Mate-distance pruning. A node `ply` plies from the root cannot be worth less than
+    # being mated here, -(MATE_SCORE - ply), nor more than mating on this very move,
+    # MATE_SCORE - ply - 1, whatever the position is. Clamping the window to that costs two
+    # comparisons and ends the search of a line as soon as a shorter mate is already known
+    # somewhere above it, which is what stops a mate search from wandering off looking for a
+    # longer one. The clamp is safe because it only removes values the node could never return,
+    # so `alpha` is a true bound on the value in both directions when the window closes.
+    mated_here = -(MATE_SCORE - ply)
+    mate_next = MATE_SCORE - ply - 1
+    if alpha < mated_here:
+        alpha = mated_here
+    if beta > mate_next:
+        beta = mate_next
+    if alpha >= beta:
+        return alpha
+
+    # (5) Check extension: a side in check has few sensible replies and the position is
     # tactically hot, so it is searched one ply deeper. It comes before the table probe so probe
     # and store agree on the depth of this node.
     if in_chk != 0:
         depth += 1
 
-    # (5) Transposition table probe. Stored mate scores are distances from the stored node;
+    # (6) Transposition table probe. Stored mate scores are distances from the stored node;
     # convert them to distances from the root before comparing with this node's window.
     tt_move = NO_MOVE
     index = _tt_probe(st, key)
@@ -819,11 +835,11 @@ def negamax(
     if ply >= MAX_PLY:
         return _static_score(pos, st, ev, ply, in_chk)
 
-    # (6) Horizon: resolve captures before evaluating.
+    # (7) Horizon: resolve captures before evaluating.
     if depth <= 0:
         return quiescence(pos, st, ev, alpha, beta, ply, in_chk, 0)
 
-    # (7) Interior node. Register the position on the current line for repetition checks, and
+    # (8) Interior node. Register the position on the current line for repetition checks, and
     # start a fresh path-draw flag for the subtree (the caller's is restored on the way out).
     st.path[ply] = key
     outer_path_draw = ints[I_PATH_DRAW]
@@ -836,7 +852,7 @@ def negamax(
     # "doing nothing" are exactly what decides the position.
     mate_bounds = alpha <= -MATE_THRESHOLD or beta >= MATE_THRESHOLD
 
-    # (8) Null-move pruning: if passing already holds beta, a real move surely does too.
+    # (9) Null-move pruning: if passing already holds beta, a real move surely does too.
     if (
         NULL_MOVE_PRUNING
         and null_allowed != 0
@@ -859,7 +875,7 @@ def negamax(
             _store(st, key, depth, beta, LOWER, tt_move, ply, tainted)
             return beta
 
-    # (9) Futility: decided once for the node, applied to its quiet moves in the loop.
+    # (10) Futility: decided once for the node, applied to its quiet moves in the loop.
     futility_bound = -_INFINITY
     if FUTILITY_PRUNING and depth < _FUTILITY_DEPTHS and in_chk == 0 and not mate_bounds:
         bound = _cached_eval(pos, st, ev, key) + _FUTILITY[depth]
@@ -901,18 +917,18 @@ def negamax(
             and searched >= LMR_FULL_DEPTH_MOVES
         )
         if searched == 0:
-            # (10) The first move searched is the principal variation candidate: the ordering
+            # (11) The first move searched is the principal variation candidate: the ordering
             # believes in it, so it gets the full window and its score is the one every later
             # move is measured against. It is never reduced.
             score = -negamax(pos, st, ev, child_depth, -beta, -alpha, child_ply, 1)
         else:
-            # (11) Principal variation search. Every later move is expected to be worse than the
+            # (12) Principal variation search. Every later move is expected to be worse than the
             # first, and proving "worse than alpha" is far cheaper than measuring how much
             # better a move is: a null window (alpha, alpha+1) cuts off at the first refutation
             # in every subtree. Only a move that beats alpha has to be measured properly, and
             # then it is searched again with the real window.
             #
-            # (12) Late-move reduction rides on the same scan, and the two re-searches compose
+            # (13) Late-move reduction rides on the same scan, and the two re-searches compose
             # in a fixed order: reduced null window, then full-depth null window, then full
             # window. Skipping the middle step would pay full depth *and* the full window for a
             # move that the shallow search only hinted at, which is where the classic bug is.

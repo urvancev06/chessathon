@@ -745,3 +745,32 @@ move the full window, and that is where the largest single subtree saving would 
 alone for now because `root_scores` feeds `_break_draw_tie`, which counts moves scoring exactly
 `DRAW_SCORE`, and a null-window root search returns bounds rather than values there; the mop-up
 behaviour that depends on it is tested and would need re-establishing first.
+
+## 2026-09-08 — Mate-distance pruning, which the docstrings already claimed
+
+`fastsearch`'s module docstring and `docs/DESIGN.md` both listed mate-distance pruning among the
+things the search does. Neither engine had it. This adds it, in both, as step (4) of the node —
+after the draw checks, before the check extension and the table probe, so the probe and the store
+still see the same depth.
+
+A node `ply` plies from the root is worth at least `-(MATE_SCORE - ply)` (being mated right here)
+and at most `MATE_SCORE - ply - 1` (mating on this very move). Clamping `alpha` and `beta` to that
+removes only values the node could never return, so when the clamped window closes the node can
+answer `alpha` immediately: in the fail-high case `alpha` is `-(MATE_SCORE - ply)`, a true lower
+bound; in the fail-low case `alpha` is at or above the ceiling, a true upper bound. Two
+comparisons per node, and it stops a search that has already found a mate in n from spending the
+rest of the iteration proving a mate in n + 2 somewhere else.
+
+**Measured, compiled engine.** Ordinary positions are untouched, as they should be — depth 10
+from the standard start, the Kiwipete middlegame and the rook ending give byte-identical node
+counts (199 510 / 3 193 943 / 165 683) because the clamp only bites once a mate bound is in the
+window. Where it does bite: a mate in three to depth 5, 13 052 → 2 914 nodes (−78 %, 25 ms →
+4 ms); KR vs k to depth 12 unchanged at 1 365 801; KQ vs k to depth 12 3 472 742 → 3 595 700
+(+3.5 %, the mop-up tie-break searching a different tree, same move and same score).
+
+**Rejected: clamping after the table probe** instead of before it. It would let a probe return a
+score from outside the window the node can actually be worth, and it is one comparison later for
+no gain.
+
+**Rejected: also clamping in `quiescence`.** Quiescence has no depth left to shorten and its
+stand-pat score is never a mate score, so the clamp could only ever cost the comparison.

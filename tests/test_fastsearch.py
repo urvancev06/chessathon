@@ -145,6 +145,7 @@ def test_an_expired_deadline_skips_every_phase_and_still_returns() -> None:
     keeps its conservative default rather than being left at zero."""
     engine = FastEngine()
     assert engine.node_rate == DEFAULT_NODE_RATE
+    arm(None)  # the budget is shared and `warm_up` only sets its deadline: start its log empty
     try:
         spent = warm_up(engine, deadline=time.perf_counter() - 1.0)
         skipped = list(budget().skipped)
@@ -167,6 +168,7 @@ def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
     budget that fits some of them runs those; and the two that need a compiled `negamax` are
     skipped once it is, because running them would compile it anyway."""
     engine = FastEngine()
+    arm(None)  # see the note in the test above
     try:
         # Three seconds fits `quiescence` (2.1 reference seconds) and `tie_break` (1.6) but not
         # `helpers` (5.3) or `negamax` (12.5).
@@ -185,6 +187,7 @@ def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
 
 def test_a_generous_deadline_runs_the_whole_warm_up() -> None:
     engine = FastEngine()
+    arm(None)  # see the note two tests above
     try:
         warm_up(engine, deadline=time.perf_counter() + 3600.0)
         skipped = list(budget().skipped)

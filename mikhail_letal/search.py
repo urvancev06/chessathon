@@ -28,7 +28,9 @@ caused cutoffs at the same distance from the root), then the remaining quiet mov
 
 Repetition and the fifty-move rule are handled inside the tree so the engine neither drifts into
 a draw when it is winning nor avoids one when it is losing. The referee's 600-ply cap is applied
-the same way.
+the same way. *Mate-distance pruning* clamps every node's window to the best and worst a node
+that far from the root could possibly be worth, which keeps a won position looking for the
+shortest mate rather than any mate.
 
 v0.2 adds five textbook ways of searching less without (in practice) missing more, each behind a
 switch so its effect could be measured in games: *null-move pruning* (if passing already holds
@@ -596,7 +598,23 @@ class Engine:
         if board.halfmove_clock >= 100:
             return self._game_over_score(board, ply)
 
-        # (4) Check extension: a side in check has few sensible replies and the position is
+        # (4) Mate-distance pruning. A node ``ply`` plies from the root cannot be worth less than
+        # being mated here, -(MATE_SCORE - ply), nor more than mating on this very move,
+        # MATE_SCORE - ply - 1, whatever the position is. Clamping the window to that costs two
+        # comparisons and ends the search of a line as soon as a shorter mate is already known
+        # somewhere above it, which is what stops a mate search from wandering off looking for a
+        # longer one. The clamp is safe because it only removes values the node could never return,
+        # so `alpha` is a true bound on the value in both directions when the window closes.
+        mated_here = -(MATE_SCORE - ply)
+        mate_next = MATE_SCORE - ply - 1
+        if alpha < mated_here:
+            alpha = mated_here
+        if beta > mate_next:
+            beta = mate_next
+        if alpha >= beta:
+            return alpha
+
+        # (5) Check extension: a side in check has few sensible replies and the position is
         # tactically hot, so it is searched one ply deeper rather than handed to quiescence. It
         # comes before the table probe so that the probe and the store below agree on the depth
         # of this node; otherwise an in-check node would accept an entry one ply too shallow.
@@ -604,7 +622,7 @@ class Engine:
         if in_check:
             depth += 1
 
-        # (5) Transposition table probe. Stored mate scores are distances from the stored node;
+        # (6) Transposition table probe. Stored mate scores are distances from the stored node;
         # convert them to distances from the root before comparing with this node's window.
         tt = self._tt
         entry = tt.get(key)
@@ -630,11 +648,11 @@ class Engine:
         if ply >= MAX_PLY:
             return self._static_score(board, ply, in_check)
 
-        # (6) Horizon: resolve captures before evaluating.
+        # (7) Horizon: resolve captures before evaluating.
         if depth <= 0:
             return self._quiescence(search_board, alpha, beta, ply, in_check, 0)
 
-        # (7) Interior node. Register the position on the current line for repetition checks,
+        # (8) Interior node. Register the position on the current line for repetition checks,
         # and start a fresh path-draw flag for the subtree (the caller's is restored after).
         path = self._path
         path[key] = 1
@@ -649,7 +667,7 @@ class Engine:
         # and "doing nothing" are exactly what decides the position.
         mate_bounds = alpha <= -MATE_THRESHOLD or beta >= MATE_THRESHOLD
 
-        # (8) Null-move pruning (see NULL_MOVE_PRUNING for the idea and the guards).
+        # (9) Null-move pruning (see NULL_MOVE_PRUNING for the idea and the guards).
         if (
             NULL_MOVE_PRUNING
             and null_allowed
@@ -674,7 +692,7 @@ class Engine:
                 self._store(key, depth, beta, LOWER, tt_code, ply, tainted)
                 return beta
 
-        # (9) Futility: decided once for the node, applied to its quiet moves in the loop.
+        # (10) Futility: decided once for the node, applied to its quiet moves in the loop.
         futility_bound = -_INFINITY
         if FUTILITY_PRUNING and depth < len(FUTILITY_MARGINS) and not in_check and not mate_bounds:
             bound = self._evaluate(search_board) + FUTILITY_MARGINS[depth]
@@ -695,18 +713,18 @@ class Engine:
                 continue
             search_board.push(move)
             if searched == 0:
-                # (10) The first move searched is the principal variation candidate: the
+                # (11) The first move searched is the principal variation candidate: the
                 # ordering believes in it, so it gets the full window and its score is what
                 # every later move is measured against. It is never reduced.
                 score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
             else:
-                # (11) Principal variation search. Later moves are expected to be worse than the
+                # (12) Principal variation search. Later moves are expected to be worse than the
                 # first, and proving "no better than alpha" is far cheaper than measuring how
                 # much better a move is: the null window (alpha, alpha + 1) cuts off at the
                 # first refutation in every subtree. Only a move that beats alpha is measured
                 # properly, with a re-search inside the real window.
                 #
-                # (12) Late-move reduction rides on the same scan, and the re-searches compose
+                # (13) Late-move reduction rides on the same scan, and the re-searches compose
                 # in a fixed order -- reduced null window, full-depth null window, full window.
                 # Skipping the middle step would spend full depth *and* the full window on a
                 # move the shallow search only hinted at.

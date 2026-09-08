@@ -223,11 +223,13 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   alpha, because a score at or below alpha is an upper bound and cannot rank moves.
 - Node: terminal checks in this order: (1) `board.ply() >= 600` → draw; (2) repetition: key in
   `history` or in the search path → `DRAW_SCORE`; (3) halfmove clock ≥ 100 → checkmate or draw;
-  (4) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
-  probe and store see the same depth; (5) TT probe (depth-sufficient, mate scores adjusted by
-  ply); (6) depth ≤ 0 → quiescence; (7) register the position on the path; (8) null-move
-  pruning; (9) the futility decision; then the staged move loop with (10) the first move at the
-  full window, (11) a null window for every later move and (12) late-move reductions inside it.
+  (4) mate-distance pruning: `alpha = max(alpha, -(MATE_SCORE - ply))`,
+  `beta = min(beta, MATE_SCORE - ply - 1)`, return `alpha` if the window closes;
+  (5) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
+  probe and store see the same depth; (6) TT probe (depth-sufficient, mate scores adjusted by
+  ply); (7) depth ≤ 0 → quiescence; (8) register the position on the path; (9) null-move
+  pruning; (10) the futility decision; then the staged move loop with (11) the first move at the
+  full window, (12) a null window for every later move and (13) late-move reductions inside it.
   No legal move and nothing pruned → mated or stalemate.
 - Principal variation search: only the first move searched at a node gets the full window
   `(alpha, beta)`. Every later one is searched with `(alpha, alpha + 1)`, which asks only whether
