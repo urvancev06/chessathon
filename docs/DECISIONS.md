@@ -879,3 +879,43 @@ legality, so an illegal one can now set `pruned_any`. That can only raise the no
 score to `futility_bound`, which is at most `alpha_original`, so the node still stores an UPPER
 bound and the bound is still true — a looser upper bound is always sound. Nothing in the three
 measured positions changed by a single node.
+
+## 2026-09-08 — Rejected: a history malus, and history gravity
+
+Tried, measured, and not shipped. The history heuristic only ever *rewards* a quiet move that
+causes a beta cutoff, and an audit suggested the two standard additions: a **malus** that lowers
+the score of the quiet moves the same node tried and which failed to cut off, and **gravity**,
+which scales each update by how close the entry already is to `_HISTORY_MAX` so that scores
+approach the limit instead of piling up against it. Both were implemented in both engines — the
+compiled loop marking the slots it skipped so the malus could tell a move that was searched and
+beaten from one that was never given the chance — and then measured over fifteen positions
+(the three benchmark positions plus twelve openings from `data/openings.txt`, seed 20260908) at a
+fixed depth 10.
+
+| build | nodes to depth 10, fifteen positions |
+|---|---|
+| shipped (bonus only) | 8 634 847 |
+| gravity, no malus | 8 634 847 |
+| gravity + malus | 9 624 902 (**+11.5 %**) |
+| gravity + malus, bonus and malus capped at 400 | 9 624 902 |
+
+**Gravity is exactly a no-op here, to the node**, and the third row says the cap is too. Both
+answers have the same cause and it is worth writing down: the bonus is `depth * depth`, so at
+depth 10 it never exceeds 100, while `_HISTORY_MAX` is 999 999 and the whole table is halved at
+the start of every move. Entries never get near the limit, so there is nothing for gravity to
+scale down and nothing for a cap to cut. The saturation the audit predicted does not happen in
+this engine, and adding code that measurably changes nothing is not worth the lines.
+
+**The malus costs 11.5 % more nodes at the same depth.** That is the wrong sign for a
+move-ordering change, which is the one kind of change whose node count at fixed depth is a fair
+verdict on its own: better ordering cuts off sooner, and nothing is traded away for it. The
+likely reason is the asymmetry between the two updates at this bonus shape — a node hands out one
+bonus and up to thirty maluses, each as large as the bonus and each scaled by `depth * depth`, so
+a quiet move that is tried and beaten in a deep node is driven far more negative than the same
+move is ever raised by cutting off in a shallow one. What the table then ranks is "how often was
+this move tried near the root", not "how often did it work". Making that work would need a
+different bonus shape, and that is a tuning exercise against games, not something to bolt on.
+
+Kept for the record rather than deleted: the numbers above are the reason the shipped engine still
+has a reward-only history table, and anyone who reads the audit and reaches for the same two ideas
+should start from here.
