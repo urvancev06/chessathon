@@ -12,6 +12,11 @@ Positions are identified by ``board._transposition_key()``, python-chess's own r
 FEN strings are not compared, because the halfmove clock and move number in a FEN are not part of
 repetition identity.
 
+The compiled searcher cannot hash a ``chess.Board`` inside its tree, so every position is recorded
+a second time under ``fastboard.position_key`` -- the Zobrist key the compiled tree computes for
+itself. The two keys mean the same thing (see the note in ``fastboard``) and are kept strictly in
+step: every place that records a position records both.
+
 One known, harmless gap: we only ever see positions with our own colour to move, so when we play
 Black the game's true start position (White to move) is never observed and its count here stays
 one lower than the referee's. Because the searcher treats *any* earlier occurrence as a draw
@@ -19,9 +24,11 @@ one lower than the referee's. Because the searcher treats *any* earlier occurren
 ``tests/test_gamestate.py::test_black_never_sees_the_start_position`` pins this.
 """
 
-from collections.abc import Hashable, Mapping
+from collections.abc import Hashable, Mapping, Sequence
 
 import chess
+
+from mikhail_letal.fastboard import position_key
 
 # A position key as produced by ``chess.Board._transposition_key()``.
 type Key = Hashable
@@ -33,6 +40,8 @@ class GameState:
     def __init__(self) -> None:
         # How many times each position has occurred in the game so far.
         self._counts: dict[Key, int] = {}
+        # The same positions under the compiled engine's own key, in the order they occurred.
+        self._fast_keys: list[int] = []
         # The last position we know about: the one after our own last move, normally. The next
         # position we receive must be one legal move away from it, or the game has desynced.
         self._last: chess.Board | None = None
@@ -64,6 +73,7 @@ class GameState:
             probe.pop()
             if reached:
                 self._counts[key] = self._counts.get(key, 0) + 1
+                self._fast_keys.append(position_key(board))
                 self._last = board.copy(stack=False)
                 return True
 
@@ -75,6 +85,7 @@ class GameState:
         """Record the position after the move we chose was pushed onto the board."""
         key = board_after._transposition_key()
         self._counts[key] = self._counts.get(key, 0) + 1
+        self._fast_keys.append(position_key(board_after))
         # Copy without the move stack: the caller may keep mutating its board, and legal-move
         # generation needs only the current position (castling rights and the en passant square
         # are part of it), not how it was reached.
@@ -91,6 +102,15 @@ class GameState:
         return self._counts
 
     @property
+    def fast_history(self) -> Sequence[int]:
+        """The same positions as ``history``, keyed the way the compiled searcher keys them.
+
+        Order and multiplicity do not matter to the searcher (it treats any earlier occurrence as
+        a draw), so this is a plain list rather than a count.
+        """
+        return self._fast_keys
+
+    @property
     def own_moves(self) -> int:
         """How many moves we have played this game (drives the time budget)."""
         return self._own_moves
@@ -103,4 +123,5 @@ class GameState:
     def _restart(self, board: chess.Board, key: Key) -> None:
         """Forget every earlier position and begin the history at ``board``."""
         self._counts = {key: 1}
+        self._fast_keys = [position_key(board)]
         self._last = board.copy(stack=False)

@@ -5,6 +5,14 @@ whatever happens inside the search (a bug, a slow move, a bad result), ``get_mov
 and never returns an illegal move, because either of those loses the game on the spot. The engine
 itself (search, evaluation, time management, position history) lives in the package; here we only
 build the board, decide how much time to spend, call the engine, and check its answer.
+
+The engine underneath is compiled: ``mikhail_letal.fastsearch`` searches its own 0x88 board
+(``fastboard``) with numba, about fourteen times as many nodes a second as the searcher in
+``search.py``, which stays in the repository as the specification the compiled port is checked
+against. That changes nothing here. python-chess is still the legality oracle -- the board is
+built with it, the move that comes back is looked up in its ``legal_moves``, and anything that
+fails that test is replaced by the fallback -- so the safety guarantees do not depend on the
+compiled code being right.
 """
 
 import contextlib
@@ -21,16 +29,23 @@ os.environ.setdefault("NUMBA_NUM_THREADS", "1")
 # print includes them; hence the E402 waivers.
 import chess  # noqa: E402
 
-from mikhail_letal import ENGINE_NAME, __version__  # noqa: E402
+from mikhail_letal import (  # noqa: E402
+    ENGINE_NAME,
+    __version__,
+    fastboard,
+    fasteval,
+    fastsearch,
+)
 from mikhail_letal.fallback import fallback_move  # noqa: E402
+from mikhail_letal.fastsearch import FastEngine  # noqa: E402
 from mikhail_letal.gamestate import GameState  # noqa: E402
-from mikhail_letal.search import GAME_PLY_CAP, Engine  # noqa: E402
+from mikhail_letal.search import GAME_PLY_CAP  # noqa: E402
 from mikhail_letal.timing import DEFAULT_PARAMS, budget  # noqa: E402
 
 # Module state lives for one game: the platform starts a fresh process per game and keeps it alive
 # (suspended while the opponent thinks) between our moves.
 STATE = GameState()  # every position seen this game, so the search knows about repetitions
-ENGINE = Engine()  # iterative-deepening alpha-beta; its transposition table persists all game
+ENGINE = FastEngine()  # compiled iterative-deepening alpha-beta; its table persists all game
 PARAMS = DEFAULT_PARAMS  # every time-management constant, in one place (mikhail_letal/timing.py)
 
 
@@ -81,7 +96,7 @@ def get_move(fen: str, time_left_ms: int) -> str:
             soft_ms, hard_ms = plan.soft_ms, plan.hard_ms
             result = ENGINE.search(
                 board,
-                STATE.history,
+                STATE.fast_history,
                 # Do not start another depth once this share of the soft budget has elapsed:
                 # the next iteration costs several times the previous one.
                 soft_deadline=t0 + PARAMS.next_iteration_fraction * soft_ms / 1000.0,
@@ -101,6 +116,7 @@ def get_move(fen: str, time_left_ms: int) -> str:
         move = None
 
     uci = _validated(fen, move)
+    _check_signatures()  # a jitted function compiled on the clock would cost a move; say so
     elapsed_ms = (perf_counter() - t0) * 1000.0
     _say(
         f"m {uci} d {depth}/{seldepth} n {nodes} nps {nps} t {elapsed_ms:.0f}"
@@ -145,26 +161,60 @@ def _validated(fen: str, move: chess.Move | None) -> str:
     return uci
 
 
-def _warm_up() -> None:
-    """Search two plies from the standard start so every code path has run once before the clock
-    starts. Wrapped, because a failure here must not break the import; the table is cleared after,
-    so the real game begins from a fresh searcher."""
+# Every compiled function of the engine, by module. numba compiles a function the first time it
+# is called with a given set of argument types; on the platform that first call has to happen
+# here, inside the 90-second import budget, and never on the clock, where it would cost a move.
+_JITTED = (
+    (fastboard, fastboard.JITTED),
+    (fasteval, fasteval.JITTED),
+    (fastsearch, fastsearch.JITTED),
+)
+
+
+def _signatures() -> dict[str, int]:
+    """How many compiled specialisations each jitted function has right now."""
+    return {
+        f"{module.__name__}.{name}": len(getattr(module, name).signatures)
+        for module, names in _JITTED
+        for name in names
+    }
+
+
+def _warm_up() -> dict[str, int]:
+    """Compile the whole engine and run a real search, so that nothing compiles on the clock.
+
+    Wrapped, because a failure here must not break the import: an engine that has not warmed up
+    is slow, an agent that fails to import loses every game. The table is cleared afterwards, so
+    the real game begins from a fresh searcher.
+    """
     try:
-        board = chess.Board()
-        warm_state = GameState()
-        warm_state.observe(board)
-        now = perf_counter()
-        ENGINE.search(
-            board,
-            warm_state.history,
-            soft_deadline=now + 5.0,
-            hard_deadline=now + 10.0,
-            max_depth=2,
-        )
+        fastsearch.warm_up(ENGINE)
         ENGINE.new_game()
+        missing = [name for name, count in _signatures().items() if count == 0]
+        if missing:  # a function left to compile on the clock: say so in the log
+            _say(f"warm-up missed {len(missing)}: {missing[0]}")
     except Exception as exc:  # see the docstring
         _say(f"warm-up failed: {type(exc).__name__}: {exc}")
+    return _signatures()
 
 
-_warm_up()
-_say(f"init {(perf_counter() - _IMPORT_STARTED) * 1000:.0f} ms {ENGINE_NAME} {__version__}")
+# The gate this pins: after the warm-up every jitted function has exactly the specialisations it
+# will ever have. ``get_move`` re-checks the counts once a move (a few dozen attribute reads, tens
+# of microseconds) and says so in the log if one has changed, which is how a missed warm-up shows
+# up in a real game rather than as a mysteriously slow move.
+_WARM_SIGNATURES = _warm_up()
+
+
+def _check_signatures() -> None:
+    """Compare the compiled specialisations against the warm-up's, and log any that appeared."""
+    with contextlib.suppress(Exception):
+        for name, count in _signatures().items():
+            if count != _WARM_SIGNATURES.get(name):
+                _say(f"jit: {name} now has {count} signatures, not {_WARM_SIGNATURES[name]}")
+
+
+_say(
+    f"init {(perf_counter() - _IMPORT_STARTED) * 1000:.0f} ms {ENGINE_NAME} {__version__}"
+    f" jit {fastboard.WARM_UP_SECONDS + fasteval.WARM_UP_SECONDS + fastsearch.WARM_UP_SECONDS:.1f}s"
+    f" nps {ENGINE.node_rate:.0f}"
+)

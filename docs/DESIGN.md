@@ -20,6 +20,9 @@ mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searche
 mikhail_letal/timing.py           SHIPS   time budget formula (all constants in one dataclass)
 mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
 mikhail_letal/fallback.py         SHIPS   fast always-legal fallback move
+mikhail_letal/fastboard.py        SHIPS   Stage 1: 0x88 board, move generation, make/unmake, position key (numba)
+mikhail_letal/fasteval.py         SHIPS   Stage 1: evaluation.py ported onto that board (numba)
+mikhail_letal/fastsearch.py       SHIPS   Stage 1: search.py ported onto that board (numba); what agent.py plays with
 weights/pst.json         SHIPS   generated tables with a provenance header
 weights/PROVENANCE.json  SHIPS   machine-readable provenance for every shipped number
 tools/gen_pst.py                 the parametric prior: tables, piece values, structural weights (--out weights/pst.json ships it)
@@ -32,9 +35,10 @@ docs/                            DESIGN, DECISIONS, RESULTS, PROVENANCE, CALIBRA
 data/                            openings.txt, tuning positions and labels (data/tuning/), other collected data
 ```
 
-Rules: `agent.py` and `mikhail_letal/` import only the standard library and `chess`. Nothing under `mikhail_letal/`
-imports `tools/`, `tests/`, `harness/` or `numpy`/`numba` (Stage 1 adds numba). No file in the zip
-is named after a stdlib or stack module. No randomness anywhere in the shipped code path.
+Rules: `agent.py` and `mikhail_letal/` import only the standard library, `chess`, and — in
+`fastboard.py` and the Stage 1 modules built on it — `numpy` and `numba`. Nothing under
+`mikhail_letal/` imports `tools/`, `tests/` or `harness/`. No file in the zip is named after a
+stdlib or stack module. No randomness anywhere in the shipped code path.
 
 ## Shared conventions
 
@@ -402,6 +406,8 @@ class GameState:
     @property
     def history(self) -> Mapping[Key, int]     # counts of every position seen so far in this game
     @property
+    def fast_history(self) -> Sequence[int]    # the same positions under fastboard.position_key
+    @property
     def own_moves(self) -> int                 # how many moves we have played this game
     @property
     def desyncs(self) -> int
@@ -410,6 +416,11 @@ class GameState:
 Reconstructing the opponent's move is done by pushing each legal move on a copy of the expected
 board and comparing `_transposition_key()`; `board.fen()` equality is not used because the
 halfmove clock and move number are not part of repetition identity.
+
+Every position is recorded twice: once under python-chess's key (what `history` returns, and what
+the referee's repetition rule uses) and once under `fastboard.position_key`, because the compiled
+searcher cannot hash a `chess.Board` inside its tree. The two mean the same thing and are written
+in the same three places, so they cannot fall out of step.
 
 Known gap, benign by design: we only receive positions with our colour to move, so when we play
 Black the game's true start position (White to move) is never observed and its count stays one
@@ -430,12 +441,230 @@ preferred; ties broken by UCI string so the result is deterministic. Must return
 milliseconds; never raises when `legal` is non-empty. If `legal` is empty (should never happen —
 the referee ends the game first) it raises `ValueError`, and `agent.py` guards for that.
 
+## `mikhail_letal/fastboard.py` (Stage 1, phase 1)
+
+The compiled position: its own board, its own move generation, its own make and unmake, with no
+Python object in the hot path. Phase 1 is this file only; the compiled search and evaluation that
+will call it are a later phase, and until they exist nothing in `agent.py`'s move path uses it.
+
+```python
+class Position(NamedTuple):        # five preallocated int32 arrays, mutated in place
+    board: NDArray[int32]          # 128 entries, 0x88 indexed: piece_type | colour << 3, or 0
+    plist: NDArray[int32]          # colour * 16 + slot -> square
+    pidx:  NDArray[int32]          # square -> slot in its colour's list, else -1
+    meta:  NDArray[int32]          # side, castling, ep, halfmove, fullmove, undo depth, kings, counts
+    undo:  NDArray[int32]          # MAX_UNDO x UNDO_N
+
+def new_position() -> Position
+def new_move_buffer() -> NDArray[int32]                     # MAX_MOVES
+def new_move_stack(max_ply: int = 64) -> NDArray[int32]     # one buffer per recursion level
+
+# compiled (numba njit); every one is called by warm_up() at import
+def attacked(board, square: int, by_colour: int) -> int     # 1 or 0
+def in_check(pos) -> int
+def gen_pseudo(pos, out) -> int                             # writes packed moves, returns the count
+def gen_legal(pos, out) -> int                              # filters gen_pseudo in place
+def make_move(pos, move: int) -> int                        # 1 if legal; ALWAYS pushes an undo record
+def unmake_move(pos) -> None
+def has_legal_move(pos, out) -> int
+def perft(pos, stack, depth: int, ply: int) -> int
+def hash_position(pos, zob) -> int                          # Zobrist key; ZOBRIST at import
+
+# boundary, plain Python
+def from_board(board: chess.Board) -> Position;  def from_fen(fen: str) -> Position
+def set_from_board(pos, board) -> None;          def to_fen(pos) -> str
+def legal_moves(pos) -> list[int]
+def move_to_uci(move) -> str;  def move_to_chess(move) -> chess.Move
+def move_from_chess(pos, move: chess.Move) -> int
+def pack_move(frm, to, promotion=0, flag=FLAG_NORMAL) -> int
+def move_from / move_to / move_promotion / move_flag (move) -> int
+def sq88(square: int) -> int;  def sq64(square: int) -> int
+def check_invariants(pos) -> None                           # tests only
+def position_key(board: chess.Board) -> int                 # hash_position for a chess.Board
+def warm_up() -> float                                      # called at import; WARM_UP_SECONDS
+JITTED: tuple[str, ...]                                     # every compiled function here
+```
+
+Conventions inside this module, which differ from the rest of the engine and are converted only at
+the boundary:
+
+- Squares are **0x88** (`a1 = 0x00`, `h1 = 0x07`, `a8 = 0x70`), not python-chess's 0..63. A square
+  is on the board exactly when `sq & 0x88 == 0`, which is the whole reason for the representation:
+  every knight hop, king step and slider ray tests the edge with one AND and cannot wrap.
+- Colours are `WHITE = 0`, `BLACK = 1`, not python-chess's `True`/`False`. Piece types match
+  python-chess (`PAWN = 1 .. KING = 6`) so a promotion code passes straight to `chess.Move`.
+- A move is one int32: `from | to << 7 | promotion << 14 | flag << 17`. The flag distinguishes a
+  double push, an en passant capture and a castling move, none of which make/unmake can infer
+  from the squares alone.
+- Every array is int32. One dtype means one numba specialisation per function and no implicit
+  casts.
+
+Behaviour:
+
+- Generation is pseudo-legal plus "make, then ask whether the mover's king is attacked". Castling
+  is the exception: its "not out of, through or into check" conditions are checked in the
+  generator, because they concern squares the king does not end on. En passant discovered check
+  needs no special case — the captured pawn has already left the board when the king is tested.
+- `make_move` always plays the move and always pushes an undo record, whatever it returns, so the
+  caller must `unmake_move` exactly once either way. That is what makes the legality test free in
+  a search: the move it wants to keep is already on the board.
+- `unmake_move` restores the board, both piece lists, the castling rights, the en passant square
+  and both clocks exactly. The captured piece's piece-list slot is stored in the undo record,
+  because the swap-with-last removal would otherwise lose it.
+- `to_fen` reproduces `chess.Board.fen()` byte for byte, including python-chess's default
+  en passant rule: the target square is printed only when a legal en passant capture exists.
+- Both fixed-size buffers are guarded at runtime. `gen_pseudo` refuses to start on a piece unless
+  `MOVES_PER_PIECE_MAX = 27` slots are free (a queen on an empty board is the widest piece), and
+  `make_move` refuses the ply after the last undo slot. Both raise `IndexError`, which `agent.py`
+  answers with the fallback; the alternative — writing past the end of a numpy array — is silent
+  on the platform and its consequences arbitrary.
+- `hash_position` is the Zobrist key of the position: piece placement, side to move, castling
+  rights, and the en passant file **only when a pawn of the side to move stands ready to take**.
+  It is what the compiled search uses for its table and for repetition, and what `GameState`
+  records alongside python-chess's own key so the two sides of the engine agree about which
+  positions are equal. python-chess's `_transposition_key` applies the stricter test of a fully
+  *legal* en passant capture; the two differ only when that pawn is pinned.
+- `warm_up()` compiles every entry point at import with the exact argument types the engine will
+  pass, so nothing compiles on the clock. `cache=True` is not used: the platform wipes `/tmp`
+  between games and every cache path points there, so a disk cache would never hit.
+
+Gates (`tests/test_fastboard.py`, python-chess is the oracle throughout; `LETAL_FULL_GATES=1`
+runs the full sizes, and `NUMBA_BOUNDSCHECK=1` makes numba check every compiled array index):
+
+1. Perft to depth 4 on the standard public positions and on 58 positions built to break one rule
+   each, depth 3 on all 219 curated openings and on 2,000 positions from random playouts.
+2. Legal-move-set equality, as sets of UCI strings, on 100,000 positions, with the sample audited
+   for en passant, all sixteen castling-rights combinations, check, double check, promotions,
+   pawns on the seventh and terminal positions.
+3. Make/unmake round trip: FEN with both clocks byte-identical, `meta` unchanged, and
+   `check_invariants` green after every make and unmake in a Python-level perft.
+4. No jitted function gains a signature under load, so nothing compiles after import.
+
+## `mikhail_letal/fasteval.py` (Stage 1, phase 2)
+
+`evaluation.py` compiled onto `fastboard`. It is a **port, not a redesign**: every term, weight and
+rounding decision is the one in `evaluation.py`, which stays in the repository as the specification
+and as the oracle the gate compares against.
+
+```python
+class EvalTables(NamedTuple):      # eight preallocated arrays, built once at import
+    pst_mg, pst_eg: NDArray[int32]        # [colour, piece type, 0x88 square], material folded in
+    values_mg, phase_weights: NDArray[int32]
+    weights: NDArray[int32]               # the structural weights, indexed by W_*
+    misc:    NDArray[int32]               # mop-up scalars and the STRUCTURE_TERMS switch, by E_*
+    centre:  NDArray[int32]               # distance to the nearest centre square, by 0x88 square
+    scratch: NDArray[int32]               # per-file pawn summary and piece counts, reused per call
+
+def load_eval_tables(path: Path | None = None) -> EvalTables      # plain Python; TABLES at import
+def evaluate(pos: Position, ev: EvalTables) -> int                # compiled; the whole evaluation
+def evaluate_board(board: chess.Board) -> int                     # boundary helper, tests only
+def warm_up() -> float                                            # called at import
+JITTED: tuple[str, ...]                                           # every compiled function here
+```
+
+The one thing that changes is the representation. `evaluation.py` reads bitboards and leans on
+Python's arbitrary-precision integers for the pawn-structure fills (`bb >> 8`, `bb << 32`), which
+inside numba would be 64-bit machine words where a signed right shift sign-extends and a left
+shift silently overflows. So the pawn structure is computed from **per-file summaries** instead —
+for each colour and file, how many pawns stand there and the highest and lowest rank they occupy —
+and each bitboard fill is restated as a statement about those three numbers. Reading the position
+is two passes over the piece lists (at most 32 squares), so no bitboard is built at all.
+
+`load_eval_tables` calls `evaluation.load_tables`, so there is exactly one parser for
+`weights/pst.json` and the two evaluations cannot drift apart in how they read it.
+
+Gate (`tests/test_fasteval.py`): the compiled evaluation must equal the Python one **integer for
+integer** on 20,000 positions from playouts of the curated openings (`LETAL_FULL_GATES=1`; 2,000
+otherwise), on all 219 openings, on the 58 rule-breakers, on a hand-built position per structural
+term and per insufficient-material combination, and on 2,000 colour-swapped mirrors. There is no
+rounding to excuse a difference: both sides compute the same integer arithmetic.
+
+## `mikhail_letal/fastsearch.py` (Stage 1, phase 2)
+
+`search.py` compiled onto `fastboard` and `fasteval`. Same algorithm, same constants — they are
+*imported* from `search.py`, so a change there changes both engines and the two cannot disagree
+about what the algorithm is.
+
+```python
+class SearchState(NamedTuple):     # every array the search reads or writes; allocated once
+    tt_key: NDArray[int64]; tt_data: NDArray[int32]     # (slots, 5): depth, score, flag, move, generation
+    killers, history: NDArray[int32]                    # (MAX_PLY+2, 2), (2, 128*128)
+    moves, order: NDArray[int32]                        # one move buffer + score buffer per ply
+    root_scores: NDArray[int32]; path: NDArray[int64]
+    history_keys: NDArray[int64]                        # the game's earlier positions, a hash set
+    eval_key: NDArray[int64]; eval_value: NDArray[int32]
+    zobrist: NDArray[int64]; ints: NDArray[int64]; flt: NDArray[float64]
+
+def new_state(tt_bits: int = 21, eval_bits: int = 18) -> SearchState
+
+# compiled
+def negamax(pos, st, ev, depth, alpha, beta, ply, null_allowed) -> int
+def quiescence(pos, st, ev, alpha, beta, ply, in_chk, qs_ply) -> int
+def gen_captures(pos, out) -> int          # captures, en passant and queen promotions
+def _score_moves(pos, st, ply, count, tt_move) -> None;  def _pick_best(st, ply, index, count)
+def _break_draw_tie(pos, st, ev, count, best) -> int
+# ... plus the table, clock, null-move and terminal-score helpers; all listed in JITTED
+
+class FastEngine:                  # same interface as search.Engine
+    def new_game(self) -> None
+    def search(self, board: chess.Board, history: Sequence[int], soft_deadline: float,
+               hard_deadline: float, max_depth: int = 64,
+               node_limit: int | None = None) -> SearchResult      # search.SearchResult
+    node_rate: float               # measured nodes per second; the node cap is derived from it
+
+def warm_up(engine: FastEngine) -> float                           # called from agent.py
+```
+
+What is the same as `search.py`: iterative deepening; aspiration windows from depth 4 (±40 cp,
+widen ×4, at most 2 fails); fail-soft negamax alpha-beta; a transposition table probed and stored
+with mate scores adjusted by distance from the root; quiescence with stand-pat before any move is
+generated and evasions searched for the first four quiescence plies; move ordering by table move,
+MVV-LVA capture, two killers per ply and the history heuristic; null-move pruning (min depth 3,
+R = 2 + depth//6, never in check, never without a piece, only when the static evaluation already
+holds beta); late-move reductions (quiet non-killer non-table moves after the first three, at
+depth ≥ 3); futility pruning at depths 1–2 (150/300); delta pruning in quiescence (200); the check
+extension; mate-distance pruning; and draws by repetition against both the game history and the
+current line, by the fifty-move rule and at the referee's 600-ply cap.
+
+What had to change:
+
+- **The table is an array, not a dictionary.** Fixed size, a power of two, indexed by
+  `fastboard.hash_position`, depth-preferred *within* a move and always-replace across moves (each
+  entry records the move of the game that wrote it; without that a slot holding a deep entry from
+  move three would refuse every shallower entry for the rest of the game). Entries are replaced rather than accumulated,
+  and a key collision is possible (about one in 2⁶⁴ per probe). A collision can hand the search a
+  wrong score or a wrong first move to try, never an illegal move: the table move is *matched
+  against the generated move list*, never played on trust.
+- **The abort is a flag, not an exception.** `I_ABORT` is set by the deadline check and every
+  function returns as soon as it sees it, immediately after its `unmake_move`, so the position is
+  always left exactly as it was found (`tests/test_fastsearch.py` pins that on five node limits).
+- **Moves are generated whole, not in stages.** One `gen_pseudo` call, a score per move, and the
+  best remaining one selected on each iteration of the loop — the same order as `search.py`'s four
+  stages, reached in the way that suits a compiled generator with nothing to allocate. Illegal
+  moves fall out of `make_move` returning 0.
+- **The root is Python.** Iterative deepening, the aspiration window and the loop over the legal
+  root moves live in `FastEngine`, not in compiled code (see DECISIONS.md 2026-09-08): they run a
+  few hundred times a move, not millions, and compiling them costs fourteen seconds of the
+  platform's start-up budget.
+- **Two limits, always both.** The wall clock is read inside the tree through `numba.objmode`
+  every `NODE_CHECK_INTERVAL = 512` nodes, and a node cap derived from the measured node rate
+  (`FastEngine.node_rate`, twice what the hard budget can buy) backs it up in case the clock read
+  misbehaves.
+
+Gates (`tests/test_fastsearch.py`): the same behavioural questions `tests/test_search.py` asks of
+the Python searcher — mate in one and two, the hanging queen, repetition avoided when ahead and
+sought when behind, the fifty-move and 600-ply draws, the root tie-break, the limits, determinism,
+`new_game`, the caller's board untouched — plus three that are specific to the compiled build:
+every jitted function compiled at import and gaining no specialisation during a game; the position
+byte-identical after an aborted `negamax`; and a legal move returned on every sampled position at
+three different node limits.
+
 ## `agent.py`
 
 ```
 os.environ.setdefault("OMP_NUM_THREADS", "1"); os.environ.setdefault("NUMBA_NUM_THREADS", "1")
 import chess; from mikhail_letal import ...
-STATE = GameState(); ENGINE = Engine(); PARAMS = DEFAULT_PARAMS
+STATE = GameState(); ENGINE = FastEngine(); PARAMS = DEFAULT_PARAMS
 
 def get_move(fen, time_left_ms) -> str:
     t0 = perf_counter()
@@ -449,7 +678,7 @@ def get_move(fen, time_left_ms) -> str:
         else:
             b = budget(time_left_ms, STATE.own_moves, PARAMS,
                        plies_to_cap=600 - board.ply(), fifty_move_room=<100 - halfmove_clock in a mop-up, else None>)
-            result = ENGINE.search(board, STATE.history,
+            result = ENGINE.search(board, STATE.fast_history,
                                      soft_deadline = t0 + PARAMS.next_iteration_fraction * b.soft_ms / 1000,
                                      hard_deadline = t0 + b.hard_ms / 1000)
             move = result.move if result.move in legal else fallback_move(board, legal)
@@ -461,15 +690,23 @@ def get_move(fen, time_left_ms) -> str:
 
 A final guard re-validates `chess.Move.from_uci(uci) in board.legal_moves` on a fresh
 `chess.Board(fen)` before returning; if that fails, the fallback plays. Nothing in `get_move` can
-raise: even the logging is wrapped. A tiny warm-up search (depth 2 from the standard start) runs
-at import so module-level state is exercised before the first real move.
+raise: even the logging is wrapped.
+
+The engine underneath is the compiled one (`FastEngine`), and python-chess is still the legality
+oracle and the fallback, so none of the guarantees above depend on the compiled code being right.
+At import, `fastsearch.warm_up(ENGINE)` calls every jitted function with the exact argument types
+a game will pass and then runs real searches, so nothing compiles on the clock; `_warm_up` records
+how many specialisations each one then has, and `get_move` compares that once a move and logs any
+that appeared. Measured import from the extracted zip: 17–19 s, against the platform's 90 s budget.
 
 ## Determinism and logging
 
 - No `random`, no `HARNESS_SEED`, no time-dependent ordering except the deadline itself.
 - Each move prints one line, for example
   `m e2e4 d 5/9 n 31240 nps 10413 t 3001 s 3300 h 9900 c 118500` (tokens: move, depth/seldepth,
-  nodes, nps, elapsed ms, soft ms, hard ms, clock ms). Init prints one line with the load time.
+  nodes, nps, elapsed ms, soft ms, hard ms, clock ms). Init prints one line with the load time,
+  the compile time and the measured node rate, and `get_move` adds a `jit:` line if any compiled
+  function ever gains a specialisation after the warm-up.
 
 ## Testing hooks
 
