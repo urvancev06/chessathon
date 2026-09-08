@@ -125,6 +125,31 @@ chunk lands, in order:
    latest valid one plays, a failed validation costs nothing, and every rated round is a free sample
    of the start-up distribution.
 
+## 5a. GitHub CI is not a gate tonight — the local suite is
+
+Since 21:08 UTC every CI job fails in 2–6 seconds with *"the job was not started because recent
+account payments have failed or your spending limit needs to be increased"*. **No job ran.** It is
+a billing outage, not a defect. Last green is `68534b2`.
+
+**Do not read a green badge as a gate tonight, and do not read a red one as a defect.**
+
+What is unverified by CI is prose only — verified, not assumed:
+`git diff --name-only 68534b2..HEAD -- agent.py mikhail_letal/ harness/ weights/` is **empty**. The
+outage has cost no verification of anything that runs.
+
+**Consequence for everything after the match.** The provenance regeneration, the `ct-warmup` merge,
+`ct-zobrist` and `ct-pvs` all touch code, and pushing will no longer tell anyone anything. Each
+needs `.venv/bin/python -m pytest tests/ -q` run **locally**, with the result stated in the commit
+or the row. Capture the exit status separately rather than piping into `&&` — a pipeline returns the
+last command's status, which is how a red type check reached a commit earlier tonight.
+
+Local suite at 00:5x, on the tree the match is running against: **660 passed**.
+
+`chessathon-5a` has flagged to the operator that the workflow runs `games` on `windows-latest` and
+`macos-latest` as well as Ubuntu, billing at 2× and 10× the Linux minute rate on a private
+repository — a plausible cause of the exhausted allowance, and of limited value for an engine that
+ships into one Linux container.
+
 ## 6. The rule itself
 
 `docs/DECISIONS.md`, amendments 4 to 7 and the pre-registration above them. Read the **operative
