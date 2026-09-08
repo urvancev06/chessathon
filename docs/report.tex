@@ -99,7 +99,18 @@ over 40 real-clock games \src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}
 pass in Section~\ref{sec:testing} shows the time budget holding, with a worst overshoot of 2~ms.
 
 On the platform: v1.0 passed validation, reaching depth 10--12 in both smoke games with every warm-up
-phase completed \src{CALIBRATION.md, 2026-09-08, v1.0 validation}. \pending{ladder rating of build v1.0}
+phase completed \src{CALIBRATION.md, 2026-09-08, v1.0 validation}.
+
+\paragraph{The ladder rating, and why little should be read into it.} At the snapshot taken at 19:44
+on 8~September, v1.0 stood at a provisional ladder rating of \textbf{1669} from \textbf{five} rated
+games, won 3, drawn 1, lost 1 \src{data/cache/leaderboard/qualifier.html}. The leaders in the same
+table hold 2573--2763 on \textbf{48--65} games. Five games is an unconverged seed rather than a
+rating, and the snapshot was already stale when it was taken: two further rated games (rounds 74 and
+75) have since been played and are not in it. The ladder also decides nothing on its own --- it seeds
+the 13-round Swiss on 11~September, and only the Swiss counts for qualification. The number is
+recorded here because a report that omits its own worst-looking figure is not a record; it is not
+offered as a measurement of strength, and the Stockfish brackets in Section~\ref{sec:rating} are the
+better estimate.
 
 \section{Rules-compliance statement}\label{sec:rules}
 \begin{itemize}[nosep]
@@ -540,9 +551,20 @@ token of our log line; the difference is the platform overhead for that move, an
 \code{overhead\_ms} $= \max(\text{difference}) + 50$; (3)~compute the platform node rate from our \code{nps}
 tokens and divide by the local node rate on the same build and positions to get the speed factor, and
 rescale any node cap; (4)~record the platform init time against the local one; (5)~commit the new
-constants with the log excerpt. The speed factor and the calibration table are
-\pending{first platform validation log: table of local vs platform move times, init time, overhead and
-speed factor (CALIBRATION.md, ``Log of calibrations'')}.
+constants with the log excerpt. \textbf{That procedure has been run.} The interpreted v0.2.1's rated
+logs of 8~September gave the 2.3x speed factor and the 0--2~ms per-move overhead that set
+\code{overhead\_ms}; v1.0's own validation and its rated rounds gave the start-up figures and the
+depth and node rates quoted in the v1.0 addendum; and round 74 supplied a full per-move table for a
+whole rated game \src{CALIBRATION.md, ``Log of calibrations''; handoff/LOG-round-74-zagreus.md}. Every
+time constant in Section~\ref{sec:time} is calibrated against those measurements rather than against
+the brief's initial values.
+
+The one part of the procedure that has *not* converged is start-up. Six samples of the compiled
+build's import range over 33.2--49.4~s of numba compilation against a 90~s budget, and the five fast
+ones are all uncontended single rated games while the slow one is half of a concurrent validation
+pair --- so the samples do not yet bound the case where two of our games compile at once, which the
+agent contract permits. That is recorded as the build's largest open risk in the addendum rather than
+resolved here.
 
 \section{Endgame handling}\label{sec:endgame}
 \paragraph{Mop-up.} Section~\ref{sec:eval}: a geometric term so that KX-vs-K converts without tablebases.
