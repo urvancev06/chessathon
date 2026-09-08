@@ -1,0 +1,9 @@
+. vs baselines/random: 200 games at 3000+50 ms, ply cap 600, 4 worker(s), openings from data/openings.txt (219), seed offset 0, load 4.33 6.83 7.27
+Game 1/200 (seed 0), Petroff Defence as white, white by checkmate, 38 plies, low clock 1649 ms, 28.5 s
+Game 2/200 (seed 1), Petroff Defence as black, black by checkmate, 13 plies, low clock 1649 ms, 28.5 s
+Game 3/200 (seed 2), Sicilian Closed as white, white by checkmate, 16 plies, low clock 1683 ms, 28.5 s
+Game 4/200 (seed 3), Sicilian Closed as black, black by checkmate, 35 plies, low clock 1648 ms, 29.3 s
+Game 5/200 (seed 4), London System as white, white by checkmate, 22 plies, low clock 1648 ms, 28.2 s
+Game 6/200 (seed 5), London System as black, black by checkmate, 23 plies, low clock 1655 ms, 26.9 s
+Game 7/200 (seed 6), London System as white, white by checkmate, 34 plies, low clock 1649 ms, 28.6 s
+Game 8/200 (seed 7), London System as black, black by checkmate, 19 plies, low clock 1649 ms, 28.4 s

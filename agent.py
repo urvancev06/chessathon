@@ -199,9 +199,9 @@ def _warm_up() -> dict[str, int]:
 
 
 # The gate this pins: after the warm-up every jitted function has exactly the specialisations it
-# will ever have. ``get_move`` re-checks the count on the first move of the game and says so in
-# the log if it has changed, which is how a missed warm-up would show up in a real game rather
-# than as a mysteriously slow move.
+# will ever have. ``get_move`` re-checks the counts once a move (a few dozen attribute reads, tens
+# of microseconds) and says so in the log if one has changed, which is how a missed warm-up shows
+# up in a real game rather than as a mysteriously slow move.
 _WARM_SIGNATURES = _warm_up()
 
 
