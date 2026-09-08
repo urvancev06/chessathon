@@ -1141,3 +1141,45 @@ count below `panic_ms`, the lowest clock and the game it occurred in, and the te
 can then apply any threshold they prefer instead of trusting ours. 64 asked not to be told which way
 its rule lands until this is recorded, and if the replacement flips the decision, that fact goes in
 this file too.
+
+## 2026-09-08 — The recurring defect of the evening: the check existed and did not check
+
+Three separate failures tonight had one shape, and the shape is worth more than any of them
+individually. In each case a safeguard was present, correctly described, and passed by an
+implementation it should have rejected. Recorded together because someone auditing this repository
+will find each fix in isolation and miss what they have in common.
+
+**1. The per-term parity positions proved nothing** (`chessathon-64`). `tests/test_fasteval.py`
+kept a position per evaluation term so that "a term that is simply never exercised by the playouts
+cannot slip through". All four `king_shield` entries were kings and pawns only, so `phase = 0`;
+`king_shield` is middlegame-only, and the phase blend multiplies the middlegame half by zero. The
+four positions compared **0 against 0** and would have passed with the term deleted from one
+implementation.
+
+**2. The cold-finish test passed against the unfixed code** (`chessathon-bb`). The gate for the
+warm-up's degraded path drove `get_move` with a 120 s clock. The bound it was meant to catch was
+`cold_finish_fraction × time_left`, which at 120 s is 30 s — enough to compile everything on this
+machine — so the test passed whether or not the defect was present. Only at a six-second clock does
+it discriminate: 9 phases left uncompiled without the fix, 0 with it.
+
+**3. The verdict tool routed around the rule** (`chessathon-bb`). `docs/DECISIONS.md` amendment 4
+makes interim looks reject-only, because three looks inflate the false-promotion rate from 2.60 % to
+5.71 % and the case-3 gate from 51.22 % to 70.35 %. The first version of `tools/promotion_verdict.py`
+printed **PROMOTE** when run on a single chunk. **This is the worst of the three**, because the rule
+still reads correctly: an auditor would have found a defensible pre-registration and a working script
+that between them did the forbidden thing. The tool now refuses to emit a promotion verdict below
+300 games.
+
+**What the three have in common.** In none of them was the *stated* safeguard wrong. The parity
+requirement was right, the warm-up gate was the right gate, the reject-only rule was correctly
+derived. What failed was the step from the statement to the thing that runs — and each passed
+silently, which is why none was found by running the suite. Two related failures the same evening
+have the same root: a safety criterion written in terms of a quantity the run does not record
+(amendment 3, uncomputable), and `mypy | tail -1 && git commit`, where the pipe returns `tail`'s
+status so a commit ran on a red type check.
+
+**The practice that follows, and it is cheap.** *Verify that a check fails when it should.* Every
+one of the three was caught the same way: run the test against the broken code and confirm it goes
+red; run the tool on the input it must refuse and confirm it refuses. A test that has never failed
+is a claim, not a check. This is now the standard for anything added to this repository that exists
+to catch something.
