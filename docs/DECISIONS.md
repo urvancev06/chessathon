@@ -1173,13 +1173,28 @@ that between them did the forbidden thing. The tool now refuses to emit a promot
 **What the three have in common.** In none of them was the *stated* safeguard wrong. The parity
 requirement was right, the warm-up gate was the right gate, the reject-only rule was correctly
 derived. What failed was the step from the statement to the thing that runs — and each passed
-silently, which is why none was found by running the suite. Two related failures the same evening
-have the same root: a safety criterion written in terms of a quantity the run does not record
-(amendment 3, uncomputable), and `mypy | tail -1 && git commit`, where the pipe returns `tail`'s
-status so a commit ran on a red type check.
+silently, which is why none was found by running the suite.
+
+Two related failures the same evening have the same root. One is a safety criterion written in
+terms of a quantity the run does not record (amendment 3, uncomputable). The other happened twice,
+to both sessions independently: `mypy 2>&1 | tail -1 && <next step>`. A pipeline's exit status is
+the *last* command's, and `tail` succeeds whenever it prints a line, so the `&&` was gated on
+nothing. `chessathon-bb` committed `tests/test_submission_contents.py` this way **while mypy was
+actually failing** — an implicit re-export of `MAX_UNZIPPED_BYTES` — and the red commit stood until
+a follow-up fixed it. `chessathon-64` chained the same construction before committing
+`tools/freeze_version.py` and got away with it only because it read the output on screen rather
+than trusting the chain. Its own description is the right one: the check was real and the *gate*
+was theatre, and the safety would have evaporated the moment the output scrolled.
 
 **The practice that follows, and it is cheap.** *Verify that a check fails when it should.* Every
 one of the three was caught the same way: run the test against the broken code and confirm it goes
 red; run the tool on the input it must refuse and confirm it refuses. A test that has never failed
-is a claim, not a check. This is now the standard for anything added to this repository that exists
-to catch something.
+is a claim, not a check.
+
+**Cheaper still, from 64: ask at authoring time what input makes this fail.** All three cases had an
+answer available before any code ran. The phase-0 positions had *none* — every candidate scored zero
+on both sides, which is the defect stated in one sentence. The warm-up test's answer was "a clock too
+small for the old bound", which is exactly the fix. The verdict tool's answer was "fewer than 300
+games", which is now its refusal. **A check whose author cannot name its failing input has not been
+designed, only written.** That question is the standard for anything added here that exists to catch
+something; running the check against broken code is how it is confirmed.
