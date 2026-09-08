@@ -78,3 +78,20 @@ the time-management check the brief's §7.4 asks for. Both are on the dev box, n
 | v0.2-fuzz-random-3s | . | baselines/random | 3+0.05 s | 100 | +100 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 100 | 12 | 1.80 3.15 3.78 / 3.98 3.58 3.90 | data/openings.txt |
 | v0.3-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +95 =26 -179 | 36.0% | ±5.2% | -100 (-140 to -62) | 8.7% | checkmate 274, fifty_moves 8, insufficient_material 7, threefold_repetition 11 | 12 | 0.49 4.59 4.18 / 10.21 11.37 8.58 | data/openings.txt |
 | v0.3-lambda40-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +126 =28 -146 | 46.7% | ±5.4% | -23 (-61 to +14) | 9.3% | checkmate 272, fifty_moves 6, threefold_repetition 16, insufficient_material 6 | 12 | 4.88 9.58 8.13 / 8.82 11.44 10.42 | data/openings.txt |
+| v0.2-vs-sf1600-real | . | tools/yardstick (YARDSTICK_ELO=1600) | 120+0.5 s | 60 | +38 =8 -14 | 70.0% | ±10.7% | +147 (+65 to +249) | 13.3% | checkmate 52, threefold_repetition 8 | 6 | 0.20 3.51 7.07 / 1.85 4.41 5.56 | data/openings.txt |
+| v0.2-vs-sf1800-real | . | tools/yardstick (YARDSTICK_ELO=1800) | 120+0.5 s | 60 | +44 =4 -12 | 76.7% | ±10.3% | +207 (+118 to +329) | 6.7% | checkmate 56, threefold_repetition 4 | 6 | 1.85 4.41 5.56 / 1.46 4.05 5.30 | data/openings.txt |
+| v0.2-vs-sf2000-real | . | tools/yardstick (YARDSTICK_ELO=2000) | 120+0.5 s | 60 | +25 =4 -31 | 45.0% | ±12.3% | -35 (-125 to +51) | 6.7% | checkmate 56, threefold_repetition 3, insufficient_material 1 | 6 | 1.46 4.05 5.30 / 1.83 3.97 5.22 | data/openings.txt |
+| v0.2-vs-sf2200-real | . | tools/yardstick (YARDSTICK_ELO=2200) | 120+0.5 s | 60 | +16 =14 -30 | 38.3% | ±10.8% | -83 (-168 to -6) | 23.3% | checkmate 46, fifty_moves 2, threefold_repetition 12 | 6 | 1.83 3.97 5.22 / 1.20 3.46 4.99 | data/openings.txt |
+| v0.2-vs-sf2400-real | . | tools/yardstick (YARDSTICK_ELO=2400) | 120+0.5 s | 60 | +18 =16 -26 | 43.3% | ±10.8% | -47 (-127 to +29) | 26.7% | checkmate 44, threefold_repetition 11, fifty_moves 5 | 6 | 1.20 3.46 4.99 / 2.40 4.55 5.44 | data/openings.txt |
+
+### 2026-09-08 — v0.2 rating estimate from the Stockfish yardstick (real clock, 6 workers, load ≈ 6/16)
+
+| level | games | +W =D −L | score |
+|---|---|---|---|
+| Stockfish 19 UCI_Elo 1600 | 60 | +38 =8 −14 | 70.0% |
+| Stockfish 19 UCI_Elo 1800 | 60 | +44 =4 −12 | 76.7% |
+| Stockfish 19 UCI_Elo 2000 | 60 | +25 =4 −31 | 45.0% |
+| Stockfish 19 UCI_Elo 2200 | 60 | +16 =14 −30 | 38.3% |
+| Stockfish 19 UCI_Elo 2400 | 60 | +18 =16 −26 | 43.3% |
+
+Maximum-likelihood fit over all 300 games, draws as ½: **CCRL-40/4-scale ≈ 2050 (95% interval 1940–2170, bootstrap 2000–2110 plus ±100 yardstick calibration in quadrature); FIDE-equivalent ≈ 1840–2360 (Route A: CCRL−100 lower bound, TalkChess 2800−0.7×(2800−CCRL) upper bound); chess.com Rapid-equivalent ≈ 1820–2340; chess.com Blitz-equivalent ≈ 1730–2700 (ChessGoals table, interpolated). Route B (Sunfish) not run. Estimates built on a rating-limited reference engine and a survey table; honest uncertainty ±200 or more on the human scales.** Caveats: Stockfish's UCI_Elo is calibrated for 120 s + 1 s and anchored to CCRL 40/4; 60 games per level; the 2200 and 2400 scores are not monotonic (limited-strength noise); games shared the machine six at a time; zero flags, lowest clock 1 889 ms.

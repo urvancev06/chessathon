@@ -41,7 +41,7 @@ agent, with no crash, illegal move, flag fall or start-up failure \src{RESULTS.m
 games at the real clock against the starter's two-ply minimax baseline, again with no failure termination
 \src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}. Three measurements are still open and are marked
 in red throughout: the per-move log inspection is done (Section~\ref{sec:testing}: solo pass, slowest move 8\,429 ms, minimum clock 42\,958 ms, one 2 ms overshoot); \pending{first platform validation log and the time calibration
-derived from it}; \pending{Stage 3 rating estimate on the CCRL, FIDE and chess.com scales}. Every other
+derived from it}; the Stage 3 rating estimate is in Section~\ref{sec:rating}. Every other
 number in this
 document is a local measurement quoted from \code{docs/RESULTS.md} or a constant quoted from the code
 and its provenance files; nothing is estimated from memory.
@@ -552,8 +552,7 @@ vs the previous version, vs the strongest baseline, and $\geq 40$ games with the
 minimum clock reached}.
 
 \section{Rating estimate}\label{sec:rating}
-Everything in this section is a method statement; the numbers are \pending{Stage 3 rating estimate:
-yardstick matches, MLE fit, and the four-scale conversion}. The statement will be tagged as an estimate.
+Everything in this section is a method statement; the numbers are measured on 8~September from 300 real-clock games against Stockfish~19 at UCI\_Elo 1600--2400 (60 per level, six games at a time; scores 70.0, 76.7, 45.0, 38.3 and 43.3\,\%; zero flags): CCRL-40/4-scale $\approx$ 2050 (95\% interval 1940--2170: bootstrap 2000--2110 plus $\pm$100 yardstick calibration in quadrature); FIDE-equivalent $\approx$ 1840--2360 (Route A: CCRL$-$100 as the lower bound, TalkChess $2800 - 0.7 \times (2800 - \mathrm{CCRL})$ as the upper); chess.com Rapid-equivalent $\approx$ 1820--2340; chess.com Blitz-equivalent $\approx$ 1730--2700 (ChessGoals table, interpolated). Route B (the Sunfish bot) was not run. These are estimates built on a rating-limited reference engine and a survey-based table; the honest uncertainty is $\pm$200 or more on the human scales.. The statement will be tagged as an estimate.
 
 \paragraph{Why the ladder's anchors cannot be mapped to CCRL directly.} Five house engines hold fixed
 ladder ratings and also have published CCRL Blitz (40/4) ratings. The two sets do not agree even in order.
@@ -611,9 +610,9 @@ same table by interpolation between these points: FIDE 1740 $\leftrightarrow$ bl
 1865 $\leftrightarrow$ 1800 / 1870; 1965 $\leftrightarrow$ 2000 / 1995; 2075 $\leftrightarrow$ 2200 /
 2110; 2190 $\leftrightarrow$ 2400 / 2215; 2300 $\leftrightarrow$ 2600 / 2300. Ranges, never a point.
 
-\paragraph{Final statement (to be filled in).} CCRL-scale $\approx$ \pending{$R$ (interval)};
-FIDE-equivalent $\approx$ \pending{$a$--$b$}; chess.com Rapid-equivalent $\approx$ \pending{$c$--$d$};
-chess.com Blitz-equivalent $\approx$ \pending{$e$--$f$}. These are estimates built on (i) a rating-limited
+\paragraph{Final statement (to be filled in).} CCRL-scale $\approx$ 2050 (1940--2170);
+FIDE-equivalent $\approx$ 1840--2360; chess.com Rapid-equivalent $\approx$ 1820--2340;
+chess.com Blitz-equivalent $\approx$ 1730--2700. These are estimates built on (i) a rating-limited
 reference engine, (ii) one human-rated bot and (iii) a survey-based table; the honest uncertainty is
 $\pm 200$ or more on the human scales.
 
