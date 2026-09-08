@@ -973,3 +973,38 @@ errs in the safe direction.
 The three rows are mutually exclusive and cover every case, given step 1 has passed. King safety
 still has no independent safety argument: if the bundle ships by the third row, the king-danger
 term ships unproven and the record says so.
+
+### Amendment 5: the futility stop gets a number
+
+`chessathon-5a` pointed out that "stop if chunk A is a disaster" had no threshold, and that picking
+one after seeing chunk A would be a discretionary stop dressed as a rule — the same species as
+defect A above, even though it errs safe. Proposed by 5a blind, at 21:4x, before chunk A landed;
+accepted here after checking what it does.
+
+**The rule: stop the match if and only if chunk A's 95 % interval has an upper bound at or below
+50 %** — that is, the *optimistic* end of the interval is still a regression. At n = 100 and a 20 %
+draw rate that requires a score of **41.0 % or worse**, roughly −60 Elo as a point estimate.
+
+Simulated over 20 000 chunk-A runs:
+
+| true strength of the change | probability the rule stops the match |
+|---|---|
+| level (0 Elo) | 2.56 % |
+| −35 Elo | 20.95 % |
+| −70 Elo | 62.72 % |
+| −140 Elo | 99.39 % |
+
+It stops nearly every catastrophe, most large regressions, and a level change one time in forty.
+It **can only reject, never promote**, so it spends no alpha against the promotion decision, and a
+false stop costs machine time and reverts to v1.0 — which is the safe default and a build we
+already have. Applied at chunk A only: by chunk B two thirds of the games are already played and
+the saving no longer justifies another look.
+
+**Tree freeze, recorded because it is not obvious and it constrains everyone.** `arena_openings`
+resolves the agent under test to the **repo root** (`settings.agent.resolve()`), and
+`harness/sandbox.py` spawns a fresh subprocess per game from that directory. **The working tree is
+the live agent for the whole run.** So while a match is up: no merge to `main`, no edit to
+`agent.py` or `mikhail_letal/`, or the pooled result becomes a mixture of two engines with no record
+of which game ran which. `docs/` is safe apart from `RESULTS.md`, which each chunk appends to as it
+finishes. This is also why the three chunks run sequentially rather than at once: 24 processes on 16
+cores would manufacture exactly the flags the safety gate exists to detect.
