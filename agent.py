@@ -265,14 +265,35 @@ def _finish_warm_up(t0: float, time_left_ms: int) -> float:
     functions compile later in the game where the budget for a move is three seconds rather than
     the opening's hundred and twenty.
 
-    It is bounded twice: by ``cold_finish_fraction`` of the clock, and by the same predictive
-    budget the import used, which will not *start* a phase it does not expect to finish. What
-    still does not fit is left alone; the search below then runs on the clock that remains.
+    It compiles **everything left, unconditionally**, and the cost is paid out of this move's
+    budget: ``get_move`` subtracts the returned milliseconds from ``time_left_ms`` before
+    ``budget()`` sees it, so the search that follows shrinks to fit whatever this cost.
+
+    There used to be a predictive bound here as well, and it did not work. ``warmup.arm`` calls
+    ``reset``, which sets ``slowdown`` back to 1.0 -- discarding the very measurement that had made
+    the import skip phases, and which by construction was above 1.0 at that moment. The bound was
+    therefore computed at 1.0x on a machine already known to be slower: at 3x, a phase predicted to
+    take 12 s really takes 36 s. Carrying the slowdown forward instead would have been worse, not
+    better, because every phase it then skipped would compile inside ``ENGINE.search``, where numba
+    cannot be interrupted and no deadline applies. Between an accounted cost and an unaccounted
+    one, take the accounted one.
+
+    **What this costs in the worst case**, because it is not free: on a machine slow enough that
+    compiling everything takes longer than the clock, ``time_left_ms - warm_ms`` floors at zero and
+    this move is played on the fallback. That is a bad first move. It is still better than the
+    alternative, where the same compilation happens *inside* a search that believed it had a
+    deadline, blows through the hard bound, and takes the same time anyway with no bookkeeping --
+    measured at 15.9 s against a 10.2 s budget. Note also that the ``panic_ms`` gate in ``get_move``
+    is tested against the raw clock *before* this runs, so it cannot catch an overrun here.
+
+    ``cold_finish_fraction`` is consequently no longer read on this path.
     """
     global _COLD, _WARM_SIGNATURES
     _COLD = False  # one attempt only: a second would spend another slice of the clock for nothing
     try:
-        warmup.arm(t0 + PARAMS.cold_finish_fraction * time_left_ms / 1000.0)
+        # No deadline: every phase left is one the search would otherwise compile inside itself,
+        # uninterruptibly. See the docstring for why a predictive bound here was worse than none.
+        warmup.arm(None)
         fastboard.warm_up()
         fasteval.warm_up()
         fastsearch.warm_up(ENGINE)
