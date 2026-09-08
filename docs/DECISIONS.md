@@ -816,7 +816,28 @@ constant (`KING_DANGER_SHELTERED_PAWNS`) rather than an inlined 2 — whether it
 worth paying for at 204 ns is a question for the arena, not for a comment.
 
 **Status: unmeasured in games.** On the three round-70 positions the compiled engine now declines
-`8...O-O-O` and plays `h6` instead; it still plays `Ne2+` at move 20 and `Nxd4` at move 22, which
-were tactical losses rather than king-safety ones. That is the right shape of result and it is
-still n = 1. This earns a promotion match against `versions/v1.0`, not a place in the zip, and the
-term sits behind `KING_DANGER_TERM` / `E_KING_DANGER_ON` so the match can switch it off.
+`8...O-O-O` and plays `h6` instead; it still plays `Ne2+` at move 20 and `Nxd4` at move 22. This
+earns a promotion match against `versions/v1.0`, not a place in the zip, and the term sits behind
+`KING_DANGER_TERM` / `E_KING_DANGER_ON` so the match can switch it off.
+
+**Correction, same day, from Yan's PR #4.** This entry first called the move-20 and move-22
+blunders "tactical losses rather than king-safety ones". That was wrong, and the mistake was to
+infer a cause from a term's silence. Yan built four king-danger variants -- `expo` (king virtual
+mobility plus queen proximity), `units` (weighted attackers, quadratic: the same family as the term
+above), `files` (open lines toward the king) and `storm` (shield deficit plus pawn storm) -- all
+parity-checked, all cheap (-0.6 % to +4.9 % nps), and **every one reproduces all three blunders**.
+
+His diagnosis is structural, not a weight wanting tuning. For the black king on c8 the virtual
+mobility is **6, the floor, before `22...Nxd4`, after it, and after the correct `22...Nf4` alike**:
+the king's own rook on d8 blocks east, its own pawn on c6 blocks south, its own queen on e6 blocks
+the diagonal. The c-file opens *behind* the c6 pawn as the king sees it, so no exposure count moves,
+and what remained was a queen-distance term identical for every candidate. **A king's own crowding
+pieces suppress every exposure measure exactly when the danger is worst.** So these were king-safety
+failures that this whole family of terms cannot see, not tactical oversights -- the danger was a
+half-open file an enemy rook could arrive down, which is a fact about enemy access rather than about
+where the king could walk.
+
+The consequence for the term above: keep it and screen it **on general merit** -- king safety is
+something engines have and ours did not -- but it must not be claimed to address round 70. It
+declines the losing castle at move 8 and nothing more, which is exactly what Yan's result predicts.
+And if the screen comes back inside the noise, the next step is not a fifth exposure variant.
