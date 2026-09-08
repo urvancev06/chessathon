@@ -917,3 +917,59 @@ record. Once the calendar correction is accounted for there are roughly nine six
 before the Friday 11:00 cutoff, so a timing-alone match against `versions/v1.0` runs afterwards for
 the report regardless of what is uploaded. Shipping fast and knowing why are not in competition
 here; there is room for both.
+
+### Amendment 4, and the operative rule restated in full
+
+Two structural defects, found by `chessathon-64` auditing the entry above, both fixed **before any
+result exists**. The rule has now been amended four times in one evening; patching it a fifth time
+would leave a decision procedure nobody could state without reading the diffs, so the whole of it
+is restated here and **this section supersedes the numbered cases above**. Those remain as written,
+unedited, because how the rule got here is part of the record.
+
+**Defect A: optional stopping.** The rule permitted deciding after chunk A, B or C, and calibrated
+the margin at each. Fixing the interval's *width* at each `n` does nothing about the multiplicity
+of *looks*, which is a different failure. Simulated over 20 000 matches, a genuinely level change
+at a 20 % draw rate:
+
+| truly level change | one look at pooled 300 | promote at first favourable chunk |
+|---|---|---|
+| case 1 fires (interval above zero) | 2.60 % | **5.71 %** |
+| case 3 gate fires (point estimate ≥ 0) | 51.22 % | **70.35 %** |
+
+64 quantified the first row. The second is the one that matters, because case 3 is the path most
+likely to fire, and there best-of-three turns a coin flip into a 70 % chance of promoting a change
+worth nothing. A pre-registration that says "decided in advance" while permitting best-of-three is
+performing the ritual and skipping the substance.
+
+**Defect B: the rule was not exhaustive, and the safety condition gated the wrong case.** A
+straddling interval with a non-negative point estimate, a lower bound above the margin, *and* a
+failed safety condition matched no case at all — which is exactly the situation a pre-commitment is
+for, because it is the one where "the Elo is fine, ship it" is tempting. Worse, case 1 promoted on
+the interval alone with **no** safety condition, so a build that flagged a game would have shipped
+on strength — in a change whose entire rationale is that a flag loses the game outright.
+
+**The operative rule.**
+
+**Step 1 — the safety gate, applied first and to every case.** Over all games actually completed:
+no `flag` termination in any chunk, and `low_clock_ms` above 5 000 ms (three times the 1 650 ms
+`panic_ms` floor). **If this fails, nothing is promoted, whatever the Elo shows**, and the failure
+is recorded in `RESULTS.md` as the reason. A flag in 300 games is disqualifying on its own.
+
+**Step 2 — one look, on the pooled total.** The Elo decision is taken **once**, on every game
+completed, whatever that number turns out to be. The chunks exist to bound the cost of a crash, not
+to provide three chances. An early chunk may **stop** the match for futility — a disaster visible at
+100 games costs nothing to act on, and stopping early can only make the decision more conservative —
+but **no chunk may promote**. Asymmetric stopping needs no alpha-spending arithmetic because it
+errs in the safe direction.
+
+**Step 3 — the Elo decision, exhaustive over what remains.** With `margin = −40 × sqrt(300 / n)`:
+
+| pooled result | outcome |
+|---|---|
+| lower bound above zero | promote |
+| point estimate < 0, **or** lower bound ≤ margin | revert both changes; v1.0 ships |
+| otherwise (straddles, point estimate ≥ 0, lower bound > margin) | promote, recorded as shipping on the **safety** criterion and not the Elo rule |
+
+The three rows are mutually exclusive and cover every case, given step 1 has passed. King safety
+still has no independent safety argument: if the bundle ships by the third row, the king-danger
+term ships unproven and the record says so.
