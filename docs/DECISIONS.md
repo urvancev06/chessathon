@@ -1256,3 +1256,58 @@ eight rated games finished on 4.7 s and 6.0 s, and a flag loses the game outrigh
 intervals does not give the interval of the difference, so "bundle minus timing-alone" is not a
 measurement of king safety. It is a second match of `main` against the timing-only worktree, and
 whether there is a slot for it depends on what the bundle result requires first.
+
+## 2026-09-08 — Round 73: four explanations, none of them confirmed
+
+Recorded as a negative result, deliberately and at length, because the alternative is that someone
+re-derives one of these tomorrow. The game is a loss the whole team can remember, which makes it the
+position most likely to attract a fifth theory.
+
+**What was proposed, and what happened to each.**
+
+1. **Time management** (`chessathon-bb`). Every blunder landed under 15 s — 14.8 s at move 60,
+   8.0 s at 65, 9.0 s at the mate, 7.6 s lowest. True, and downstream: it never asked why the clock
+   was gone at move 60 of a 68-move game. A symptom presented as a cause.
+2. **King safety** (`chessathon-bb`). Refuted by measurement: the king-danger term scores `Ka1` and
+   the saving `Qxf4+` at **50 apiece**, so it returns the same number for the losing move and the
+   move that holds, and cannot change the choice. Consistent with Yan's PR #4, where four variants
+   across the exposure family all reproduce every blunder.
+3. **A flat evaluation in a locked position** (the operator). The mechanism — with pawns fixed,
+   every structural term is constant, quiescence is a no-op with no captures, so dozens of root
+   moves tie and the engine shuffles — is coherent, and the shuffling was verified: 8 returns within
+   six moves, 17 king moves in 68, `g1-f1-e2-d1-c1` undoing our own castling. **Its quantitative
+   prediction fails.** Shuffle rate against blocked pawns, pooled over 278 middlegame moves from
+   seven rated games: open 8/107, locked 7/66, **Fisher exact p = 0.580**; binning-free,
+   point-biserial **r = +0.045, permutation p = 0.45**. `chessathon-5a` established that the
+   bucketed 7.5 % → 12.9 % trend was mostly an artefact of boundaries chosen after seeing the data.
+4. **Unconcentrated shuffling** (`chessathon-5a`), the salvage: the defect is real but structure-
+   independent, so it is fixable by a cheap root tie-break and measurable with the ordinary
+   instrument. **Killed by a baseline that took one command over PGNs already on disk:**
+
+| returns a piece within 6 middlegame moves | rate |
+|---|---|
+| us, 7 rated games | 27/278 = **9.7 %** |
+| our opponents, the same 7 games | 27/281 = **9.6 %** |
+| top-5 ladder teams, 250 games | 2654/22739 = **11.7 %** |
+| top-50 ladder teams, 400 games | 4110/35907 = **11.4 %** |
+
+**The strongest teams in the field shuffle more than we do.** `Nf3-d2-f1-g3` is a textbook
+manoeuvre and the metric counts it as waste, so one middlegame move in ten is what playing chess
+looks like, not a defect. A tie-break that pushed us below 9.7 % would move us *away* from the field.
+
+**The transferable lesson: a rate is not a finding.** 9.7 % looked damning with nothing standing
+next to it. This is the control-arm problem one level up — 5a controlled for position structure,
+correctly, and that killed explanation 3; neither of us controlled for what *good play* scores on
+the metric itself. The baseline was the cheapest analysis available and the fourth or fifth one run.
+
+**What survives, stated narrowly on purpose.** The evaluation lacks mobility, space, outpost and
+lever terms — a code fact, not in question. The king walk was bad. The endgame was played at
+7.6–9.5 s. We lost. **The bridge between those has gone**, and round 73 has no confirmed diagnosis.
+Also worth keeping: round 71 was nearly as locked (median 6 blocked pawns against round 73's 8) and
+we **won** it.
+
+**What this forbids.** The bundle match measures the timing refit and king safety. Neither addresses
+any of the above, so whatever `RESULTS.md` records, it must not read as a fix for round 73. And if
+the root-clustering falsifier returns thirty-way ties, that is a fact about our evaluation and
+**not** an explanation of this game — we have no baseline for a good engine's root distribution and
+no way to obtain one before the cutoff. The lesson above is exactly what that would be repeating.
