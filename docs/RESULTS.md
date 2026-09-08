@@ -132,3 +132,18 @@ otherwise covered by the full suite (497 tests, including a legal move required 
 search on 3 000 sampled positions at three node limits, and the property suite driving
 `agent.get_move`). Recorded here rather than dropped, because a gate that was not finished should
 not read as one that was.
+
+### 2026-09-08 — the recorded unconverted wins, replayed with the compiled engine
+
+Same protocol as the "Known unconverted wins" table above: the opponent is a second copy of the
+engine, 1 250 ms per move (5 000 ms for the Lucena, as recorded there), played out with
+python-chess. Two of the three are now converted; the third is on a knife edge.
+
+| position | v0.2 (interpreted) | compiled | note |
+|---|---|---|---|
+| Lucena `1K1k4/1P6/8/8/8/8/r7/2R5 w - - 0 1` | not converted | **converted**, mate in 69–87 plies | not the textbook bridge: it gives the rook back for the promotion and wins queen against rook |
+| `8/8/8/8/3k4/8/8/4KQ2 w - - 82 60` (KQ vs K, 18 plies of fifty-move room) | not converted, drawn two moves short | **converted**, mate in 13 plies | the Syzygy tablebase gives mate in 13 with 18 plies of room, so this is now at tablebase pace |
+| `8/8/8/3K4/8/8/8/q6k b - - 0 291` (KQ vs K, 19 plies before the 600-ply cap) | converted, 17 plies | **knife edge**: mate delivered exactly at ply 600 in one replay, missed in another and then drawn | the position needs 19 of the 19 remaining plies; which side of the line a run lands on depends on the wall clock, so it is neither a fix nor a regression to claim |
+
+The Python engine was replayed alongside the compiled one on the third position and mated in 19
+plies as well, so the two are on the same edge, not on opposite sides of it.
