@@ -226,10 +226,31 @@ nodes/s peaking at 646 000, and depth median 11 peaking at 16 - consistent with 
 phase is accounted for, since node rate and depth both rise as pieces come off. **Quote the opening
 figures for the opening and the round-74 log for a game.**
 
-**What it leaves open.** The two start-up times differ by **15 seconds for identical code on
-identical hardware**, 35.8 against 50.7. That variance, not the mean, is the risk: the budget is
-90 s, the deadline is armed at 70 s, and a run slower than the worse of these two would start
-skipping phases. Watch the `init` line in every rated log.
+**What it leaves open — narrowed, 8 September, from two samples to five.** This section read: "the
+two start-up times differ by 15 seconds for identical code on identical hardware, 35.8 against
+50.7. That variance, not the mean, is the risk." With only the two validation smoke games that was
+the honest reading, and it looks bimodal. Three rated logs have since been stored in `handoff/`,
+and their `init` lines were already on disk while that risk was being discussed:
+
+| run | ready in | of which numba | phases skipped |
+|---|---|---|---|
+| validation smoke 1 | 35.8 s | 34.8 s | 0 |
+| validation smoke 2 | **50.7 s** | 49.4 s | 0 |
+| rated round 71 | 35.6 s | 34.5 s | 0 |
+| rated round 73 | 35.2 s | 34.1 s | 0 |
+| rated round 74 | 34.1 s | 33.2 s | 0 |
+
+**Four of the five fall within 1.7 s of each other, at 34.1–35.8 s. The 50.7 s is one outlier, not
+half a distribution.** Worst observed leaves 19.3 s before the 70 s warm-up deadline and 39.3 s
+before the 90 s budget, and no run has skipped a phase. The risk is real but smaller than two
+points suggested, and it is a tail rather than a mode: a single unexplained +15 s excursion, cause
+unknown, on a shared machine.
+
+Still open, and the reason this is not settled: five samples cannot bound a tail, and nothing
+explains the outlier. **Every rated round is a free sample.** Store the log — `handoff/LOG-round-NN-*.md`
+— and add its row here. That practice is why this paragraph could be corrected at all; the round-73
+log spent an evening in a downloads folder while three sessions argued from claims it would have
+settled.
 
 **Time management, unchanged from the v0.2.1 finding.** Game 2 shows three moves at 8.9–10.1 s
 against a soft target of 3.4 s, running to the hard ceiling, while six others finished under it —
