@@ -120,3 +120,15 @@ Command: a script that calls `fastsearch.FastEngine.search` and `search.Engine.s
 | Python → jitted call boundary | 4.0 µs | 20 000 calls of `negamax` at depth 0; why the root is Python (DECISIONS.md) |
 | compile time if the root is compiled too | 34.2 s total | measured per function before the root was moved to Python: `negamax` 13.4 s, `_search_root` 6.3 s, aspiration 2.7 s, deepening loop 5.4 s |
 | numba-vs-v0.2-10s | . | versions/v0.2 | 10+0.1 s | 300 | +279 =19 -2 | 96.2% | ±1.6% | +560 (+495 to +660) | 6.3% | checkmate 281, fifty_moves 1, threefold_repetition 16, insufficient_material 2 | 8 | 0.72 2.63 3.71 / 6.25 7.76 7.59 | data/openings.txt |
+
+### 2026-09-08 — fuzz re-run on the final build, stopped early
+
+The 200-game fuzz row above (`numba-fuzz-random`) was run at commit `4383d28`, one commit before
+the transposition table gained its generation field. The re-run on the final build was started and
+**stopped at game 25 of 200** to give the machine to the real-clock promotion match, which was
+sharing it with a measured match in another checkout. What it did play: **25 games, 25 wins by
+checkmate, no failed termination, lowest clock 1 649 ms of 3 000**. The final build's legality is
+otherwise covered by the full suite (497 tests, including a legal move required from the compiled
+search on 3 000 sampled positions at three node limits, and the property suite driving
+`agent.get_move`). Recorded here rather than dropped, because a gate that was not finished should
+not read as one that was.
