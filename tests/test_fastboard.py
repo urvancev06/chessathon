@@ -285,9 +285,12 @@ def test_perft_random_playout_positions_depth_3() -> None:
     count = 2_000 if FULL_GATES else 200
     starts = sample_starts()
     pos = fb.new_position()
+    compared = 0
     for board in playout_boards(count, seed=20260908, starts=starts):
         fb.set_from_board(pos, board)
         assert fast_perft(pos, 3) == chess_perft(board, 3), board.fen()
+        compared += 1
+    assert compared == count
 
 
 # ------------------------------------------------------------------- gate 2: move-set equality
@@ -311,7 +314,9 @@ def test_move_sets_match_python_chess() -> None:
         "promotion": 0,
     }
     rights_seen = set()
+    compared = 0
     for board in sample_boards(count, seed=11235813):
+        compared += 1
         fb.set_from_board(pos, board)
         mine = uci_set(pos)
         theirs = {move.uci() for move in board.legal_moves}
@@ -334,6 +339,7 @@ def test_move_sets_match_python_chess() -> None:
         if board.pieces_mask(chess.PAWN, board.turn) & seventh:
             seen["seventh_rank_pawn"] += 1
 
+    assert compared == count
     for name, hits in seen.items():
         assert hits > 0, f"the sample contained no position with {name}"
     assert len(rights_seen) == 16, f"only {len(rights_seen)} castling-rights combinations sampled"
@@ -346,15 +352,21 @@ def test_make_unmake_restores_the_position_exactly() -> None:
     """Making and unmaking any legal move leaves the FEN, both clocks included, byte-identical."""
     count = 20_000 if FULL_GATES else 1_500
     pos = fb.new_position()
+    positions = 0
+    moves_tried = 0
     for board in sample_boards(count, seed=31415926):
         fb.set_from_board(pos, board)
         before = fb.to_fen(pos)
         meta_before = pos.meta.copy()
+        positions += 1
         for move in fb.legal_moves(pos):
             fb.make_move(pos, move)
             fb.unmake_move(pos)
+            moves_tried += 1
             assert fb.to_fen(pos) == before, f"{before} broken by {fb.move_to_uci(move)}"
             assert np.array_equal(pos.meta, meta_before), fb.move_to_uci(move)
+    assert positions == count
+    assert moves_tried > 20 * count, f"only {moves_tried} moves round-tripped"
 
 
 def test_make_unmake_keeps_the_piece_lists_consistent() -> None:
