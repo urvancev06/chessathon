@@ -859,9 +859,21 @@ would upload better than what is uploaded") and cannot attribute the result to e
 **The rule, fixed in advance:**
 
 1. **Interval above zero** → promote. This is CLAUDE.md's rule, unchanged, and needs no argument.
-2. **Point estimate negative, or lower bound at or below −40 Elo** → revert both changes; v1.0
-   ships. −40 is the largest regression we are willing to fail to detect, not a number chosen to
-   let something through.
+2. **Point estimate negative, or lower bound at or below the non-inferiority margin** → revert both
+   changes; v1.0 ships. The margin is **−40 Elo at the full 300 games**, scaled by `sqrt(300 / n)`
+   if fewer games are played (−49 at 200, −69 at 100).
+
+   The scaling is not a loophole, it is the correction that keeps the margin meaning one thing. A
+   *genuinely neutral* change returns `elo_low` of −35.3 at 300 games, **−43.4 at 200 and −61.9 at
+   100** (computed from `tools.arena_openings.statistics` at a 20 % draw rate). A fixed −40 would
+   therefore pass a neutral result at 300 games and reject the same neutral result at 200 — turning
+   "did a chunk survive" into a verdict on the engine. −40 was chosen to sit just outside the width
+   of a neutral 300-game interval: wide enough not to reject a change that is genuinely level,
+   tight enough to catch a real regression.
+
+   Consequence worth stating plainly: at 300 games this margin is **not the binding constraint** —
+   any non-negative point estimate clears it. The conditions that actually decide case 3 below are
+   the non-negative point estimate and the clock.
 3. **Interval straddles zero, point estimate at or above zero, lower bound above −40, *and* the
    lowest-clock figure improves against v1.0 with no loss on time** → promote, and record in
    `RESULTS.md` and the report that it shipped on the **safety** criterion, not the Elo rule.
