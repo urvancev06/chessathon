@@ -239,8 +239,9 @@ and their `init` lines were already on disk while that risk was being discussed:
 | rated round 71 | 35.6 s | 34.5 s | 0 |
 | rated round 73 | 35.2 s | 34.1 s | 0 |
 | rated round 74 | 34.1 s | 33.2 s | 0 |
+| rated round 75 | 33.6 s | 32.7 s | 0 |
 
-**Four of the five fall within 1.7 s of each other, at 34.1–35.8 s. The 50.7 s is one outlier, not
+**Five of the six fall within 2.2 s of each other, at 33.6–35.8 s. The 50.7 s is one outlier, not
 half a distribution.** Worst observed leaves 19.3 s before the 70 s warm-up deadline and 39.3 s
 before the 90 s budget, and no run has skipped a phase. The risk is real but smaller than two
 points suggested, and it is a tail rather than a mode: a single unexplained +15 s excursion, cause
