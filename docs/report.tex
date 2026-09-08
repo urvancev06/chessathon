@@ -24,27 +24,36 @@
 
 \title{Mikhail LeTal: a chess agent for AI Chessathon 2026\\
   \large Design, evidence and rating estimate}
-\author{Alexander Urvancev}
-\date{September 2026 (draft for build v0.1.0; updated with each build)}
+\author{Alexander Urvancev \and Yan Beletskiy}
+\date{September 2026 (build v1.0, the compiled engine; updated with each build)}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-Mikhail LeTal is a chess agent written for AI Chessathon 2026 by a one-person team. The shipped build
-(v0.1.0, ``Stage 0'') is plain Python 3.12 on top of the python-chess library, which supplies the board
-and the rules of chess; the search, the evaluation, the time management, the game-state tracking and the
-safety wrapper are our own and are described here so that every line can be explained. Locally the build
-won all 300 fuzz games against the starter kit's random mover and all 200 against its one-ply greedy
-agent, with no crash, illegal move, flag fall or start-up failure \src{RESULTS.md, rows
-\code{fuzz-random-v0.1} and \code{fuzz-greedy-v0.1}}, and scored 98.8\,\% ($\pm$2.4\,\%; +39 =1 $-$0) in 40
-games at the real clock against the starter's two-ply minimax baseline, again with no failure termination
-\src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}. Three measurements are still open and are marked
-in red throughout: the per-move log inspection is done (Section~\ref{sec:testing}: solo pass, slowest move 8\,429 ms, minimum clock 42\,958 ms, one 2 ms overshoot); \pending{first platform validation log and the time calibration
-derived from it}; the Stage 3 rating estimate is in Section~\ref{sec:rating}. Every other
-number in this
-document is a local measurement quoted from \code{docs/RESULTS.md} or a constant quoted from the code
-and its provenance files; nothing is estimated from memory.
+Mikhail LeTal is a chess agent written for AI Chessathon 2026 by a two-person team. The shipped build
+(v1.0, ``Stage 1'') carries its own board representation, move generation, evaluation and search,
+compiled to machine code by numba at import; python-chess remains in the safety wrapper as the legality
+oracle and the fallback. Every line of it is our own and is described here so that it can be explained.
+The engine it replaced --- the same algorithms in plain Python on a python-chess board --- still ships
+inside the zip, because it is the readable reference and the oracle the compiled engine is tested
+against, integer for integer.
+
+The compiled build beats that predecessor by \textbf{+560 Elo} (95\,\% interval +495 to +660; 300 games,
++279 =19 $-$2, 96.2\,\% $\pm$ 1.6\,\%) \src{RESULTS.md, row \code{numba-vs-v0.2-10s}}, reaching depth
+10--14 in three seconds where it reached 6--10, at 691--913 thousand nodes per second against 50--69
+thousand \src{RESULTS.md, ``Stage 1 phase 2'' tables}. It has been validated on the competition platform,
+where it is measured at \textbf{depth 10--12} and 290--569 thousand nodes per second on the slower
+competition core \src{CALIBRATION.md, 2026-09-08, v1.0 validation}. Against rating-limited Stockfish at
+the full time control it scores 84.4\,\%, 75.0\,\%, 65.6\,\% and 56.2\,\% at UCI\_Elo 1800, 2000, 2200 and
+2400, 16 games each \src{RESULTS.md, rows \code{v1.0-vs-sf*-real}}; those brackets are wide and no
+CCRL-scale rating is claimed for this build (Section~\ref{sec:rating}).
+
+No game in any of those matches ended in a crash, an illegal move, a flag fall or a start-up failure.
+Every number in this document is a measurement quoted from \code{docs/RESULTS.md} or
+\code{docs/CALIBRATION.md}, or a constant quoted from the code and its provenance files; where a figure
+is an estimate rather than a measurement it says so. Two measurements remain open and are marked in red
+throughout.
 \end{abstract}
 
 \section{The competition and what was built}
@@ -52,7 +61,7 @@ and its provenance files; nothing is estimated from memory.
 team uploads a zip whose root \code{agent.py} exposes one function, \code{get\_move(fen, time\_left\_ms)},
 returning a move in UCI notation (for example \code{e2e4}, or \code{e7e8q} for a promotion). The platform
 plays the latest build that passed validation on a rated ladder (hourly rounds, 08:00--22:00 London). The
-ladder only seeds a 13-round Swiss tournament over locked builds on the afternoon of Thursday
+ladder only seeds a 13-round Swiss tournament over locked builds on the afternoon of Friday
 11~September; the Swiss decides qualification for the London final on Saturday 12~September, where each
 finalist team walks a judge through how its agent was built. Uploads close at 11:00 London on
 11~September.
@@ -70,29 +79,44 @@ threefold repetition and fifty-move draws automatically; a game that reaches 600
 counting the opening position) is a draw. Every game starts from a curated near-level opening position,
 not from the initial position, and the set of openings is not published \src{brief, \S 3; \code{AGENTS.md}}.
 
-\paragraph{What was built.} The build described here is Stage 0 of a staged plan (Section~\ref{sec:arch}).
-It ships \code{agent.py} (the wrapper), the package \code{mikhail\_letal} (evaluation, search, timing,
-game state, fallback), \code{weights/pst.json} (the evaluation tables) and \code{weights/PROVENANCE.json}:
-23\,333 bytes zipped, 66\,825 bytes unzipped \src{RESULTS.md, row ``zip''}. It reaches depth 5--6 with
-selective depth 18--32 at the real clock on the development machine, at 50--61 thousand nodes per second
-\src{RESULTS.md, rows ``depth at 120 s clock'' and ``node rate, middlegame''}.
+\paragraph{What was built.} The shipped build is v1.0, Stage 1 of a staged plan
+(Section~\ref{sec:arch}). It ships \code{agent.py} (the wrapper) and the package \code{mikhail\_letal}:
+the compiled board, evaluation and search (\code{fastboard}, \code{fasteval}, \code{fastsearch}), the
+Python reference engine they are tested against (\code{evaluation}, \code{search}, \code{searchboard}),
+and the timing, game-state, warm-up and fallback modules --- plus \code{weights/pst.json} and
+\code{weights/PROVENANCE.json}. Fourteen files, 85\,925 bytes zipped and 269\,589 unzipped, against a
+50~MB cap. On the development machine it reaches depth 10--14 with selective depth 26--30 in three
+seconds, at 691--913 thousand nodes per second \src{RESULTS.md, ``Stage 1 phase 2'' tables}; on the
+competition core, depth 10--12 \src{CALIBRATION.md, 2026-09-08, v1.0 validation}.
 
-\paragraph{Our result.} Local: 300/300 against \code{baselines/random} and 200/200 against
-\code{baselines/greedy}, all by checkmate, zero failure terminations (Section~\ref{sec:testing}).
-Against \code{baselines/minimax} at the real clock (120~s + 0.5~s, four games at a time): 40 games,
-+39 =1 $-$0, 98.8\,\% ($\pm$2.4\,\%), 39 by checkmate and one draw by threefold repetition, no flag
-\src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}; the brief's Stage 0 bar was a score of at least
-90\,\% with zero flags. The per-move log of that run (slowest move, minimum clock reached) is
-the solo pass in Section~\ref{sec:testing} shows the budget holding (worst overshoot 2 ms). On the platform: \pending{first validation log
-(init time, per-move times, clock left)} and \pending{ladder rating of build v0.1.0}.
+\paragraph{Our result.} Local: 200/200 against \code{baselines/random} by checkmate with zero failure
+terminations, and +560 Elo over 300 games against the previous shipped build (Section~\ref{sec:testing}
+and the v1.0 addendum). Against rating-limited Stockfish~19 at the real clock, 16 games per level: 84.4\,\%
+at UCI\_Elo 1800, 75.0\,\% at 2000, 65.6\,\% at 2200 and 56.2\,\% at 2400, no flag at any level
+\src{RESULTS.md, rows \code{v1.0-vs-sf*-real}}. The predecessor v0.1 cleared the brief's Stage 0 bar --- a
+score of at least 90\,\% against \code{baselines/minimax} with zero flags --- at 98.8\,\% ($\pm$2.4\,\%)
+over 40 real-clock games \src{RESULTS.md, row \code{v0.1-vs-minimax-real-clock}}, and the solo per-move
+pass in Section~\ref{sec:testing} shows the time budget holding, with a worst overshoot of 2~ms.
+
+On the platform: v1.0 passed validation, reaching depth 10--12 in both smoke games with every warm-up
+phase completed \src{CALIBRATION.md, 2026-09-08, v1.0 validation}. \pending{ladder rating of build v1.0}
 
 \section{Rules-compliance statement}\label{sec:rules}
 \begin{itemize}[nosep]
-  \item No third-party engine, wrapper, port or translation is shipped or consulted at runtime. The only
-        library used at runtime is \code{python-chess 1.11.2}, which is part of the platform's fixed stack
-        and provides board representation, move generation and the rules, not chess knowledge.
-  \item No published network is shipped; Stage 0 ships no network at all. No positions labelled by any
-        engine were used: Stage 0 has no tuned parameters (Section~\ref{sec:eval}).
+  \item No third-party engine, wrapper, port or translation is shipped or consulted at runtime. The
+        libraries used at runtime are \code{python-chess 1.11.2}, \code{numba 0.67} and \code{numpy 2.5},
+        all part of the platform's fixed stack. python-chess supplies board representation and the rules
+        in the safety wrapper; numba and numpy supply compilation and array storage. None of them supplies
+        chess knowledge: the board representation, move generation, evaluation and search that play the
+        game are ours.
+  \item \textbf{No native binary ships.} numba compiles from the Python source in the zip, at import, on
+        the platform's own machine. What is uploaded is source a judge can read, which is what the rules
+        require; nothing is precompiled, and \code{cache=True} is not used --- the platform's filesystem is
+        read-only apart from \code{/tmp}, which is wiped between games, so a cache would buy nothing.
+  \item No published network is shipped; this build ships no network at all. No parameter that ships was
+        fitted to positions labelled by another engine. Texel tuning was attempted and rejected on
+        measurement, so the evaluation that ships is the untuned parametric prior
+        (Section~\ref{sec:eval}).
   \item No lookup database of another engine's moves or evaluations ships in the zip. There is no opening
         book and no tablebase in this build (Section~\ref{sec:endgame}).
   \item Memorised-code risk. An engine written with a language model can reproduce code or tables it has
@@ -128,14 +152,22 @@ The plan has stages, and each stage replaces the previous shipped build only aft
 real clock with a 95\,\% interval above zero. Three architectures were on the table.
 
 \begin{enumerate}[nosep]
-  \item \textbf{python-chess board + our own search and evaluation in pure Python} (Stage 0, this build).
-        python-chess is a proven implementation of the rules, so correctness risk is confined to our own
-        code: search, evaluation, time management. This is what the first priority of the brief (never
-        lose a game for free) demands from the first session.
+  \item \textbf{python-chess board + our own search and evaluation in pure Python} (Stage 0, builds
+        v0.1 and v0.2). python-chess is a proven implementation of the rules, so correctness risk is
+        confined to our own code: search, evaluation, time management. This is what the first priority
+        of the brief (never lose a game for free) demands from the first session. It is no longer the
+        shipped architecture, but it still ships inside the zip as the reference implementation and as
+        the oracle the compiled engine is tested against (Section~\ref{sec:testing}).
   \item \textbf{Own board representation, move generation, evaluation and search compiled with numba}
-        (Stage 1, planned), with python-chess kept in the wrapper as the legality oracle and fallback.
-        numba compiles at every game start, so its compile time must be measured from the zip and kept
-        under 40~s locally against the 90~s start-up budget.
+        (Stage 1, \textbf{this build}), with python-chess kept in the wrapper as the legality oracle and
+        fallback. numba compiles at every game start, so the compile time is paid at import, inside the
+        90~s start-up budget and before the clock starts: measured at 18.5~s from the extracted zip
+        \src{RESULTS.md, row ``import + compile, extracted zip''}. The root of the iterative-deepening
+        loop is deliberately left in Python; only \code{negamax} crosses into compiled code, once per
+        root move per iteration. Compiling the root as well was measured and rejected: it raised total
+        compile time to 34.2~s for no gain, because the root executes a handful of times per move rather
+        than millions \src{RESULTS.md, rows ``compile time if the root is compiled too'' and ``Python
+        $\rightarrow$ jitted call boundary''}.
   \item \textbf{A small self-trained NNUE-style network} evaluated inside the jitted search (Stage 4,
         expected to be skipped): \code{onnxruntime} cannot be called once per node from a jitted search,
         training data would have to be produced first, and the operator would rather explain a tuned
@@ -154,26 +186,57 @@ replacing the board and the move generator, which is Stage 1.
 \toprule
 architecture & node rate & depth at 120 s + 0.5 s & import time & peak RSS & status \\
 \midrule
-Stage 0: python-chess + pure Python & 50--61k nps (middlegame) & 5--6 (seldepth 18--32) & 0.033 s & 42.4 MB after a 10 s search; 120 MB at the TT cap & shipped (v0.1.0) \\
-Stage 1: numba engine & not built & not built & must be $\leq 40$ s from the zip & must be $< 500$ MB & planned \\
-Stage 4: NNUE-style net & not built & --- & --- & --- & expected to skip \\
+Stage 0: python-chess + pure Python & 50--61k nps (middlegame) & 5--6 (seldepth 18--32) & 0.033 s & 42.4 MB after a 10 s search; 120 MB at the TT cap & superseded (v0.1, v0.2) \\
+Stage 1: numba engine & 691--913k nps & 10--14 at 3 s (seldepth 26--30) & 18.5 s from the zip, against a 90 s budget & 349 MB after three moves, against a 2 GB cap & \textbf{shipped (v1.0)} \\
+Stage 4: NNUE-style net & not built & --- & --- & --- & skipped \\
 \bottomrule
 \end{tabular}
 \caption{Architectures and the measured numbers that decided the order. Stage 0 rows: RESULTS.md, rows
 ``node rate, middlegame'', ``depth at 120 s clock'', ``import time'', ``peak RSS after a 10 s search'',
-``RSS at the TT cap''. Stage 1 limits are the brief's requirements, not measurements. ``nps'' is nodes
-per second; ``seldepth'' is the deepest ply reached including quiescence; RSS is resident memory.}
+``RSS at the TT cap''. Stage 1 rows: RESULTS.md, ``Stage 1 phase 2'' tables, three positions at a
+three-second budget on the same machine as the Stage 0 rows. ``nps'' is nodes per second; ``seldepth''
+is the deepest ply reached including quiescence; RSS is resident memory. Both node rates are dev-box
+figures: the competition core is slower, and Section~\ref{sec:time} gives the measured factor.}
 \end{table}
 
-Import time was measured three times by timing \code{import agent} with \code{time.perf\_counter()} in a
-fresh interpreter and was 0.033~s each time,
-including a depth-2 warm-up search that runs at import so every code path has executed before the first
-real move \src{RESULTS.md, row ``import time''}. After the 2026-09-07 review the node rate on a 3~s search
-from the initial position rose from 51.7k to 67.2k nps (+30\,\%, same move \code{g1f3}, depth 6/17)
+Under Stage 0, import time was measured three times by timing \code{import agent} with
+\code{time.perf\_counter()} in a fresh interpreter and was 0.033~s each time, including a depth-2 warm-up
+search that runs at import so every code path has executed before the first real move
+\src{RESULTS.md, row ``import time''}. After the 2026-09-07 review the node rate on a 3~s search from the
+initial position rose from 51.7k to 67.2k nps (+30\,\%, same move \code{g1f3}, depth 6/17)
 \src{RESULTS.md, row ``review nps''}; Section~\ref{sec:search} lists what changed.
 
+\paragraph{What import means once the engine is compiled.} Under Stage 1 that 0.033~s becomes 18.5~s,
+and the warm-up stops being a formality. numba compiles a function the first time it is called with a
+given argument type, and it cannot be interrupted: a function left uncompiled until the game is running
+would compile \emph{inside} a search, blowing straight through the hard deadline that protects the clock.
+So every jitted function is listed in its module and called once at import, on positions chosen to
+trigger the same type signatures the game will, and \code{tests/test\_fasteval.py} asserts that no new
+signature appears afterwards under load --- a second signature would mean a compilation deferred onto the
+clock. The warm-up also carries a wall-clock deadline, so that an unexpectedly slow container degrades
+into a shallower first move rather than losing every game: if the budget runs out, the remaining
+compilation is finished on the first real move, which may spend up to \code{cold\_finish\_fraction} of
+its clock doing it, on the fullest clock of the game.
+
 \section{Board representation and move generation}
-Stage 0 uses python-chess's \code{Board}: a bitboard representation (one 64-bit integer per piece type
+\paragraph{What the shipped build uses.} v1.0 has its own board and its own move generator:
+\code{mikhail\_letal/fastboard.py}, a \textbf{0x88 mailbox} representation compiled by numba. A 0x88 board
+stores the 64 squares in a 128-entry array whose spare half makes the off-board test a single bit
+operation --- \code{square \& 0x88} is non-zero exactly when a square is off the edge --- which removes the
+bounds checking that dominates a naive mailbox generator and suits numba, where an array index is cheap
+and an exception is not. Moves are packed into integers rather than objects, positions are identified by
+our own Zobrist keys (\code{fastboard.position\_key}), and make/unmake restores the position in place
+rather than copying it. Correctness is established by perft and legal-move-set agreement against
+python-chess, described in Section~\ref{sec:testing}; because the generator is ours, that agreement is a
+real test rather than a tautology.
+
+python-chess remains in \code{agent.py}, where it converts the incoming FEN, supplies the legality check
+that every returned move passes, and provides the fallback. So the rules of chess are still enforced by
+the library at the boundary, and the speed comes from our own representation inside it.
+
+\paragraph{What Stage 0 used, and why the two are described together.} The interpreted engine, which still
+ships as the reference implementation and the oracle, uses python-chess's \code{Board} throughout: a
+bitboard representation (one 64-bit integer per piece type
 and per colour) with fully legal move generation, written and tested by the library's authors and pinned
 by the platform at version 1.11.2. Quiescence uses \code{Board.generate\_legal\_captures()} so that only
 captures are generated at the leaves. Squares are indexed as python-chess does (\code{a1 = 0},
@@ -183,13 +246,15 @@ python-chess's own repetition key, \code{Board.\_transposition\_key()}, a tuple 
 side to move, the castling rights and the en passant square; it is exactly what \code{Board.is\_repetition}
 uses, so what we count as a repetition is what the referee counts \src{DECISIONS.md, 2026-09-06,
 ``Position keys''}. Two costs are accepted knowingly: the key is a private name (an upgrade of the library
-could remove it, but the platform pins 1.11.2), and it is a tuple rather than a Zobrist hash, which
-Stage 1 replaces.
+could remove it, but the platform pins 1.11.2), and it is a tuple rather than a Zobrist hash. The compiled
+board replaces it with its own Zobrist keys, so nothing on the path that plays a rated move depends on a
+private name.
 
 \paragraph{Perft.} A perft test counts the leaf nodes of the full move tree to a fixed depth and compares
-the count with a reference; it is the standard proof that a move generator is correct. Stage 0 has no move
-generator of its own, so there is nothing to perft against python-chess: legality agreement with the
-referee, which also uses python-chess, holds by construction. The evidence that the surrounding code uses
+the count with a reference; it is the standard proof that a move generator is correct. It did not apply to
+Stage 0, which had no move generator of its own: legality agreement with the referee, which also used
+python-chess, held by construction. It applies squarely to the shipped build, whose generator is ours, and
+Section~\ref{sec:testing} gives the four gates that establish it. The evidence that the surrounding code uses
 the library correctly is the property-test set (each of the following returns a legal move within budget:
 all four promotion pieces, capture-promotions, under-promotion to a knight when it is the only mate, en
 passant for both colours, castling both ways for both colours, a stalemate trap, insufficient material,
@@ -219,15 +284,20 @@ scores $100\,000 - p$, so shorter mates score higher. All of this is in \code{mi
 gives tens of thousands of nodes per second, so the tree is small (about $10^5$--$10^6$ nodes per move at
 the real clock) and every technique that makes a small tree go deeper, or that keeps the clock check
 honest, matters more than it would at millions of nodes per second. Null-move pruning, late-move
-reductions, futility pruning, aspiration windows and quiescence delta pruning are deliberately absent from
-Stage 0: each will be added as a separate experiment with its own arena result so that the report can say
-what each is worth here \src{DECISIONS.md, 2026-09-06, ``No null-move pruning''}.
+reductions, futility pruning, aspiration windows and quiescence delta pruning were deliberately absent from
+Stage 0, so that each could be added as a separate experiment rather than as an undifferentiated block
+\src{DECISIONS.md, 2026-09-06, ``No null-move pruning''}. All of them were added in v0.2 and all of them
+ship in v1.0; the v0.2 addendum lists the constants each was given, and the combined effect was to cut the
+nodes needed to reach depth 6 from the standard start from 238\,000 to 17\,000.
 
 {\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{5.2cm}>{\raggedright\arraybackslash}p{5.9cm}@{}}
-\caption{Search techniques in build v0.1.0 and the local evidence for each. No per-feature arena ablation
-(feature on/off, games, interval) has been run yet; the effects listed are node-rate, latency and
-correctness measurements from the 2026-09-07 review. Elo ablations are Stage 1 work.}\label{tab:search}\\
+\caption{Search techniques as introduced in build v0.1.0, and the local evidence for each; the algorithms
+are unchanged in the compiled engine, which is a port rather than a redesign. The effects listed are
+node-rate, latency and correctness measurements from the 2026-09-07 review. \textbf{No per-feature Elo
+ablation (feature on/off, games, interval) has been run}, so what each technique is worth in Elo on this
+engine is not known; the evidence here is that each does what it is supposed to do, not what it
+scores.}\label{tab:search}\\
 \toprule
 technique & what it does and why & measured effect (local, dev box) \\
 \midrule
@@ -328,19 +398,30 @@ so that ``close'' beats one ring of the endgame king table \src{DECISIONS.md, 20
 \paragraph{Cost.} \code{evaluate()} takes 3.4--3.8~$\mu$s in the middlegame and 1.6~$\mu$s in the endgame
 (10\,000-call loops) \src{RESULTS.md, row ``\code{evaluate()} cost''}.
 
-\paragraph{How the weights were obtained, and before/after.} They were not tuned: Stage 0 ships the prior
-as generated, so there is no tuning script, data set or run to cite and no before/after arena result.
-Texel-style tuning of the piece values and tables on positions from our own arena games and public human
-games, labelled by game result or by a local reference engine's static evaluation (permitted by the
-rules), is a Stage 2 experiment; it will be accepted only on a positive interval against the untuned set,
-and its script, data hash and run id will be added to Appendix~\ref{app:provenance}.
+\paragraph{How the weights were obtained: tuning was tried and rejected.} The shipped weights are the
+parametric prior as generated, untuned. That is not because tuning was skipped --- it was run, and it
+lost.
+
+Texel-style tuning of the piece values and tables was implemented in \code{tools/tune\_texel.py} and
+measured against the untuned set under the ordinary promotion rule. The first attempt scored 36.0\,\% over
+300 games, an interval of $-100$ Elo ($-140$ to $-62$), comfortably \emph{below} zero. A second attempt
+with stronger regularisation recovered most of the loss but still did not clear the bar: 46.7\,\%, $-23$
+Elo ($-61$ to $+14$) \src{RESULTS.md, rows \code{v0.3-texel-vs-v0.2-10s} and
+\code{v0.3-texel-lambda40-vs-v0.2-10s}}. Under a rule that promotes only on an interval above zero, the
+untuned prior stands.
+
+Both runs are kept in \code{RESULTS.md} rather than deleted. The most likely reading is over-fitting: the
+tuning set is small next to the number of free parameters in twelve 64-entry tables, and a prior built
+from a geometric formula generalises better than weights fitted to a few thousand positions. It is
+recorded here as a negative result because a report that lists only what worked is not evidence of a
+method.
 
 \section{Time management}\label{sec:time}
 \paragraph{The budget formula.} Every constant lives in one frozen dataclass, \code{TimeParams}
 (file \code{mikhail\_letal/timing.py}), so that a calibration changes one object and nothing else. With
 $t$ the clock in milliseconds before the move and $m$ the number of moves we have played this game:
 \begin{align*}
-  \mathrm{moves\_to\_go} &= \mathrm{clamp}(40 - \lfloor m/2 \rfloor,\ 12,\ 40), \\
+  \mathrm{moves\_to\_go} &= \mathrm{clamp}(50 - \lfloor 0.7\,m \rfloor,\ 20,\ 50), \\
   \mathrm{moves\_to\_go} &= \min(\mathrm{moves\_to\_go},\ \lceil \mathrm{plies\_to\_cap}/2 \rceil,\ \lceil \mathrm{fifty\_move\_room}/2 \rceil), \\
   \mathrm{soft} &= (t - \mathrm{overhead}) / \mathrm{moves\_to\_go} + 0.8 \times 500, \\
   \mathrm{hard} &= \min(3 \times \mathrm{soft},\ 0.25\, t), \\
@@ -350,20 +431,57 @@ $t$ the clock in milliseconds before the move and $m$ the number of moves we hav
 both clamped to be non-negative. \code{plies\_to\_cap} $= 600 - \mathrm{ply}$ is always passed;
 \code{fifty\_move\_room} $= 100 - \mathrm{halfmove\ clock}$ is passed only in a pawnless mop-up, where
 nothing but the mate itself resets the halfmove clock (the urgency clamps of review item C). Worked
-examples from the unit tests: at $t = 120\,000$, $m = 0$: moves\_to\_go 40, soft $= 119\,850/40 + 400 =
-3396.25$~ms, hard $= 10\,188.75$~ms; at $t = 60\,000$, $m = 20$: moves\_to\_go 30, soft $= 2395$~ms, hard
-$= 7185$~ms \src{tests/test\_timing.py}.
+examples from the unit tests: at $t = 120\,000$, $m = 0$: moves\_to\_go 50, soft $= 119\,950/50 + 400 =
+2799$~ms, hard $= 8397$~ms; at $t = 60\,000$, $m = 20$: moves\_to\_go 36, soft $= 59\,950/36 + 400 \approx
+2065$~ms, hard $\approx 6196$~ms \src{tests/test\_timing.py}.
+
+\paragraph{Where the divisor comes from.} $50$, $20$ and $0.7$ are not chosen by feel. 1\,697 finished
+ladder games were collected and used to measure how many of \emph{our} moves are really left at each
+point of a game, given the game reached that point: the median is 67 at the start, falls by about one a
+move to roughly 25 by move 50, and then flattens. If a move spent its whole soft budget, sharing the clock
+over that curve would be the right answer directly. It does not --- a move spends about 0.70 of its soft
+budget --- so the divisor is that curve scaled by 0.70, which makes the \emph{realised} spending an even
+split of the clock over the moves that are really left. Hence $0.7 \times 67 \approx 47 \rightarrow 50$ at
+the start, and a decay of 0.7 divisor-moves per move played.
+
+The floor is the interesting one, and it is set by a safety argument rather than by the median. At full
+spend the clock settles where a move's cost equals the increment, at $\mathrm{overhead} +
+\mathrm{moves\_to\_go\_min} \times 500 \times (1/\mathrm{usage} - 0.8)$. At a floor of 16 that lands on
+$1650$~ms --- \emph{exactly} \code{panic\_ms}, the threshold below which the engine is skipped entirely,
+so the tail of a long game would settle precisely on the boundary where it stops searching. At 20 it is
+$2050$~ms at full spend and about 6.3~s at the measured 0.70, and over the ladder games that ran to at
+least 90 of our moves the lowest clock reached rises from 4.6~s to 5.9~s. The floor is therefore 20.
 
 \paragraph{How the budget is used.} \code{get\_move} starts its own timer on entry, so board construction
 and history bookkeeping count against the budget as they do on the platform. The searcher is handed two
-absolute deadlines: a soft deadline at $0.45 \times \mathrm{soft}$ after which no new iteration starts
-(the next iteration costs several times the previous one), and a hard deadline at which the search aborts
-mid-iteration; the clock is read every 128 nodes (Section~\ref{sec:search}). A node limit is supported by
-the search and tested (\code{test\_node\_limit\_stops\_search\_close\_to\_the\_limit}) but is not set in
-Stage 0; the brief's node cap derived from a measured node rate is for the jitted search, where a
-misbehaving clock read is the risk it backs up. Below \code{panic\_ms} $= 1650$~ms the engine is skipped
-and the fallback plays (Section~\ref{sec:safety}); a position with a single legal move is played without
-searching.
+absolute deadlines: the soft budget as a target, and a hard deadline at which the search aborts
+mid-iteration, with the clock read every 512 nodes in the compiled search (Section~\ref{sec:search}).
+Below \code{panic\_ms} $= 1650$~ms the engine is skipped and the fallback plays
+(Section~\ref{sec:safety}); a position with a single legal move is played without searching.
+
+\paragraph{Starting the next depth: a prediction, not a fixed share.} Whether to begin depth $d+1$ used to
+be decided by a fixed fraction of the budget --- start one only before $0.45 \times \mathrm{soft}$ had
+elapsed. The platform's own logs showed what that does. Per-move times came in two lumps and nothing
+between: 1.5--3.0~s, where an iteration finished and the engine stopped with a third of its budget unspent,
+or 8.9--10.1~s, where it started a depth that could not finish and ran into the hard ceiling. The cause is
+arithmetic. Iteration costs grow geometrically --- each depth costs about 4--5 times the previous --- so a
+depth begun at 0.45 of the budget cannot finish inside it, and a fixed fraction has no way to tell the two
+cases apart.
+
+The rule now predicts. The cost of depth $d+1$ is estimated as $\rho \times T(d)$, where $\rho$ is
+measured from the last two completed iterations, clamped to $[2.0, 8.0]$ and defaulting to 4.5 before
+there is data; the depth is started only if it is predicted to end inside a target. The target is the soft
+budget times \code{iteration\_target\_factor}, stretched by half again when the best root move changed at
+the last completed depth, and cut to 0.7 when it has been stable for six iterations with a score that is
+not falling. Insisting that the next depth \emph{finish} by the soft budget is the obvious reading and the
+wrong one: with geometric costs it stops a factor of $\rho$ short and leaves a third of the clock unspent,
+which is why the target factor is 1.35 rather than 1.0.
+
+Every target is clamped to the hard window, so the guarantee that matters is preserved by construction: a
+decision to start an iteration implies the elapsed time is still inside the hard deadline. The abort path
+and the flag invariant are untouched, and \code{tests/test\_timing.py} asserts the guarantee over a grid
+of histories and windows. The old fixed fraction survives only as a fallback for an iteration too short to
+measure (under 1~ms), where a ratio would be meaningless.
 
 \begin{table}[H]\centering\small
 \begin{tabular}{@{}ll>{\raggedright\arraybackslash}p{7.6cm}@{}}
@@ -371,16 +489,24 @@ searching.
 constant & value & origin \\
 \midrule
 \code{increment\_ms} & 500 & agent contract \\
-\code{overhead\_ms} & 150 & brief's initial guess; to be replaced by $\max$ over a game of (platform-measured move time $-$ self-measured) $+ 50$ \\
-\code{moves\_to\_go\_max} / \code{min} & 40 / 12 & brief \S 6.2 \\
+\code{overhead\_ms} & 50 & \textbf{measured}: the platform charged 0--2~ms beyond what we measure ourselves (mean 1.1) over 25 rated moves; this file's rule is $\max + 50$ \\
+\code{moves\_to\_go\_max} / \code{min} / \code{decay} & 50 / 20 / 0.7 & \textbf{measured}: 1\,697 finished ladder games, scaled by the 0.70 of its budget a move actually spends; the floor is set by the settling-clock argument above \\
 \code{increment\_fraction} & 0.8 & brief \S 6.2 \\
 \code{hard\_multiplier} / \code{hard\_fraction} & 3.0 / 0.25 & brief \S 6.2 \\
 \code{floor\_ms} / \code{floor\_fraction} & 1500 / 0.05 & brief \S 6.2 \\
-\code{panic\_ms} & 1650 & \code{overhead\_ms} + \code{floor\_ms}: below it the formula has no time to plan with (the brief suggested about 1500; in the band 1500--1650 the formula returned a zero budget and a depth-0 move) \\
-\code{next\_iteration\_fraction} & 0.45 & brief; to be replaced by the measured iteration-cost ratio \\
+\code{panic\_ms} & 1650 & below it the engine is skipped and the fallback plays. Deliberately unchanged when \code{overhead\_ms} fell, so that nothing within a second and a half of the flag behaves differently from the build that was measured \\
+\code{next\_iteration\_fraction} & 0.45 & brief; \textbf{demoted} to a fallback for an iteration shorter than \code{ratio\_measurable\_s} $= 1$~ms, which says nothing about the next one \\
+\code{iteration\_ratio\_default} / \code{min} / \code{max} & 4.5 / 2.0 / 8.0 & \textbf{measured}: the platform's per-move logs give 4--5$\times$ per depth; clamped so one mis-timed iteration can neither stop the search early nor start one it cannot finish \\
+\code{iteration\_target\_factor} & 1.35 & \textbf{measured}: 1.0 spends 0.70 of the budget for mean depth 10.83; 1.35 spends 0.80 for 11.17; 1.75 reaches the hard ceiling \\
+\code{unstable\_factor} & 1.5 & hand-chosen, textbook magnitude: half a budget more when the best root move just changed. Bounded by the hard ceiling like every other target \\
+\code{easy\_factor} / \code{stable\_depths} / \code{score\_drop} & 0.7 / 6 / 30\,cp & \textbf{measured} against 0.5 / 4 / 30, which fired on nearly every move and spent less than the fixed rule it replaced \\
+\code{cold\_finish\_fraction} & 0.25 & the share of the first move's clock that may go on finishing a warm-up that ran out of its own budget \\
 \bottomrule
 \end{tabular}
-\caption{Time-management constants of build v0.1.0, all uncalibrated \src{docs/CALIBRATION.md}.}
+\caption{Time-management constants of build v1.0, calibrated on 8~September against the platform's own
+per-move timing and 1\,697 ladder games \src{docs/CALIBRATION.md; docs/PROVENANCE.md}. The worst case an
+iteration can be \emph{started} for is $1.35 \times 1.5 = 2.03$ soft, against a hard ceiling of 3.0 soft,
+so the abort path is no likelier to be needed than under the fixed rule.}
 \end{table}
 
 \paragraph{What the local games show.} At the real clock the smoke games from the extracted zip ran 1.5 to
@@ -481,6 +607,16 @@ process when the game ends; without the flush the first local game printed no ag
 opponent that plays the strange moves (under-promotions, en passant, stalemate tries) that exercise the
 guard paths.
 
+The compiled engine was fuzzed the same way: 200 games against \code{baselines/random}, 200 wins by
+checkmate, zero failure terminations \src{RESULTS.md, row \code{numba-fuzz-random}}. A re-run on the final
+build was started and \textbf{stopped at 25 games of 200} to give the machine to a measured match, and is
+recorded as stopped rather than quietly dropped: 25 games, 25 wins by checkmate, no failed termination,
+lowest clock 1\,649~ms of 3\,000. The final build's legality argument therefore rests on the full test
+suite --- which includes a legal move being required from the compiled search on 3\,000 sampled positions
+at three node limits, and the property suite driving \code{agent.get\_move} --- rather than on a completed
+200-game fuzz. That is a real gap and it is stated as one: a gate that was not finished should not be
+read as one that was.
+
 \section{Testing methodology and results}\label{sec:testing}
 \paragraph{Machines and load.} Development machine: 16 cores, 7.8~GB RAM, WSL2 on Windows, Python
 3.12.14. Platform: one core of an AMD EPYC 9V74 at 2.60~GHz, 2~GB \src{RESULTS.md, ``Machine''}. Every
@@ -539,20 +675,75 @@ RSS at the TT cap & 120 MB (250k entries) after; 143 MB (270k) before & same 60 
 \caption{Other measurements of build v0.1.0, development machine \src{RESULTS.md, ``Other measurements''}.}
 \end{table}
 
-\paragraph{Static checks and smoke games.} \code{ruff format --check}: 32 files already formatted;
-\code{ruff check .}: all checks passed; \code{mypy --strict}: no issues in 28 source files;
-\code{pytest -q}: 143 passed in 32.8~s; \code{harness.arena} vs random, 2 games at 5~s: +2 =0 $-$0 by
-checkmate; \code{harness.play} vs greedy at 20~s + 0.2~s: won by checkmate in 16 of our moves, twice;
-\code{harness.package}: zip built and both platform-style smoke games (120~s + 0.5~s, 20 plies) clean
-\src{INTEGRATION\_NOTES.md, ``Checks run''}.
-\paragraph{Perft.} Not applicable to Stage 0 (Section 4); the Stage 1 table will go here.
+\paragraph{Static checks and smoke games.} At the Stage 0 integration pass: \code{ruff format --check}:
+32 files already formatted; \code{ruff check .}: all checks passed; \code{mypy --strict}: no issues in 28
+source files; \code{pytest -q}: 143 passed in 32.8~s; \code{harness.arena} vs random, 2 games at 5~s:
++2 =0 $-$0 by checkmate; \code{harness.play} vs greedy at 20~s + 0.2~s: won by checkmate in 16 of our
+moves, twice; \code{harness.package}: zip built and both platform-style smoke games (120~s + 0.5~s, 20
+plies) clean \src{INTEGRATION\_NOTES.md, ``Checks run''}.
+
+On the shipped v1.0, measured 8~September: \code{ruff check} and \code{ruff format --check} clean;
+\code{mypy} in \code{strict} mode over \code{agent.py}, \code{harness}, \code{mikhail\_letal},
+\code{tools} and \code{tests}: no issues in 50 source files; \code{pytest -q}: \textbf{621 passed} in
+2~min 41~s, with the gates at their reduced sizes. The suite has more than quadrupled since Stage 0,
+which is where most of the compiled engine's correctness argument lives: the perft, legal-move-set,
+make/unmake and evaluation-parity gates above are all part of that count.
+\paragraph{Perft and the compiled board's gates.} Stage 0 needed no perft, because python-chess
+generated the moves. Stage 1 has its own move generator, so it needs one, and \code{tests/test\_fastboard.py}
+is the gate. \textbf{The perft counts are not taken from a published table.} \code{chess\_perft} walks
+python-chess's own legal move generator to produce the expected number, so a disagreement is a
+disagreement with a reference implementation rather than with a number copied from a web page --- which
+also means the gate cannot be passed by having memorised the standard answers. Four gates run, with
+python-chess as the oracle throughout, and \code{NUMBA\_BOUNDSCHECK=1} making numba check every compiled
+array index:
+
+\begin{enumerate}[nosep]
+  \item \textbf{Perft} to depth 4 on the standard public positions and on 58 positions built to break one
+        rule each, and to depth 3 on all 219 curated openings and on 2\,000 positions from random playouts.
+  \item \textbf{Legal-move-set equality}, compared as sets of UCI strings, on 100\,000 positions, with the
+        sample audited to confirm it contains en passant, all sixteen castling-rights combinations, check,
+        double check, promotions, pawns on the seventh rank and terminal positions --- so that the count
+        cannot be met by easy positions alone.
+  \item \textbf{Make/unmake round trip}: after every make and every unmake in a Python-level perft, the FEN
+        including both clocks is byte-identical, the metadata is unchanged, and \code{check\_invariants}
+        passes.
+  \item \textbf{No jitted function gains a new signature under load}, so nothing compiles after import ---
+        the property Section~\ref{sec:arch} explains the warm-up exists to guarantee.
+\end{enumerate}
+
+The evaluation has the equivalent gate against \code{evaluation.py} described in the v1.0 addendum. The
+sizes above are the full ones, run with \code{LETAL\_FULL\_GATES=1} before a promotion; an ordinary
+\code{pytest} run uses reduced samples so that the suite stays quick.
 \paragraph{Per-move log of the minimax run.} The arena tool cannot see the agent's log, so three further games were played alone on the machine with \code{harness.play} (two as White, one as Black, all won by checkmate): 71 engine moves, one of them 2 ms over its hard cap (the clock is read every 128 nodes), slowest move 8\,429 ms against a cap of about 10 s, minimum clock before a move 42\,958 ms, mean 2\,526 ms per move against a mean soft budget of 2\,925 ms, depth 1--7 (median 5), median 64\,270 nps, import 31--34 ms \src{RESULTS.md, ``v0.1 solo real-clock pass''}. The one repetition draw of the 40-game run was a position where the engine was a pawn down (material 20 vs 21) and steered into the repetition, which is the intended behaviour when behind.
 \paragraph{Final measurement pass.} \pending{Stage 3 final pass alone on the machine at 120 s + 0.5 s:
 vs the previous version, vs the strongest baseline, and $\geq 40$ games with the slowest move and the
 minimum clock reached}.
 
 \section{Rating estimate}\label{sec:rating}
-Everything in this section is a method statement; the numbers are measured on 8~September from 300 real-clock games against Stockfish~19 at UCI\_Elo 1600--2400 (60 per level, six games at a time; scores 70.0, 76.7, 45.0, 38.3 and 43.3\,\%; zero flags): CCRL-40/4-scale $\approx$ 2050 (95\% interval 1940--2170: bootstrap 2000--2110 plus $\pm$100 yardstick calibration in quadrature); FIDE-equivalent $\approx$ 1840--2360 (Route A: CCRL$-$100 as the lower bound, TalkChess $2800 - 0.7 \times (2800 - \mathrm{CCRL})$ as the upper); chess.com Rapid-equivalent $\approx$ 1820--2340; chess.com Blitz-equivalent $\approx$ 1730--2700 (ChessGoals table, interpolated). Route B (the Sunfish bot) was not run. These are estimates built on a rating-limited reference engine and a survey-based table; the honest uncertainty is $\pm$200 or more on the human scales.. The statement will be tagged as an estimate.
+This section is a method statement, and it now describes two builds. \textbf{The rating below belongs to
+the interpreted v0.2, not to the shipped v1.0.}
+
+\paragraph{v0.2 (interpreted), fully measured.} 300 real-clock games against Stockfish~19 at UCI\_Elo
+1600--2400 on 8~September (60 per level, six games at a time; scores 70.0, 76.7, 45.0, 38.3 and 43.3\,\%;
+zero flags): CCRL-40/4-scale $\approx$ 2050 (95\,\% interval 1940--2170: bootstrap 2000--2110 plus
+$\pm$100 yardstick calibration in quadrature); FIDE-equivalent $\approx$ 1840--2360 (Route A:
+CCRL$-$100 as the lower bound, TalkChess $2800 - 0.7 \times (2800 - \mathrm{CCRL})$ as the upper);
+chess.com Rapid-equivalent $\approx$ 1820--2340; chess.com Blitz-equivalent $\approx$ 1730--2700
+(ChessGoals table, interpolated). Route B (the Sunfish bot) was not run.
+
+\paragraph{v1.0 (compiled), provisional and under-sampled.} The same instrument and the same fit, run on
+64 games at UCI\_Elo 1800--2400 (16 per level; scores 84.4, 75.0, 65.6 and 56.2\,\%; zero flags)
+\src{RESULTS.md, rows \code{v1.0-vs-sf*-real}}, give a maximum-likelihood CCRL-40/4-scale rating of
+$\approx$ \textbf{2305}, bootstrap 95\,\% interval 2199--2426, widening to 2159--2462 once the
+yardstick's own $\pm$100 calibration uncertainty is added in quadrature.
+
+\textbf{This is quoted as provisional and should not be repeated as the build's rating.} The protocol in
+this section calls for at least 60 games per level; 16 is barely a quarter of that, the sample is one
+fifth of what produced the v0.2 figure, and the levels stop at 2400 while the build scores above 50\,\%
+there --- which is exactly the condition under which the protocol says to extend upward, because a fit
+whose top level is not a losing one is extrapolating at its own boundary. The human-scale conversions are
+deliberately not computed from it. \pending{full-sample re-rating of v1.0: $\geq 60$ games per level,
+levels extended above 2400 until the build scores under 50\,\%}
 
 \paragraph{Why the ladder's anchors cannot be mapped to CCRL directly.} Five house engines hold fixed
 ladder ratings and also have published CCRL Blitz (40/4) ratings. The two sets do not agree even in order.
@@ -610,11 +801,19 @@ same table by interpolation between these points: FIDE 1740 $\leftrightarrow$ bl
 1865 $\leftrightarrow$ 1800 / 1870; 1965 $\leftrightarrow$ 2000 / 1995; 2075 $\leftrightarrow$ 2200 /
 2110; 2190 $\leftrightarrow$ 2400 / 2215; 2300 $\leftrightarrow$ 2600 / 2300. Ranges, never a point.
 
-\paragraph{Final statement (to be filled in).} CCRL-scale $\approx$ 2050 (1940--2170);
-FIDE-equivalent $\approx$ 1840--2360; chess.com Rapid-equivalent $\approx$ 1820--2340;
+\paragraph{Final statement.} For the \textbf{interpreted v0.2}, on 300 games: CCRL-scale $\approx$ 2050
+(1940--2170); FIDE-equivalent $\approx$ 1840--2360; chess.com Rapid-equivalent $\approx$ 1820--2340;
 chess.com Blitz-equivalent $\approx$ 1730--2700. These are estimates built on (i) a rating-limited
 reference engine, (ii) one human-rated bot and (iii) a survey-based table; the honest uncertainty is
 $\pm 200$ or more on the human scales.
+
+For the \textbf{shipped v1.0}, no rating is claimed. The provisional 64-game fit above puts it near
+CCRL-scale 2300, and the direct comparison against v0.2 --- +560 Elo over 300 games, an interval far from
+zero --- says the gap is large and well measured. But an engine-pool Elo difference measured at 10~s +
+0.1~s against one opponent is not a rating, the yardstick sample behind the 2300 is a quarter of the
+protocol's own requirement, and no human-scale conversion is offered from it. The number a judge should
+be given for this build is the one measured against known opposition: 84.4, 75.0, 65.6 and 56.2\,\% at
+UCI\_Elo 1800, 2000, 2200 and 2400, sixteen games each, with the intervals shown in the v1.0 addendum.
 
 \section{Known limitations and next stage}
 \begin{itemize}[nosep]
@@ -625,31 +824,78 @@ $\pm 200$ or more on the human scales.
         steady progress but not at tablebase pace, and is two moves from mate when the rule lands. At the
         real clock the urgency clamps can buy time; at 5~s the hard limit caps every move at 1\,250~ms
         \src{DECISIONS.md item D}.
-  \item \textbf{TT clear stall.} When the table hits its 250\,000-entry cap mid-search it is emptied
-        before the next store: crude but safe. The clear at move start above 60\,\% keeps this from
-        landing mid-iteration in normal play, but it happened once in the 60~s stress search
-        \src{RESULTS.md, ``RSS at the TT cap''}. An ageing replacement scheme is Stage 1 work.
-  \item \textbf{Pure-Python speed.} 50--67k nps and depth 5--6 at the real clock is the ceiling of this
-        architecture; the platform's core is slower than the development machine by a factor that is
-        \pending{speed factor from the first validation log}.
-  \item \textbf{Uncalibrated time constants} until the first validation log; the soft target is
-        overrun by design (Section~\ref{sec:time}) and the first log decides whether that is safe.
-  \item \textbf{No tuning and no ablations.} The evaluation is the untuned prior and no search technique
-        has an Elo ablation yet; both are on the plan below.
-  \item \textbf{Private-API key.} \code{Board.\_transposition\_key()} is private to python-chess; safe at
-        the pinned 1.11.2, replaced by our own Zobrist keys in Stage 1.
+  \item \textbf{Private-API key, narrowed.} \code{Board.\_transposition\_key()} is private to python-chess
+        and is still called in \code{search.py}. It is safe at the pinned 1.11.2, and it no longer runs
+        during a rated game --- the compiled engine uses our own Zobrist keys --- but the code ships.
 \end{itemize}
-\paragraph{Next stage.} Stage 1 is the numba engine: our own board representation, move generation,
-make/unmake, evaluation and search compiled with numba and called from the same wrapper, with python-chess
-kept as the legality oracle and fallback. Its definition of done: perft agreement with python-chess to
-depth 4 on the standard positions and depth 3 on every collected opening and $\geq 2\,000$ random
-positions, identical legal-move sets on $\geq 100\,000$ random positions; Stage 0's fuzz and property tests
-passing unchanged; import time from the zip $\leq 40$~s; $\geq 300$ games against v0.1 at 10~s + 0.1~s
-with the 95\,\% interval entirely above zero, then $\geq 100$ games at the real clock, alone on the
-machine, zero flags and interval above zero \src{brief, \S 5}. Inside it: principal-variation search,
-null-move pruning, late-move reductions, aspiration windows, mate-distance pruning and a fixed-size numpy
-transposition table, each measured. Stage 2 then adds evaluation terms, Texel tuning, the tablebase
-experiment and time-management refinements, one arena run each.
+
+\paragraph{Limitations of the shipped v1.0.} The Stage 0 list above is kept because it is the history of
+the build; most of it was closed by the compiled engine. Two of the three unconverted endgames are now
+won, the speed ceiling is gone, and the speed factor and time constants have been measured against the
+platform. What remains, in order of how much it is likely to cost:
+
+\begin{itemize}[nosep]
+  \item \textbf{No king-danger term in the evaluation.} The only king-safety term is a count of pawns in
+        front of the king; there is no attacker count, no weighting by attacking piece and no penalty for
+        an open file bearing on our own king. Rated round 70 was lost to exactly this: the engine castled
+        into a queen already bearing on the castled position, and later scored the losing
+        \code{22\ldots Nxd4} at $+305$ for itself where Stockfish had the position at $-834$. Replaying
+        it at up to sixteen times the time it actually spent, and at four to five plies deeper on the
+        compiled engine, changes none of the three losing decisions --- so it is not a horizon failure
+        that depth dissolves, but a gap in what the evaluation knows to look for. Analysis by Yan
+        Beletskiy \src{handoff/FINDING-king-safety.md}. This was the highest-value evaluation work
+        outstanding and the one whose absence is visible in a lost game rather than in a hunch.
+
+        \emph{Status.} A king-danger term counting attackers into the king's zone has since been
+        written and is on the development branch, gated on the parity comparison against the Python
+        evaluation like every other term \src{DECISIONS.md, 2026-09-08, ``A king-danger term''}. It is
+        \textbf{not in v1.0}, which is the build this report describes and the build that has played,
+        and it has not yet won a promotion match, so nothing is claimed for it here.
+  \item \textbf{Start-up time varies by fifteen seconds, and the sample is two.} The two platform smoke
+        games compiled in 34.8~s and 49.4~s on identical hardware. The budget is 90~s and the warm-up
+        deadline arms at 70~s; a run slower than the worse of the two starts skipping phases and finishes
+        compiling on the first move. See the v1.0 addendum.
+  \item \textbf{The evaluation is an untuned prior.} Texel tuning was attempted and \emph{rejected on
+        measurement}: the tuned weights lost 100 Elo over 300 games, and a regularised second attempt
+        still lost 23 with the interval touching zero \src{RESULTS.md, rows \code{v0.3-texel-vs-v0.2-10s}
+        and \code{v0.3-texel-lambda40-vs-v0.2-10s}}. The prior therefore stands, which is an honest
+        negative result rather than an untried idea.
+  \item \textbf{One endgame on a knife edge.} \code{8/8/8/3K4/8/8/8/q6k b - - 0 291} needs 19 of the 19
+        plies left before the 600-ply cap; it was mated exactly at ply 600 in one replay and drawn in
+        another. Which side of the line a run lands on depends on the wall clock, so it is claimed as
+        neither a fix nor a regression \src{RESULTS.md, ``the recorded unconverted wins''}.
+  \item \textbf{v1.0 has no full-sample rating} (Section~\ref{sec:rating}): 16 games per level against
+        the yardstick, against a protocol that asks for 60, and the top level is one the build still wins.
+  \item \textbf{One platform run.} Everything known about this build on the competition hardware comes
+        from a single validation, two smoke games of 20 plies. Every rated round is another sample and the
+        \code{init} and per-move lines of each are read.
+\end{itemize}
+\paragraph{Stage 1 is done.} It was defined as: perft agreement with python-chess to depth 4 on the
+standard positions and depth 3 on every collected opening and $\geq 2\,000$ random positions; identical
+legal-move sets on $\geq 100\,000$ random positions; Stage 0's fuzz and property tests passing unchanged;
+import time from the zip $\leq 40$~s; and $\geq 300$ games against the previous version with the 95\,\%
+interval entirely above zero \src{brief, \S 5}. All of those are met: the gates are in
+Section~\ref{sec:testing}, import from the zip is 18.5~s, and the match was +560 Elo over 300 games with
+the interval far from zero.
+
+\paragraph{What is next, in the order the evidence ranks it.} First, \textbf{king danger} --- the one
+outstanding gap with a lost game behind it rather than a hunch, and the reason round 70 was lost. Second,
+\textbf{time management}: the platform's own logs show per-move times falling into two lumps, an iteration
+that finished early or one that ran to the hard ceiling, with nothing between, and the divisor that shares
+the clock across the game is wrong in both directions --- a 23-move game ended with 69\,\% of its clock
+unspent while a 113-move game finished on 4.7~s. Third, \textbf{a full-sample re-rating} of the shipped
+build.
+
+Both of the first two are now written and sit on the development branch --- the timing rule of
+Section~\ref{sec:time} and the king-danger term above. \textbf{Neither has yet won a promotion match
+against v1.0}, and under the rule this project runs on, a change that has not won one is not a version.
+Until that match is played and its interval is above zero, v1.0 remains the build, and the numbers in this
+report are its numbers. Recording that plainly matters more than the two changes do: the rule is only
+worth anything if it also binds the changes we happen to believe in. Not on the list: Texel tuning, which was tried and lost; and playing for the opponent's flag, which
+was investigated by Yan Beletskiy and rejected on arithmetic --- with a 0.5~s increment the opponent's
+measured net drain was 0.063~s a move, so flagging from 10~s would take about 157 moves and the referee's
+600-ply draw lands first \src{handoff/FINDING-flagging.md}. Both are recorded as negative results rather
+than dropped, because the reason not to do them is the useful part.
 
 
 \section*{Addendum: build v0.2}
@@ -684,12 +930,86 @@ Zero failed terminations in all 460 games; the zip (nine files, 105\,680 bytes u
 the packaging smoke games. The lowest clock reached at the real clock was 3.6~s, in a 242-ply
 fifty-move draw; the time constants are unchanged until the first validation log arrives.
 
+\section*{Addendum: build v1.0, the compiled engine}
+\addcontentsline{toc}{section}{Addendum: build v1.0, the compiled engine}
+Stage 1 was built and shipped. The board, move generation, evaluation and search were rewritten onto a
+0x88 mailbox representation with integer-coded moves and compiled by numba at import; the algorithms are
+those of Section~\ref{sec:search} and Section~\ref{sec:eval}, unchanged in substance. python-chess remains
+in \code{agent.py} as the legality oracle and the fallback, so the safety argument of
+Section~\ref{sec:safety} is untouched: the compiled search proposes, and a python-chess legality check
+disposes.
+
+\paragraph{What stayed in Python, and why.} The iterative-deepening root, the aspiration window and the
+root move loop are Python; only \code{negamax} crosses into compiled code, once per root move per
+iteration. The boundary costs 4.0~µs per crossing, which is negligible at a handful of crossings per move
+and ruinous at millions --- and compiling the root as well was measured at 34.2~s of extra start-up for no
+gain \src{RESULTS.md, ``Stage 1 phase 2'' tables}. Two constants changed as a direct consequence of
+compilation: a clock read from inside jitted code costs 301~ns through \code{numba.objmode} rather than
+about 60~ns, so \code{NODE\_CHECK\_INTERVAL} is 512 in the compiled search where it is 128 in the Python
+one --- the same wall-clock granularity at thirteen times the node rate.
+
+\paragraph{The oracle.} The Python evaluation is the specification and the compiled one is a port of it,
+so \code{tests/test\_fasteval.py} requires the two to agree \emph{integer for integer} --- there is no
+rounding to excuse a difference, and one centipawn of drift would change which move the search picks. The
+gate compares 2\,000 positions drawn from playouts of the 219 curated opening positions by default, and
+20\,000 when \code{LETAL\_FULL\_GATES=1}, which is what is run before anything is promoted; it also
+compares all 219 openings exactly, a hand-built position for each evaluation term, and every position
+against its colour-swapped mirror, where an indexing error in the Black tables would show up.
+
+\begin{table}[H]\centering\small
+\begin{tabular}{llrlrl}
+\toprule
+match & clock & games & $+W\ =D\ -L$ & score & Elo (95\%) \\
+\midrule
+v1.0 vs v0.2 & 10 s + 0.1 s (8 workers) & 300 & +279 =19 $-$2 & 96.2\% $\pm$ 1.6\% & +560 (+495 to +660) \\
+v1.0 vs Stockfish 1800 & 120 s + 0.5 s & 16 & +13 =1 $-$2 & 84.4\% $\pm$ 17.3\% & --- \\
+v1.0 vs Stockfish 2000 & 120 s + 0.5 s & 16 & +11 =2 $-$3 & 75.0\% $\pm$ 20.0\% & +191 (+35 to +512) \\
+v1.0 vs Stockfish 2200 & 120 s + 0.5 s & 16 & +10 =1 $-$5 & 65.6\% $\pm$ 23.2\% & +112 ($-$53 to +360) \\
+v1.0 vs Stockfish 2400 & 120 s + 0.5 s & 16 & +8 =2 $-$6 & 56.2\% $\pm$ 23.5\% & +44 ($-$125 to +238) \\
+v1.0 vs random & 3 s + 0.05 s (8 workers) & 200 & +200 =0 $-$0 & 100\% & --- \\
+\bottomrule
+\end{tabular}
+\caption{v1.0 against the frozen v0.2, against rating-limited Stockfish at the full time control, and
+against the random baseline \src{RESULTS.md, rows \code{numba-vs-v0.2-10s}, \code{v1.0-vs-sf*-real},
+\code{numba-fuzz-random}}. The promotion interval against v0.2 lies far above zero. The Stockfish rows are
+16 games each and their intervals are correspondingly wide: they bracket the build, they do not rate it.}
+\end{table}
+
+\paragraph{Validation on the competition platform.} v1.0 was uploaded and validated: verdict \emph{valid},
+two smoke games of 20 plies, one per colour. It reached \textbf{depth 10--12} at 290--569 thousand nodes
+per second on the competition core, against the interpreted v0.2.1's depth 5--8 at 21.6--27.3 thousand
+\src{CALIBRATION.md, 2026-09-08, v1.0 validation}. That is the only platform run of the compiled build to
+date; every other platform figure in this report is the interpreted engine and is labelled as such.
+
+\paragraph{The start-up risk, stated plainly.} numba compilation is paid once, at import, inside the 90~s
+budget and before the clock starts. In those two smoke games it took 34.8~s and 49.4~s, for total start-up
+times of 35.8~s and 50.7~s. Both completed every warm-up phase, so the degraded path --- in which the
+warm-up runs out of its 70~s budget and the remaining compilation is finished on the first move --- has
+never yet run outside a test. The mean is comfortable; \textbf{the variance is the risk}. Identical code on
+identical hardware started up fifteen seconds apart, and a run slower than the worse of the two begins
+skipping phases. Two samples is not a distribution, so the \code{init} line of every rated log is watched
+as a further sample. This is the largest open risk in the build and it is why the warm-up deadline exists.
+
 \appendix
 \section{Provenance of every constant}\label{app:provenance}
-Copied from two files: \code{docs/PROVENANCE.md}, which lists the search and timing constants that
-live in code, and \code{weights/PROVENANCE.json}, which lists the tables and ships in the zip. The generator commit is \code{4109710}
-(full hash in the JSON); the tables' SHA-256 is recorded in \code{weights/pst.json} under
-\code{\_provenance.tables\_sha256}.
+Copied from two files: \code{docs/PROVENANCE.md}, the human-readable record, and
+\code{weights/PROVENANCE.json}, the machine-readable one, which is the copy that \textbf{ships in
+the zip}. The brief requires both to cover every parameter -- piece values, piece-square tables,
+evaluation weights, the search margins (null-move, the LMR settings, futility, aspiration, delta),
+the time-management constants and the transposition-table size. The shipped JSON carries 44 such
+rows; \code{docs/} never ships, so it is the JSON that answers the question a judge is most likely
+to ask about a constant, and it is complete rather than restricted to the tables. The generator
+commit is \code{4109710} (full hash in the JSON).
+
+\textbf{What identifies these tables is the content hash, not the commit stamp.}
+\code{weights/pst.json} records \code{\_provenance.tables\_sha256} over the tables themselves, and
+that is the figure to check: it changes if and only if a number changes. The
+\code{git\_commit} beside it records which \emph{run} of the generator last wrote the file, which is
+a weaker thing --- re-running \code{gen\_pst.py} after an unrelated change re-stamps it with
+whatever \code{HEAD} then is, on tables that did not move. The two are easy to confuse and only one
+of them is evidence. Anyone verifying this should re-run the generator and compare the tables, not
+the file: the tables reproduce bit for bit, and we have checked that they do at the commit named
+above.
 
 {\footnotesize
 \begin{longtable}{@{}>{\raggedright\arraybackslash}p{3.4cm}>{\raggedright\arraybackslash}p{2.9cm}>{\raggedright\arraybackslash}p{2.6cm}>{\raggedright\arraybackslash}p{1.3cm}>{\raggedright\arraybackslash}p{1.8cm}>{\raggedright\arraybackslash}p{2.3cm}@{}}
@@ -719,7 +1039,7 @@ check extension & +1 ply when in check & code & none & 2026-09-06 & textbook; ap
 \code{DRAW\_TIEBREAK\_MARGIN} & 300 & code & none & 2026-09-07 & ``clearly ahead'' = at least a minor piece \\
 history heuristic bonus & $\mathrm{depth}^2$ & code & none & 2026-09-06 & textbook \\
 \code{GAME\_PLY\_CAP} & 600 & code & none & 2026-09-06 & the referee's cap \\
-time constants & Section~\ref{sec:time} table & code & none & 2026-09-06 & brief \S 6.2 initial values; calibration \pending{first validation log} \\
+time constants & Section~\ref{sec:time} table & code & platform rated logs and the v1.0 validation, 2026-09-08 & 2026-09-08 & brief \S 6.2 gave the initial values; calibrated against the platform's own per-move timing on 2026-09-08 \src{CALIBRATION.md} \\
 \end{longtable}
 }
 

@@ -1,6 +1,6 @@
 # Plan for the remaining time
 
-Written Monday 8 September. Uploads close Thursday 11 September, 11:00 London. Four working
+Written Tuesday 8 September. Uploads close Friday 11 September, 11:00 London. Four working
 sessions left, so everything here is ordered by strength gained per hour of risk.
 
 ## Where the engine stands
@@ -76,7 +76,7 @@ it is better. A hand-crafted evaluation that can be explained beats a rushed net
 | Monday night to Tuesday | The numba engine: board, move generation, perft gates. |
 | Tuesday | Compiled search and evaluation, warm-up, timing, arena runs. |
 | Wednesday | Whichever engine won: tablebases, then proper tuning. Feature freeze at 22:00 London. |
-| Thursday before 08:00 | Final measurement pass alone on the machine, final upload, report. |
+| Friday before 08:00 | Final measurement pass alone on the machine, final upload, report. |
 
 The previous build stays valid on the platform throughout, so a failed experiment never costs a
 game. Nothing gets promoted without games behind it.
