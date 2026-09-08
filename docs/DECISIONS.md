@@ -841,3 +841,46 @@ The consequence for the term above: keep it and screen it **on general merit** -
 something engines have and ours did not -- but it must not be claimed to address round 70. It
 declines the losing castle at move 8 and nothing more, which is exactly what Yan's result predicts.
 And if the screen comes back inside the noise, the next step is not a fifth exposure variant.
+
+## 2026-09-08 — Pre-registered: what the bundle match result will mean
+
+Written at 21:2x, while the match is running and **before any result exists**. That timing is the
+whole value of this entry: a promotion rule decided after seeing the number is not a rule, it is a
+rationalisation, and the deviation below would be indefensible if it were invented to fit an
+awkward result. The operator delegated the decision ("do the best idk"); it is recorded here in his
+name and with the reasoning exposed, so a judge can disagree with the judgement rather than wonder
+whether one was made.
+
+The match: `v1.1-bundle-vs-v1.0-real`, 300 games in three chunks of 100, real clock, against
+`versions/v1.0`. It measures **two** changes together — the timing refit (`82b20e2`) and the
+king-danger term (`897e1e2`) — which is the right thing for the shipping question ("is what we
+would upload better than what is uploaded") and cannot attribute the result to either half.
+
+**The rule, fixed in advance:**
+
+1. **Interval above zero** → promote. This is CLAUDE.md's rule, unchanged, and needs no argument.
+2. **Point estimate negative, or lower bound at or below −40 Elo** → revert both changes; v1.0
+   ships. −40 is the largest regression we are willing to fail to detect, not a number chosen to
+   let something through.
+3. **Interval straddles zero, point estimate at or above zero, lower bound above −40, *and* the
+   lowest-clock figure improves against v1.0 with no loss on time** → promote, and record in
+   `RESULTS.md` and the report that it shipped on the **safety** criterion, not the Elo rule.
+
+**Why case 3 is a deviation worth making.** The strict rule assumes the change is trying to buy
+Elo. The timing refit is not: it exists because two of our seven rated games finished on 4.7 s and
+6.0 s, and a flag loses the game outright. A 300-game match measures that badly, because most games
+never reach the tail where the constant bites — the effect is concentrated in the minority of long
+games and diluted across the rest. Refusing to ship a measured risk reduction because a
+badly-matched instrument returned "not proven" would be following the rule's words against its
+purpose. `low_clock_ms` is recorded by the arena already, so case 3 is decided on a measurement
+rather than on the argument above.
+
+**What case 3 does not license.** Not a positive point estimate alone; not "the simulation says so";
+not king safety, which has no independent safety argument and rides along on the bundle. If the
+bundle ships under case 3, the king-danger term ships unproven and the record must say so.
+
+**Attribution, either way.** The confounding is accepted for the upload decision, not for the
+record. Once the calendar correction is accounted for there are roughly nine six-hour slots left
+before the Friday 11:00 cutoff, so a timing-alone match against `versions/v1.0` runs afterwards for
+the report regardless of what is uploaded. Shipping fast and knowing why are not in competition
+here; there is room for both.
