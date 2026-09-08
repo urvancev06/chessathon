@@ -1265,9 +1265,21 @@ position most likely to attract a fifth theory.
 
 **What was proposed, and what happened to each.**
 
-1. **Time management** (`chessathon-bb`). Every blunder landed under 15 s — 14.8 s at move 60,
-   8.0 s at 65, 9.0 s at the mate, 7.6 s lowest. True, and downstream: it never asked why the clock
-   was gone at move 60 of a 68-move game. A symptom presented as a cause.
+1. **Time management** (`chessathon-bb`). Stated as "every blunder landed under 15 s — 14.8 s at
+   move 60, 8.0 s at 65, 9.0 s at the mate". **Those numbers were wrong, and the claim is retracted
+   entirely.** The clock list was indexed by *our move ordinal* and the Stockfish blunder list by
+   *fullmove number*; they were matched as though they were the same index. Re-extracted with the
+   clock, the legal-move count and the move on one row, the three flagged blunders were played at
+   **26.7 s, 20.8 s and 14.8 s** — not time pressure at any per-move budget. The single-digit clocks
+   belong to moves 68–70, which had **two legal moves each**, and move 75 was **forced**: one legal
+   move, in check. Verified against the platform log (`handoff/LOG-round-73-*.md`, committed at
+   `c5fbe5e` after an evening of arguing about the game without it) which shows the last search
+   returning `t 1 h 0 d 0/0 n 0` — a forced move played instantly, which is correct.
+
+   So there is no "endgame collapse under time pressure" to explain. The moves that lost the game
+   had 18–28 legal alternatives and comfortable clocks; the moves played on a low clock had no
+   alternatives. Both halves of the original claim fail, and the second one fails on data that was
+   available all evening.
 2. **King safety** (`chessathon-bb`). Refuted by measurement: the king-danger term scores `Ka1` and
    the saving `Qxf4+` at **50 apiece**, so it returns the same number for the losing move and the
    move that holds, and cannot change the choice. Consistent with Yan's PR #4, where four variants
