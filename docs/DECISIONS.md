@@ -382,3 +382,107 @@ and more balanced position set (a higher node limit, discard labels beyond ±600
 value per piece shared by both phases; fewer table parameters (mirror-symmetric files); and
 re-tuning the search margins together with the tables. Each would be a new experiment measured
 the same way.
+
+## 2026-09-08 — v0.3: three exact speedups (incremental evaluation, bitboard capture generator, cheap "is there a legal move")
+
+**Question.** How much of a node is work whose answer the search already has? Three candidates,
+all required to be *exact* — the search tree has to come out identical, so the only thing measured
+is speed. Measured cost per node in a 3 s middlegame search before the change (wrapper timings and
+`timeit` on the busy middlegame position, ~19 µs per node):
+
+1. `evaluate()` (4.9 µs, ~0.5 misses per node) walks all 32 pieces to re-sum the
+   material-plus-square tables at a position one move away from its parent.
+2. `_capture_moves` (10.7 µs, ~0.5 calls per node) asked python-chess for three masked legal-move
+   lists and then re-derived the attacker and the victim of every move with `piece_type_at` to
+   build the MVV-LVA key.
+3. Quiescence asked `any(board.generate_legal_moves())` (2.4 µs) at about a third of all nodes,
+   only ever to tell a stand-pat cutoff from a checkmate or a stalemate — and the answer is almost
+   always yes.
+
+`chess.Board.push`/`pop` cost 2.3 µs of the same node, but replacing them was **not** attempted:
+the components measure `_BoardState` 0.22 µs, `restore` 0.17 µs, `_from_chess960` 0.17 µs,
+`is_zeroing` 0.14 µs, so a lean make/unmake that still maintains everything python-chess's
+generators read (twelve bitboards, castling rights, en passant, both clocks, the state stack)
+could save at most about 1 µs per node, for by far the largest correctness risk of the four. It
+stays on the Stage 1 list, where the board stops being a `chess.Board` at all.
+
+**What changed.** No search heuristic, no constant and no evaluation weight moved; `PROVENANCE.md`
+is unchanged because v0.3 introduces no number that needed choosing.
+
+- **`mikhail_letal/searchboard.py` (new).** `SearchBoard` owns the `chess.Board` the search moves
+  on and keeps three integers beside it: `mg`, `eg` (the material-plus-square sums for both
+  phases, from White's view) and `phase` (the raw phase weight). `push` folds the move into them,
+  `pop` restores what it saved. python-chess still makes and unmakes every move and still
+  generates and rules on every one. The special cases are handled explicitly — an ordinary
+  capture, en passant (the victim is not on the target square), a promotion (the promoted piece
+  replaces the pawn in both sums and *adds* to the phase), castling (the rook moves too) — and a
+  null move changes nothing. Chess960 is refused rather than mis-evaluated, because the castling
+  update assumes the standard king-two-files move.
+- **`evaluation.py` split in two.** `material_pst(board)` is the from-scratch per-piece sum;
+  `evaluate_running(board, mg, eg, phase)` is everything else (insufficient material, structural
+  terms, phase blend, mop-up). `evaluate()` is now `evaluate_running(board, *material_pst(board))`
+  and `SearchBoard.evaluate()` is `evaluate_running` on the running totals, so the two answers run
+  the same arithmetic on the same inputs and cannot drift. 4.9 → 1.0 µs. The evaluation cache
+  stays: it still saves the structural terms, and a hit (0.13 µs) is cheaper than the blend.
+- **`_capture_moves` rewritten as a bitboard generator.** With no check on the board it walks the
+  pieces itself in python-chess's own generation order, and the branch that identifies the moving
+  piece yields both its attack set and its rank in the ordering key, so the MVV-LVA key is built
+  during generation and no move needs a `piece_type_at` afterwards. Legality is `Board._is_safe`'s
+  rule rearranged, not a new one: the king may not step onto a square the enemy attacks, and a
+  piece shielding the king from a slider may only move along `BB_RAYS[king][from]` — one mask per
+  piece instead of one test per move. In check the previous implementation, kept verbatim as
+  `_capture_moves_in_check`, answers instead. 10.7 → 4.6 µs.
+- **`Engine._has_legal_move`.** With no check on the board, any pseudo-legal move of a piece that
+  is not shielding its king is legal, so one pawn that can step forward or one piece with a square
+  to go to settles it; when that finds nothing (in check, or everything pinned or blocked)
+  python-chess's generator answers, so the result is always exact. 2.4 → 0.5 µs in the common case.
+
+This is the first place the engine reads python-chess's private API (`_slider_blockers`, and the
+`_is_safe` rule reimplemented rather than called) beyond the `_transposition_key()` it already
+used. The 2026-09-07 review had rejected exactly that for a 5 % gain; at 40 % it is worth the
+coupling, and `agent.py`'s `except Exception` fallback means a future python-chess that moved them
+would cost moves, not games. The version is pinned by the platform (python-chess 1.11).
+
+**Exactness, checked before any game was played.**
+
+- **Identical trees.** 30 openings (every 7th line of `data/openings.txt`, the set v0.2 was checked
+  with) searched at `node_limit=60000` against `versions/v0.2` run as a separate module: move,
+  score, depth, seldepth and node count identical on all 30, **1 800 960 nodes both sides**.
+- **Incremental totals.** From 224 starting positions (all 219 openings, the start position and
+  four built for promotions, castling and en passant), 40-ply random walks with the running totals
+  asserted equal to `material_pst` — and `SearchBoard.evaluate()` equal to `evaluate()` — after
+  every move and after every unmake, null moves included: 43 207 checkpoints, 0 mismatches, with
+  1 992 captures, 431 promotions, 66 castlings and 1 867 null moves along the way. A dedicated
+  sweep adds all 28 en passant captures (both colours, every file pair), 40 promotions of every
+  piece plain and capturing, and all four castlings. Pinned as `tests/test_searchboard.py`.
+- **Capture generator.** 31 766 lists compared move-for-move against the implementation it
+  replaces, 0 differ, including 414 in-check positions, 937 with an en passant square and 1 455
+  with a pinned piece. The tie argument (two MVV-LVA keys can only be equal when the attackers are
+  the same piece type, so a stable sort leaves ties where the old generation order left them) is in
+  the docstring.
+- **Has-a-legal-move.** 18 356 positions compared with `any(board.generate_legal_moves())`
+  including exhaustive sweeps from stalemate and checkmate roots, 0 disagreements, 39 of them with
+  no legal move.
+
+**Speed** (`bench2.py`: nps from a 400 000-node search, best of 3, both versions back to back on an
+idle machine; depth from a 3 s search):
+
+| position | v0.2 nps | v0.3 nps | ratio | nodes in 3 s | depth in 3 s |
+|---|---|---|---|---|---|
+| start | 52 405 | 77 284 | **1.48×** | 165 376 → 234 624 | 9 → 9 (seldepth 21) |
+| busy middlegame | 49 913 | 70 833 | **1.42×** | 155 648 → 219 008 | 6 → 6 (seldepth 26) |
+| rook endgame | 72 054 | 84 869 | **1.18×** | 218 496 → 253 952 | 12 → 12 (seldepth 20) |
+
+The endgame gains least, as expected: few captures for the new generator to speed up and few
+pieces for the incremental sums to save. The same-work check across the 30-position exactness set
+is 34.5 s → 25.3 s for the identical 1 800 960 nodes (**1.37×**). Three seconds is not enough for
+another whole ply anywhere, which is what the games are for.
+
+**Arena** (`RESULTS.md`, `data/openings.txt`). Note that an earlier, unrelated and rejected v0.3
+candidate (the Texel weight fit above) also has a row labelled `v0.3-vs-v0.2-10s`; this one is the
+later of the two, the one that scores above 50 %.
+
+- 10 s + 0.1 s, 300 games, 12 workers: **+159 =65 −76, 63.8 % ± 4.8 %, Elo +99 (+64 to +136)**.
+- REAL_CLOCK_ROW
+
+**Decision.** DECISION_LINE

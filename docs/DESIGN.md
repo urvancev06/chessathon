@@ -15,6 +15,7 @@ The engine is called **Mikhail LeTal** (a pun on Mikhail Tal). Its Python packag
 agent.py                 SHIPS   entrypoint: safety wrapper + driver (imports mikhail_letal only)
 mikhail_letal/__init__.py         SHIPS   package marker, version string, `feature_flag` (env-overridable switches)
 mikhail_letal/evaluation.py       SHIPS   tapered material + PST evaluation, structural terms (v0.2), mop-up term
+mikhail_letal/searchboard.py      SHIPS   the board the search moves on: chess.Board + running evaluation totals (v0.3)
 mikhail_letal/search.py           SHIPS   iterative deepening alpha-beta searcher (v0.2: NMP, LMR, aspiration, futility, delta)
 mikhail_letal/timing.py           SHIPS   time budget formula (all constants in one dataclass)
 mikhail_letal/gamestate.py        SHIPS   per-game position history (repetition tracking, desync reset)
@@ -59,6 +60,8 @@ PHASE_TOTAL: int                      # 24 when all non-pawn pieces are on the b
 
 def load_tables(path: Path | None = None) -> Tables   # reads weights/pst.json; called once at import
 def game_phase(board: chess.Board) -> int             # 0 (bare endgame) .. PHASE_TOTAL (full board)
+def material_pst(board) -> tuple[int, int, int]       # (mg, eg, raw phase) from scratch, White's view
+def evaluate_running(board, mg, eg, phase) -> int     # everything that is not the per-piece sum
 def evaluate(board: chess.Board) -> int               # static evaluation, side-to-move perspective
 def is_mate_score(score: int) -> bool
 def pawn_structure(white_pawns: int, black_pawns: int) -> tuple[int, int]  # (mg, eg), White's view
@@ -239,28 +242,47 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   reduced.
 - Staged move generation (`_staged_moves`, exact: the order equals the sorted full list, verified
   move-for-move on 30 openings at a fixed node limit): (1) the table move, without generating
-  anything; (2) captures and promotions from `_capture_moves`, three bitboard-masked generator
-  calls (moves onto enemy pieces, pushes by pawns on the promotion rank, en passant), sorted by
-  MVV-LVA (victim rank × 10 − attacker rank, a promotion counting the promoted piece as victim);
+  anything; (2) captures and promotions from `_capture_moves`, sorted by MVV-LVA (victim rank × 10
+  − attacker rank, a promotion counting the promoted piece as victim);
   (3) the two killers of this ply if `board.is_legal` says they are legal quiet moves here;
   (4) quiet moves from two masked calls (non-pawns to non-enemy squares, castling included;
   non-promoting pawns to empty non-en-passant squares) sorted by the history heuristic
   `history[colour][from << 6 | to]` (bonus `depth * depth` on beta cutoffs). Each stage is
   generated only if the search asks for more moves, and every move is tagged with its stage so
   the cutoff code knows quiet moves without `is_capture`. The root still sorts its full list.
+- Capture generation (`_capture_moves`, v0.3, exact): with no check on the board it walks the
+  bitboards itself in python-chess's own generation order — non-pawn pieces from the high square
+  down and each piece's targets from the high square down, then pawn captures, then promotion
+  pushes by pawns on the promotion rank, then en passant (python-chess's `generate_legal_ep`, which
+  is full of corner cases). The branch that says which piece stands on the from-square yields both
+  its attack set (from `BB_KNIGHT_ATTACKS` / `BB_KING_ATTACKS` / the occupancy-indexed slider
+  tables) and its rank in the MVV-LVA key, so the key is built during generation and no move needs
+  a `piece_type_at` afterwards. Legality is `Board._is_safe`'s rule, not a new one: the king may
+  not step onto a square the enemy attacks, and a piece shielding the king from a slider may only
+  move along `BB_RAYS[king][from]` — the same test as `ray(from, to) & king`, applied once per
+  piece as a mask instead of once per move. In check the evasion rules apply instead and the
+  previous implementation, kept verbatim as `_capture_moves_in_check`, answers. Ties in the key
+  keep the generator's order under a stable sort, so the move list is identical to v0.2's.
+  Measured 10.7 → 4.6 µs per call in a busy middlegame.
 - Quiescence: stand pat with `evaluate`, tested against beta *before* any move generation (a
   stand-pat cutoff ends most quiescence nodes; a position with no legal move is still scored as
   mate or stalemate, never evaluated); then captures via `board.generate_legal_captures()` plus
-  queen promotions, MVV-LVA ordered. In check, every evasion is searched for the first
+  queen promotions, MVV-LVA ordered (`_capture_moves`). In check, every evasion is searched for the first
   `QS_EVASION_PLIES = 4` quiescence plies; deeper checks are handled like any other node so dense
-  positions cannot explode. Delta pruning (`DELTA_PRUNING`): where the side could stand pat (not
+  positions cannot explode. "Is the position over?" is asked through `_has_legal_move` (v0.3,
+  exact): with no check on the board, any pseudo-legal move of a piece that is not shielding its
+  king is legal, so one pawn that can step forward or one piece with a square to go to answers it;
+  when that finds nothing, python-chess's generator does (2.4 → 0.5 µs in the common case). Delta
+  pruning (`DELTA_PRUNING`): where the side could stand pat (not
   in check, alpha not a mate score), a capture is skipped if `stand_pat + gain + DELTA_MARGIN
   (200) < alpha`, with `gain` the middlegame value of the captured piece (a pawn for en passant)
   plus queen − pawn for a promotion. `seldepth` tracked; quiescence depth capped at `MAX_PLY`.
 - Evaluation cache (`Engine._evaluate`): stand-pat, futility and null-move static evaluations go
   through a dict keyed on `(pawns, knights, bishops, rooks, queens, kings, white occupancy,
   turn)`, which is exactly what `evaluate` depends on. Cap `EVAL_CACHE_MAX_ENTRIES = 100 000`,
-  emptied when full and by `new_game`. About a third of the evaluations of a search hit it.
+  emptied when full and by `new_game`. About half the evaluations of a search hit it. Since v0.3 a
+  miss costs only the structural terms and the phase blend, because the per-piece sums come from
+  the `SearchBoard`'s running totals; the cache still pays for itself on the rest.
 - Transposition table: `dict[Key, TTEntry]` where `TTEntry = (depth, score, flag, move_code)`,
   every field an int (`move_code = from | to << 6 | promotion << 12`, `-1` for none; the
   `chess.Move` is rebuilt at the probe), and `flag ∈ {EXACT, LOWER, UPPER}`. Int-only entries keep
@@ -286,6 +308,38 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   check; the mate tests (mate in one, mate in two at the same depths) run with every feature on.
 - The searcher never calls `evaluate` on a position with no legal moves; mates and stalemates are
   scored explicitly.
+
+## `mikhail_letal/searchboard.py`
+
+```python
+class SearchBoard:
+    board: chess.Board                    # the position; python-chess still owns the rules
+    mg: int; eg: int; phase: int          # running totals, White's view; phase is not clamped
+    def __init__(self, board: chess.Board) -> None: ...   # ValueError on a Chess960 board
+    def evaluate(self) -> int: ...        # == evaluation.evaluate(self.board), no per-piece loop
+    def push(self, move: chess.Move) -> None: ...
+    def pop(self) -> None: ...
+    def push_null(self) -> None: ...      # the totals do not change
+    def pop_null(self) -> None: ...
+```
+
+The board the search makes its moves on (v0.3). It owns a `chess.Board` and does nothing to it
+python-chess would not do — `push`/`pop` are python-chess's own, and move generation and legality
+still come from python-chess — but it keeps three integers beside it: `mg` and `eg`, the
+middlegame and endgame sums of the combined material-plus-square tables over every piece from
+White's view, and `phase`, the raw phase weight. A move touches at most three squares, so folding
+it into the totals is a handful of table lookups where a recompute walks all 32 pieces.
+
+`evaluate()` is then `evaluation.evaluate_running` on those totals, and `evaluation.evaluate` is
+the same function on `evaluation.material_pst(board)`: one arithmetic path, so the incremental and
+the from-scratch answers cannot differ by construction. The cases the update handles explicitly
+are a capture (the victim leaves both sums and the phase), en passant (the victim is not on the
+target square), a promotion (the promoted piece replaces the pawn in both sums and adds to the
+phase) and castling (the rook moves too). Unmake restores the numbers saved when the move was
+made, so nothing can drift. Chess960 is refused because the castling update assumes the standard
+king-two-files move. `tests/test_searchboard.py` asserts the totals equal `material_pst` after
+every make and every unmake along 40-ply random walks from all 219 openings plus constructed
+promotion, castling and en passant positions.
 
 ## `mikhail_letal/timing.py`
 
