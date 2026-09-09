@@ -25,8 +25,37 @@ def see_of(fen: str, uci: str) -> int:
     return see(pos, fb.move_from_chess(pos, chess.Move.from_uci(uci)))
 
 
-def test_a_quiet_move_is_worth_nothing() -> None:
+def test_a_quiet_move_to_a_safe_square_is_worth_nothing() -> None:
+    """No victim and no attacker: the exchange is empty."""
     assert see_of("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1", "e2e4") == 0
+
+
+def test_a_quiet_move_onto_a_defended_square_loses_the_piece() -> None:
+    """The case the first contract got wrong, and the reason it was amended.
+
+    `see` originally returned 0 for every quiet move, which makes any `see(...) < 0` filter over
+    quiet moves a silent no-op -- and most checking moves are quiet, so the filter the quiescence
+    session needed would have dropped nothing at all. A knight stepping onto a square a pawn
+    attacks loses the knight for the pawn: 0 - 320, recovered as -320.
+    """
+    assert see_of("4k3/8/8/8/3p4/8/8/1N2K3 w - - 0 1", "b1c3") == -KNIGHT
+
+
+def test_a_quiet_move_defended_as_many_times_as_it_is_attacked_is_even() -> None:
+    """d4-d5 is attacked once by the c6 pawn and defended once by the e4 pawn, so Pxd5 Pxd5 comes
+    out level rather than losing a pawn.
+
+    **This test cannot fail against the unfixed code**, because a quiet move that resolves to 0 is
+    indistinguishable from a quiet move that returned 0 without looking. It is kept as a
+    correctness check on the swap-off, not as a guard on the extension -- the knight test above is
+    the one that discriminates. Labelled rather than deleted, so nobody later mistakes it for
+    protection it does not give.
+
+    The first version of this test used e2-e4 with a black pawn on d6, which attacks e5 and not
+    e4: it asserted 0 against a square nothing attacked, and would have passed whatever the
+    exchange logic did.
+    """
+    assert see_of("4k3/8/2p5/8/3PP3/8/8/4K3 w - - 0 1", "d4d5") == 0
 
 
 def test_an_undefended_pawn_is_won_outright() -> None:
