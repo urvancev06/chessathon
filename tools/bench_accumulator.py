@@ -2,11 +2,17 @@
 
 One question, two budgets, and a net is dead if it fails either.
 
-**Node rate.** The accumulator has to be updated on every make and unmake, not on every evaluation
--- the search skips evaluation at many nodes (there is an eval cache) but it can never skip keeping
-the accumulator in step with the board. So the incremental cost is paid *more often* than the
-current evaluation is. A node costs about 1.27 us measured (tools/bench_mobility.py, depth 7) and
-the whole hand-crafted evaluation costs about 204 ns (docs/PROVENANCE.md).
+**Node rate.** The accumulator is updated more often than the evaluation runs, so the two rates
+have to be measured rather than assumed. Instrumenting the engine over 318 360 nodes at depth 7
+from the curated openings gives **1.33 `make_move` calls and 0.60 `evaluate` calls per node** --
+the search tests legality by making and unmaking, and skips evaluation wherever the eval cache
+answers. A node costs about 1270 ns (`tools/bench_mobility.py`) and the hand-crafted evaluation
+about 204 ns (`docs/PROVENANCE.md`), so what the net would replace costs 204 x 0.60 = 123 ns/node.
+
+Those rates are an upper bound on what an accumulator must track. Legality testing makes and
+immediately unmakes with no evaluation in between, so an accumulator kept in the *search* rather
+than in `make_move` never has to see those at all -- which is both cheaper and far less invasive
+than threading it through `fastboard`.
 
 **Import budget.** Every jitted function must be compiled at import, inside a 70 s warm-up budget
 against a hard 90 s, and the import already costs 33-36 s. A forward pass and an accumulator update
@@ -34,6 +40,11 @@ from numba import njit
 FEATURES: Final = 768
 HIDDEN2: Final = 32
 QUIET_MOVE_CHANGES: Final = 2  # a piece leaves a square and arrives at another, per perspective
+
+# Measured in the engine, 318,360 nodes at depth 7 over the curated openings (see the docstring).
+MAKES_PER_NODE: Final = 1.33
+EVALS_PER_NODE: Final = 0.60
+HAND_CRAFTED_NS_PER_NODE: Final = 204 * EVALS_PER_NODE
 
 
 @njit(cache=False)
@@ -258,9 +269,9 @@ def measure(width: int, repeats: int = 200_000) -> dict[str, float]:
 
 
 def main() -> int:
-    print("A node costs about 1270 ns measured; the hand-crafted evaluation about 204 ns.")
-    print("The accumulator update is paid at EVERY make and unmake; the forward pass only")
-    print("at nodes that are actually evaluated.\n")
+    print("Measured in the engine over 318,360 nodes at depth 7: 1.33 make_move calls and")
+    print("0.60 evaluate calls per node. A node costs about 1270 ns and the hand-crafted")
+    print("evaluation 204 ns, so what a net would replace costs 204 x 0.60 = 123 ns/node.\n")
     print(
         f"  {'width':>6}{'compile s':>11}{'update ns':>11}{'refresh ns':>12}"
         f"{'deep head ns':>14}{'linear head ns':>16}"
@@ -274,16 +285,18 @@ def main() -> int:
             f"{r['refresh_ns']:>12.0f}{r['forward_ns']:>14.0f}{r['linear_ns']:>16.0f}"
         )
 
-    print("\nPer node, against a 1270 ns node, assuming half of nodes are evaluated.")
-    print("The hand-crafted evaluation this would replace costs 204 ns at those same nodes,")
-    print("so its per-node cost is about 102 ns.\n")
+    print("\nPer node at the measured rates, against the 123 ns/node the hand-crafted")
+    print("evaluation costs. A model, not an end-to-end measurement: it does not see the")
+    print("cache pressure of a weight table competing with the transposition table, which")
+    print("only a paired A/B on the integrated engine can show.\n")
     for width, r in results.items():
         for head, key in (("deep 2W-32-32-1", "forward_ns"), ("linear 2W-1", "linear_ns")):
-            added = r["update_ns"] + 0.5 * r[key]
+            added = r["update_ns"] * MAKES_PER_NODE + r[key] * EVALS_PER_NODE
+            delta = added - HAND_CRAFTED_NS_PER_NODE
             print(
                 f"  width {width:>3}, {head:<16} {added:>7.0f} ns/node "
-                f"({added - 102:+.0f} against the hand-crafted evaluation), "
-                f"node rate {1270 / (1270 + added - 102) * 100:>3.0f}%"
+                f"({delta:+.0f} against the hand-crafted evaluation), "
+                f"node rate {1270 / (1270 + delta) * 100:>3.0f}%"
             )
     print("\nCompile time is added to an import already costing 33-36 s against a 70 s budget.")
     return 0
