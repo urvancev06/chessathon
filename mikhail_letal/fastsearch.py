@@ -989,6 +989,24 @@ def quiescence(
                 gain += promotion_gain
             if gain < delta_floor:
                 continue
+        # Skip captures the swap-off says lose material. Until now the delta margin was the only
+        # thing pruning here, so a queen taking a defended pawn was searched to the end of its own
+        # recapture chain -- and there are 700 000 to 1 350 000 captures entering quiescence per
+        # search in closed positions.
+        #
+        # Never while `evasions`: in check every legal move is generated here and one of them may
+        # be the only escape, so a losing capture is still a move that has to be searched. Dropping
+        # it would not cost material, it would miss a mate. And, as in ordering, SEE is consulted
+        # only where MVV-LVA cannot already answer, and promotions are left alone.
+        if not evasions and ((move >> PROMO_SHIFT) & PROMO_MASK) == 0:
+            victim_kind = _victim(pos, move)
+            attacker_kind = pos.board[move & SQ_MASK] & PIECE_TYPE_MASK
+            if (
+                victim_kind != 0
+                and _SEE_VALUE[victim_kind] < _SEE_VALUE[attacker_kind]
+                and see(pos, move) < 0
+            ):
+                continue
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue

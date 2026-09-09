@@ -183,3 +183,36 @@ def test_a_winning_capture_keeps_its_place_at_the_top() -> None:
     scores = {int(state.moves[1, i]): int(state.order[1, i]) for i in range(count)}
     assert scores[winning] >= _ORDER_CAPTURE, "a winning capture was demoted"
     assert scores[winning] == max(scores.values()), "it is not searched first"
+
+
+def test_quiescence_never_skips_a_losing_capture_while_in_check() -> None:
+    """The one place the quiescence skip must not fire, and the reason it is gated on `evasions`.
+
+    White is in check from the knight on f2 and has **exactly one legal move**: `Rxf2`, which SEE
+    scores at -180 because the g3 pawn recaptures. If the skip applied while in check, quiescence
+    would discard the only legal move and return a mate score -- losing the game outright rather
+    than losing material.
+
+    `quiescence` is called **directly**, with `in_chk` set. The first version of this test drove
+    `engine.search`, which handles the root through `negamax` and so never reaches the quiescence
+    capture loop with the position in check: it passed with the `evasions` guard deleted, and was
+    caught by mutating the guard away rather than by reading it.
+    """
+    from mikhail_letal.evaluation import MATE_THRESHOLD
+    from mikhail_letal.fasteval import TABLES as EVAL_TABLES
+    from mikhail_letal.fastsearch import new_state, quiescence
+    from mikhail_letal.search import _INFINITY
+
+    fen = "7k/8/b7/8/8/6pp/5nPP/5RNK w - - 0 1"
+    board = chess.Board(fen)
+    assert board.is_check() and len(list(board.legal_moves)) == 1, "position no longer isolates it"
+    pos = fb.from_board(board)
+    assert see(pos, fb.move_from_chess(pos, chess.Move.from_uci("f1f2"))) < 0
+
+    state = new_state()
+    score = quiescence(pos, state, EVAL_TABLES, -_INFINITY, _INFINITY, 1, in_chk=1, qs_ply=0)
+
+    assert score > -MATE_THRESHOLD, (
+        f"quiescence returned {score}, a mate score, from a position with a legal escape -- "
+        "the losing capture was skipped while in check"
+    )
