@@ -1,0 +1,214 @@
+"""What one-ply continuation history costs the compiled search, in nodes per second.
+
+Why this tool is shaped differently from ``tools/bench_mobility.py``
+-------------------------------------------------------------------
+That one switches its feature with ``fasteval.TABLES.misc[E_MOBILITY_ON]``, an array entry the
+compiled code reads at run time, so both arms live in one process and every pair meets the same
+machine at the same moment. ``search.CONTINUATION_HISTORY`` is a plain module constant that numba
+folds at compile time -- which is the right thing for the engine, because the "off" arm then costs
+literally nothing -- and that makes the same trick impossible here: the two arms are different
+machine code and cannot coexist in one process.
+
+So this tool measures **one** build and prints a JSON line. The arms are paired in *time* instead:
+run it, swap ``mikhail_letal/`` to the other build, run it again, and alternate which build goes
+first. Each pair is then a minute apart rather than simultaneous, which controls slow drift but
+not an instantaneous background spike -- hence the load check below, and hence per-round ratios
+rather than one pooled number, so a spike shows up as scatter instead of as an answer.
+
+    .venv/bin/python tools/bench_conthist.py --label conthist --json bench.jsonl
+    git checkout main -- mikhail_letal/
+    .venv/bin/python tools/bench_conthist.py --label main --json bench.jsonl
+    ...
+    .venv/bin/python tools/bench_conthist.py --report bench.jsonl
+
+What the two numbers mean
+-------------------------
+**Nodes per second** is the cost being measured: the same tree walked with a little more work per
+node. **Nodes to a fixed depth** is a different question -- the ordering has changed, so the two
+builds search different trees -- and it is a search-quality diagnostic, not a speed cost and not
+an Elo claim. Only a game screen decides strength.
+
+The first round is run and thrown away. A position searched for the first time in a process costs
+far more than the same search ever costs again (the mobility session measured 9x, and reported its
+feature as four times *faster* before it noticed), and one such search left in a total is worth
+more than the whole effect being measured.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import statistics
+import sys
+import time
+from pathlib import Path
+
+import chess
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from mikhail_letal.fastboard import position_key
+from mikhail_letal.fastsearch import FastEngine
+
+ROOT = Path(__file__).resolve().parent.parent
+OPENINGS = ROOT / "data" / "openings.txt"
+
+
+def curated_positions(count: int) -> list[str]:
+    """An evenly spaced sample of the curated openings, which is where rated games start."""
+    fens = [
+        line.strip().split("\t")[-1]
+        for line in OPENINGS.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if not fens:
+        raise SystemExit(f"no openings in {OPENINGS}")
+    step = max(1, len(fens) // count)
+    return fens[::step][:count]
+
+
+def search_once(engine: FastEngine, fen: str, depth: int) -> tuple[int, float]:
+    """Nodes and seconds for one fixed-depth search.
+
+    ``new_game`` before every search: a transposition table, killer list or history table carried
+    over from the previous search would make the later one look faster, and with this feature the
+    carried-over table is the very thing under test.
+    """
+    engine.new_game()
+    board = chess.Board(fen)
+    far = time.perf_counter() + 3600.0
+    started = time.perf_counter()
+    result = engine.search(
+        board, [position_key(board)], far, far, max_depth=depth, node_limit=10**12
+    )
+    elapsed = time.perf_counter() - started
+    if result.aborted:
+        raise SystemExit(f"search aborted, which a fixed-depth run must never do: {fen}")
+    if result.depth != depth:
+        raise SystemExit(f"reached depth {result.depth}, not {depth}: {fen}")
+    return result.nodes, elapsed
+
+
+def measure(
+    label: str, depth: int, rounds: int, positions: int, verbose: bool
+) -> dict[str, object]:
+    fens = curated_positions(positions)
+    engine = FastEngine()
+
+    load = os.getloadavg()[0]
+    print(f"[{label}] depth {depth}, {len(fens)} curated positions, {rounds} measured rounds")
+    print(f"[{label}] load average at start: {load:.2f} on {os.cpu_count()} cores")
+    if load > 1.5:
+        print(f"[{label}]   WARNING: the box is busy; nodes per second is not meaningful here.")
+
+    print(f"[{label}] warm-up round (run, not counted)")
+    for fen in fens:
+        search_once(engine, fen, depth)
+
+    per_round: list[dict[str, float]] = []
+    for index in range(rounds):
+        nodes = 0
+        seconds = 0.0
+        for fen in fens:
+            got, took = search_once(engine, fen, depth)
+            nodes += got
+            seconds += took
+            if verbose:
+                print(f"[{label}]   {fen.split(' ')[0][:24]:<24} {got:>9,}n {took:7.3f}s")
+        per_round.append({"nodes": nodes, "seconds": seconds, "nps": nodes / seconds})
+        print(
+            f"[{label}] round {index + 1}: {nodes:>11,} nodes {seconds:7.2f} s "
+            f"{nodes / seconds:>10,.0f} nodes/s"
+        )
+
+    return {
+        "label": label,
+        "depth": depth,
+        "positions": len(fens),
+        "load_at_start": load,
+        "rounds": per_round,
+        # Deterministic per build, so this is the same number every run and is a search-quality
+        # diagnostic rather than a timing one.
+        "nodes_to_depth": per_round[0]["nodes"],
+    }
+
+
+def report(path: Path) -> int:
+    """Compare the runs recorded in ``path``, pairing them in the order they were taken."""
+    runs = [
+        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
+    labels = sorted({run["label"] for run in runs})
+    if len(labels) != 2:
+        raise SystemExit(f"expected exactly two labels in {path}, found {labels}")
+    feature, baseline = sorted(labels, key=lambda name: name != "conthist")
+
+    by_label = {name: [run for run in runs if run["label"] == name] for name in labels}
+    if len({len(v) for v in by_label.values()}) != 1:
+        raise SystemExit(f"unequal numbers of runs: { {k: len(v) for k, v in by_label.items()} }")
+
+    print(f"pairing {len(by_label[feature])} run(s) of each, in the order taken\n")
+    ratios: list[float] = []
+    totals = {name: [0, 0.0] for name in labels}
+    for index, (one, two) in enumerate(zip(by_label[feature], by_label[baseline], strict=True)):
+        for run, name in ((one, feature), (two, baseline)):
+            for entry in run["rounds"]:
+                totals[name][0] += int(entry["nodes"])
+                totals[name][1] += float(entry["seconds"])
+        for a, b in zip(one["rounds"], two["rounds"], strict=True):
+            ratios.append(float(a["nps"]) / float(b["nps"]))
+        print(f"  pair {index + 1}: load {one['load_at_start']:.2f} / {two['load_at_start']:.2f}")
+
+    for name in (baseline, feature):
+        nodes, seconds = totals[name]
+        print(
+            f"\n{name:>10}: {nodes:>12,} nodes {seconds:8.2f} s {nodes / seconds:>10,.0f} nodes/s"
+        )
+
+    median = statistics.median(ratios)
+    pooled = (totals[feature][0] / totals[feature][1]) / (totals[baseline][0] / totals[baseline][1])
+    print(f"\nnps ratio ({feature} / {baseline})")
+    print(
+        f"  median {median:.4f}   pooled {pooled:.4f}   min {min(ratios):.4f} max {max(ratios):.4f}"
+    )
+    print(f"  over {len(ratios)} rounds")
+    if abs(median - pooled) > 0.02:
+        print("  WARNING: median and pooled disagree by more than 2%. One round met a busy moment;")
+        print("           trust neither number and re-run on an idle box.")
+    print(f"  cost of the feature: {(1 - median) * 100:+.1f}% of the node rate")
+
+    depths = {name: by_label[name][0]["nodes_to_depth"] for name in labels}
+    print(f"\nnodes to depth {runs[0]['depth']} (deterministic, a diagnostic and not a speed cost)")
+    for name in (baseline, feature):
+        print(f"  {name:>10}: {depths[name]:>12,}")
+    print(f"  ratio ({feature} / {baseline}): {depths[feature] / depths[baseline]:.4f}")
+    print("  a different ordering searches a different tree. This is not an Elo claim; only a")
+    print("  game screen decides strength.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--label", default="conthist", help="which build this run measures")
+    parser.add_argument("--depth", type=int, default=8)
+    parser.add_argument("--rounds", type=int, default=2)
+    parser.add_argument("--positions", type=int, default=10)
+    parser.add_argument("--json", type=Path, default=None, help="append the result here")
+    parser.add_argument("--report", type=Path, default=None, help="compare a results file instead")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+
+    if args.report is not None:
+        return report(args.report)
+
+    result = measure(args.label, args.depth, args.rounds, args.positions, args.verbose)
+    if args.json is not None:
+        with args.json.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(result) + "\n")
+        print(f"[{args.label}] appended to {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
