@@ -70,6 +70,7 @@ from mikhail_letal.fastboard import (
     _KNIGHT_DIRS,
     _SLIDER_DIRS,
     _SLIDER_N,
+    BISHOP,
     BLACK,
     COLOUR_SHIFT,
     EMPTY,
@@ -95,6 +96,7 @@ from mikhail_letal.fastboard import (
     PROMO_MASK,
     PROMO_SHIFT,
     QUEEN,
+    ROOK,
     SQ_BITS,
     SQ_MASK,
     U_KEY,
@@ -542,6 +544,166 @@ def _victim(pos: Position, move: int) -> int:
         return PAWN
     kind: int = pos.board[(move >> SQ_BITS) & SQ_MASK] & PIECE_TYPE_MASK
     return kind
+
+
+# Material values for the exchange evaluator, indexed by piece type. Deliberately **not** the
+# tuned evaluation values: SEE answers "who comes out ahead in material on this square", where the
+# textbook ratios are the whole content and a positional table would make the answer depend on
+# where the pieces stand. The king is effectively infinite so that no swap-off sequence ever
+# chooses to give it up. Recorded in docs/PROVENANCE.md.
+_SEE_VALUE = np.array([0, 100, 320, 330, 500, 900, 30_000], dtype=np.int32)
+
+_SEE_MAX_SWAPS: Final = 32  # a square cannot be attacked more times than there are pieces
+
+
+@njit(cache=False)
+def _least_valuable_attacker(board: npt.NDArray[np.int32], square: int, colour: int) -> int:
+    """0x88 square of the cheapest `colour` piece attacking `square`, or -1 if there is none.
+
+    Reads the board **as it currently stands**, which is what makes the swap-off loop below able to
+    see x-rays: removing the bishop in front of a queen and calling again finds the queen, with no
+    separate occupancy word to maintain. That is why `see` mutates the mailbox and restores it,
+    rather than threading an occupancy mask the way a bitboard engine would.
+    """
+    them = colour << COLOUR_SHIFT
+
+    # Pawns first: nothing is cheaper, so the first one found is the answer. A pawn attacks
+    # diagonally forward, so it stands one rank *behind* the square from its own point of view.
+    pawn = PAWN | them
+    if colour == WHITE:
+        left, right = square - 17, square - 15
+    else:
+        left, right = square + 15, square + 17
+    if (left & OFF_BOARD_MASK) == 0 and board[left] == pawn:
+        return int(left)
+    if (right & OFF_BOARD_MASK) == 0 and board[right] == pawn:
+        return int(right)
+
+    # Knights: next cheapest, and pawns are already excluded, so again the first hit wins.
+    knight = KNIGHT | them
+    for i in range(8):
+        frm = square + _KNIGHT_DIRS[i]
+        if (frm & OFF_BOARD_MASK) == 0 and board[frm] == knight:
+            return int(frm)
+
+    # Sliders and the king. The first occupied square along a direction is the only one that can
+    # attack from it; anything behind is an x-ray, visible only once that piece is removed.
+    best_square = -1
+    best_value = 0x7FFFFFFF
+    for i in range(8):
+        direction = _KING_DIRS[i]
+        diagonal = direction != 16 and direction != -16 and direction != 1 and direction != -1
+        frm = square + direction
+        adjacent = True
+        while (frm & OFF_BOARD_MASK) == 0:
+            piece = board[frm]
+            if piece != EMPTY:
+                if (piece >> COLOUR_SHIFT) == colour:
+                    kind = piece & PIECE_TYPE_MASK
+                    hits = kind == QUEEN or kind == (BISHOP if diagonal else ROOK)
+                    if adjacent and kind == KING:
+                        hits = True
+                    if hits and _SEE_VALUE[kind] < best_value:
+                        best_value = _SEE_VALUE[kind]
+                        best_square = int(frm)
+                break
+            adjacent = False
+            frm += direction
+    return int(best_square)
+
+
+@njit(cache=False)
+def see(pos: Position, move: int) -> int:
+    """Centipawn result of the capture sequence on the destination square, from the mover's point
+    of view. Positive is a gain. A quiet move returns 0.
+
+    The standard swap-off: play the capture, then let each side recapture with its cheapest
+    attacker in turn, then fold the sequence back assuming either side stops as soon as continuing
+    would cost it. Folding is what makes the answer "what the exchange is worth if both play well"
+    rather than "what happens if everyone captures until nobody can".
+
+    Implemented on the mailbox rather than with an occupancy mask, because under numba a 64-bit
+    shift sign-extends or overflows silently -- the same reason `fasteval` uses per-file pawn
+    summaries. The board is mutated and restored exactly; nothing else may run in between.
+    """
+    board = pos.board
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    flag = (move >> FLAG_SHIFT) & 7
+    promotion = (move >> PROMO_SHIFT) & PROMO_MASK
+
+    moved = board[frm]
+    mover = moved >> COLOUR_SHIFT
+
+    # En passant takes a pawn that is not standing on the destination square.
+    taken_square = to
+    if flag == FLAG_EN_PASSANT:
+        victim = PAWN
+        taken_square = to - 16 if mover == WHITE else to + 16
+    else:
+        victim = board[to] & PIECE_TYPE_MASK
+
+    if victim == EMPTY and promotion == 0:
+        return 0  # a quiet move wins nothing and loses nothing on this square
+
+    gain = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undo_square = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undo_piece = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undone = 0
+
+    gain[0] = _SEE_VALUE[victim]
+    exposed = moved & PIECE_TYPE_MASK  # the piece now standing on `to`, and so next at risk
+    if promotion != 0:
+        # The pawn is gone and a new piece stands there: the side gains the difference, and it is
+        # the promoted piece that can be captured next.
+        gain[0] += _SEE_VALUE[promotion] - _SEE_VALUE[PAWN]
+        exposed = promotion
+
+    undo_square[undone] = frm
+    undo_piece[undone] = moved
+    undone += 1
+    board[frm] = EMPTY
+    if taken_square != to:
+        undo_square[undone] = taken_square
+        undo_piece[undone] = board[taken_square]
+        undone += 1
+        board[taken_square] = EMPTY
+    saved_to = board[to]
+    board[to] = (exposed | (mover << COLOUR_SHIFT)) if exposed != EMPTY else EMPTY
+
+    side = 1 - mover
+    depth = 0
+    while depth + 1 < _SEE_MAX_SWAPS:
+        attacker = _least_valuable_attacker(board, to, side)
+        if attacker < 0:
+            break
+        kind = board[attacker] & PIECE_TYPE_MASK
+        # A king may not capture into a square the other side still attacks, so a sequence that
+        # would require it simply stops here.
+        if kind == KING and _least_valuable_attacker(board, to, 1 - side) >= 0:
+            break
+        depth += 1
+        gain[depth] = _SEE_VALUE[exposed] - gain[depth - 1]
+        exposed = kind
+        undo_square[undone] = attacker
+        undo_piece[undone] = board[attacker]
+        undone += 1
+        board[attacker] = EMPTY
+        board[to] = kind | (side << COLOUR_SHIFT)
+        side = 1 - side
+
+    board[to] = saved_to
+    for i in range(undone - 1, -1, -1):
+        board[undo_square[i]] = undo_piece[i]
+
+    # Fold back: at each step the side to move takes the exchange only if it beats standing pat.
+    while depth > 0:
+        if -gain[depth - 1] > gain[depth]:
+            gain[depth - 1] = gain[depth - 1]
+        else:
+            gain[depth - 1] = -gain[depth]
+        depth -= 1
+    return int(gain[0])
 
 
 @njit(cache=False)
@@ -1523,6 +1685,8 @@ JITTED: Final = (
     "_has_non_pawn_material",
     "gen_captures",
     "_victim",
+    "_least_valuable_attacker",
+    "see",
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
@@ -1577,8 +1741,15 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
         _unmake_null(pos, *_make_null(pos))
         _has_non_pawn_material(pos, WHITE)
         count = int(gen_pseudo(pos, st.moves[1]))
-        gen_captures(pos, st.moves[1])
+        captures = int(gen_captures(pos, st.moves[1]))
         _victim(pos, st.moves[1, 0])
+        # `see` is compiled on a real capture from this position, not on a quiet move: the early
+        # return for a quiet move would leave the swap-off loop and the attacker scan to compile
+        # on the clock the first time the search orders a capture.
+        if captures > 0:
+            capture = int(st.moves[1, 0])
+            see(pos, capture)
+            _least_valuable_attacker(pos.board, (capture >> SQ_BITS) & SQ_MASK, WHITE)
         _score_moves(pos, st, 1, count, NO_MOVE)
         _pick_best(st, 1, 0, count)
         _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)
