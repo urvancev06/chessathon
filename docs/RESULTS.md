@@ -249,3 +249,8 @@ the same third row and ships on the same criterion either way.
 **One incidental fact worth keeping.** The chunk JSONs did not survive the reboot and the PGNs did.
 The derived artefact was the convenient form; the primary evidence was the durable one, and the
 verdict was reconstructable only because of that.
+
+| label | agent | opponent | time control | games | +W =D -L | score | 95% interval | Elo (95%) | draw rate | terminations | workers | load start / end | openings |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| fuzz-random-v1.1 | versions/v1.1 | baselines/random | 3+0.05 s | 300 | +300 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 300 | 12 | 0.48 0.38 0.23 / 11.25 11.83 8.02 | data/openings.txt |
+| fuzz-greedy-v1.1 | versions/v1.1 | baselines/greedy | 10+0.1 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 12 | 11.25 11.83 8.02 / 12.77 13.24 10.75 | data/openings.txt |

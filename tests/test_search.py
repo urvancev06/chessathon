@@ -505,13 +505,34 @@ def test_late_move_reductions_save_nodes() -> None:
     )
 
 
-def test_aspiration_windows_start_at_depth_four_and_keep_the_score_exact() -> None:
+def test_the_late_move_reduction_table_stays_inside_its_two_bounds() -> None:
+    """The table is generated from a formula, so what has to be pinned is the two clamps it is
+    generated through, over every (depth, move) the search can reach.
+
+    A reduction of zero is not a reduction, and a reduction that takes the child below depth 1
+    drops the move into quiescence, where a quiet move proves nothing. Everywhere the search
+    actually reads the table -- from `LMR_MIN_DEPTH` up, from `LMR_FULL_DEPTH_MOVES` on -- both
+    hold, and the reduction never falls as depth or move number rises."""
+    reduction = search_module.lmr_reduction
+    for depth in range(search_module.LMR_MIN_DEPTH, 200):
+        previous = 0
+        for searched in range(search_module.LMR_FULL_DEPTH_MOVES, 250):
+            r = reduction(depth, searched)
+            assert 1 <= r <= depth - 2, (depth, searched, r)
+            assert r >= previous, (depth, searched, r)  # later moves are never reduced less
+            previous = r
+            assert r >= reduction(depth - 1, searched)  # nor are deeper nodes
+    # The flat reduction v1.0 shipped is what a shallow node with few moves behind it still gets.
+    assert reduction(search_module.LMR_MIN_DEPTH, search_module.LMR_FULL_DEPTH_MOVES) == 1
+
+
+def test_aspiration_windows_start_at_depth_four_and_keep_the_answer() -> None:
     # Depths 1-3 are always searched with the full window, so the trees are identical.
     assert nodes_with("ASPIRATION_WINDOWS", True, OPENING_MIDDLEGAME, 3) == nodes_with(
         "ASPIRATION_WINDOWS", False, OPENING_MIDDLEGAME, 3
     )
-    # From depth 4 the window narrows the tree, and the final score is still exact: a fail-high
-    # or fail-low is re-searched, so the answer matches the full-window search.
+    # From depth 4 the window narrows the tree, and the move is still the same: a fail-high or
+    # fail-low is re-searched, so the answer matches the full-window search.
     saved = search_module.ASPIRATION_WINDOWS
     try:
         search_module.ASPIRATION_WINDOWS = True
@@ -521,6 +542,37 @@ def test_aspiration_windows_start_at_depth_four_and_keep_the_score_exact() -> No
     finally:
         search_module.ASPIRATION_WINDOWS = saved
     assert aspirated.nodes < full.nodes
+    assert aspirated.move == full.move
+
+
+def test_aspiration_windows_keep_the_score_exact_without_the_window_heuristics() -> None:
+    """The score, unlike the move, is only window-independent once the heuristics that read
+    alpha are switched off.
+
+    Delta pruning's floor, the futility bound, the null-move threshold and the late-move
+    re-search test are all comparisons against alpha, so a narrower window prunes a different
+    tree and the fail-soft score it returns can differ by a few centipawns from the full-window
+    one. Principal variation search searches most moves with a null window, which makes those
+    heuristics see much narrower alphas and turned a difference that used to be invisible in
+    this position into a visible one (DECISIONS.md, PVS). Nothing there is unsound -- every
+    bound is still a bound -- so the invariant worth pinning is this: with the window-dependent
+    heuristics off, aspiration and the full window agree exactly, which is what says the
+    aspiration re-searches themselves lose nothing.
+    """
+    flags = ("LATE_MOVE_REDUCTIONS", "NULL_MOVE_PRUNING", "FUTILITY_PRUNING", "DELTA_PRUNING")
+    saved = {name: getattr(search_module, name) for name in flags}
+    saved_windows = search_module.ASPIRATION_WINDOWS
+    try:
+        for name in flags:
+            setattr(search_module, name, False)
+        search_module.ASPIRATION_WINDOWS = True
+        aspirated = run_search(OPENING_MIDDLEGAME, max_depth=5)
+        search_module.ASPIRATION_WINDOWS = False
+        full = run_search(OPENING_MIDDLEGAME, max_depth=5)
+    finally:
+        search_module.ASPIRATION_WINDOWS = saved_windows
+        for name, value in saved.items():
+            setattr(search_module, name, value)
     assert (aspirated.move, aspirated.score) == (full.move, full.score)
 
 

@@ -249,11 +249,11 @@
   },
   {
     "parameter": "search.late_move_reductions",
-    "value_or_shape": "min depth 3, first 3 moves full, reduction 1",
+    "value_or_shape": "min depth 3, first 3 moves full, then a 64x64 table of trunc(0.75 + log(depth) * log(move) / 2.25), values 0-8",
     "produced_by": "code (mikhail_letal/search.py)",
     "data": "none: hand-chosen at textbook magnitude, untuned",
     "run_id": "2026-09-09",
-    "note": "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a fail-high"
+    "note": "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a fail-high. Generated from the formula at import rather than stored, so what ships is the derivation and not a list of numbers; floored at 1 ply and capped at depth - 2 so a reduced search is never shallower than depth 1"
   },
   {
     "parameter": "search.aspiration",

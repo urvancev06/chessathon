@@ -235,11 +235,21 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   alpha, because a score at or below alpha is an upper bound and cannot rank moves.
 - Node: terminal checks in this order: (1) `board.ply() >= 600` → draw; (2) repetition: key in
   `history` or in the search path → `DRAW_SCORE`; (3) halfmove clock ≥ 100 → checkmate or draw;
-  (4) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
-  probe and store see the same depth; (5) TT probe (depth-sufficient, mate scores adjusted by
-  ply); (6) depth ≤ 0 → quiescence; (7) register the position on the path; (8) null-move
-  pruning; (9) the futility decision; then the staged move loop with (10) late-move reductions.
+  (4) mate-distance pruning: `alpha = max(alpha, -(MATE_SCORE - ply))`,
+  `beta = min(beta, MATE_SCORE - ply - 1)`, return `alpha` if the window closes;
+  (5) in check → depth += 1 (check extension, capped by `MAX_PLY`), *before* the probe so that
+  probe and store see the same depth; (6) TT probe (depth-sufficient, mate scores adjusted by
+  ply); (7) depth ≤ 0 → quiescence; (8) register the position on the path; (9) null-move
+  pruning; (10) the futility decision; then the staged move loop with (11) the first move at the
+  full window, (12) a null window for every later move and (13) late-move reductions inside it.
   No legal move and nothing pruned → mated or stalemate.
+- Principal variation search: only the first move searched at a node gets the full window
+  `(alpha, beta)`. Every later one is searched with `(alpha, alpha + 1)`, which asks only whether
+  it beats alpha, and is re-searched with the full window when the answer is yes *and* the score
+  lands inside `(alpha, beta)` — unsatisfiable when the node itself was given a null window, so
+  the re-search never cascades. A late-move reduction inside this composes in a fixed order:
+  reduced depth null window → full depth null window → full window. No switch: it changes how the
+  tree is proved, not which moves are believed.
 - Null-move pruning (`NULL_MOVE_PRUNING`): when not in check, `depth >= NULL_MOVE_MIN_DEPTH (3)`,
   the previous ply was not a null move, neither window bound is a mate score, the side to move
   has a piece other than king and pawns, and the static evaluation is ≥ beta, the side passes
@@ -254,7 +264,11 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   bound ≤ alpha, and a node that pruned something is never mistaken for mate or stalemate.
 - Late-move reductions (`LATE_MOVE_REDUCTIONS`): at `depth >= LMR_MIN_DEPTH (3)`, not in check,
   moves from the quiet (history) stage after the first `LMR_FULL_DEPTH_MOVES (3)` searched moves
-  are searched at `depth - 1 - LMR_REDUCTION (1)`; a reduced result above alpha is re-searched at
+  are searched at `depth - 1 - lmr_reduction(depth, searched)`. The reduction is
+  `LMR_TABLE[depth][searched]`, generated at import from
+  `trunc(0.75 + log(depth) · log(move) / 2.25)`, floored at one ply and capped at `depth - 2` so
+  the reduced search never falls into quiescence; both indices are clamped to the table's 64 × 64.
+  A reduced result above alpha is re-searched at
   full depth before it is believed. Table move, captures, promotions and killers are never
   reduced.
 - Staged move generation (`_staged_moves`, exact: the order equals the sorted full list, verified
@@ -696,7 +710,8 @@ What is the same as `search.py`: iterative deepening; aspiration windows from de
 widen ×4, at most 2 fails); fail-soft negamax alpha-beta; a transposition table probed and stored
 with mate scores adjusted by distance from the root; quiescence with stand-pat before any move is
 generated and evasions searched for the first four quiescence plies; move ordering by table move,
-MVV-LVA capture, two killers per ply and the history heuristic; null-move pruning (min depth 3,
+MVV-LVA capture, two killers per ply and the history heuristic; principal variation search at
+interior nodes; null-move pruning (min depth 3,
 R = 2 + depth//6, never in check, never without a piece, only when the static evaluation already
 holds beta); late-move reductions (quiet non-killer non-table moves after the first three, at
 depth ≥ 3); futility pruning at depths 1–2 (150/300); delta pruning in quiescence (200); the check
@@ -718,7 +733,12 @@ What had to change:
 - **Moves are generated whole, not in stages.** One `gen_pseudo` call, a score per move, and the
   best remaining one selected on each iteration of the loop — the same order as `search.py`'s four
   stages, reached in the way that suits a compiled generator with nothing to allocate. Illegal
-  moves fall out of `make_move` returning 0.
+  moves fall out of `make_move` returning 0. The one place that hurts is the "is the position
+  over?" test behind the stand-pat cutoff, asked at about a third of all nodes, where a whole
+  generation buys one legal move: `_has_unpinned_move` is the compiled twin of
+  `search._has_legal_move` and answers it for nearly every position by reading the destinations
+  of one unpinned piece, with "not on a rank, file or diagonal through the king" standing in for
+  python-chess's exact slider-blocker set.
 - **The root is Python.** Iterative deepening, the aspiration window and the loop over the legal
   root moves live in `FastEngine`, not in compiled code (see DECISIONS.md 2026-09-08): they run a
   few hundred times a move, not millions, and compiling them costs fourteen seconds of the

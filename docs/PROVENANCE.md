@@ -1,8 +1,11 @@
 # Provenance
 
 Human-readable record of where every shipped number comes from. The machine-readable version that
-ships in the zip is `weights/PROVENANCE.json` (tables and weights). Search and time-management
-constants live in code and are listed here.
+ships in the zip is `weights/PROVENANCE.json`; this file is its human-readable twin and the two
+must be kept in step. Every constant listed here is in that file as well, the evaluation tables
+from `gen_pst.py` itself and the search and time-management constants read out of the live modules
+by its `search_rows` and `timing_rows`, because it is the only provenance the zip itself carries
+and a judge asking "where did this number come from?" has nothing else to read.
 
 | parameter / file | value or shape | produced by (script + commit) | data (path + sha256 + how obtained) | run id / date | note |
 |---|---|---|---|---|---|
@@ -32,7 +35,8 @@ constants live in code and are listed here.
 | `NULL_MOVE_MIN_DEPTH` | 3 | code | none | 2026-09-07 | hand-chosen after measurement: 2 tripled the nodes to depth 5 in a capture-rich middlegame (null searches landing in quiescence at the widest layer), 3 kept the savings elsewhere (DECISIONS.md) |
 | `NULL_MOVE_BASE_REDUCTION`, `NULL_MOVE_DEPTH_DIVISOR` | 2, 6 (R = 2 + depth // 6) | code | none | 2026-09-07 | textbook-magnitude null-move reduction, untuned |
 | null move only when static eval ≥ beta | rule | code | none | 2026-09-07 | textbook guard; measured no node change on four test positions, kept because it only removes null searches that would fail |
-| `LMR_MIN_DEPTH`, `LMR_FULL_DEPTH_MOVES`, `LMR_REDUCTION` | 3, 3, 1 | code | none | 2026-09-07 | textbook-magnitude late-move reduction, untuned |
+| `LMR_MIN_DEPTH`, `LMR_FULL_DEPTH_MOVES` | 3, 3 | code | none | 2026-09-07 | reduce only from depth 3, and only after three moves of the node have been searched at full depth; textbook magnitudes, untuned |
+| `LMR_TABLE`, `LMR_BASE`, `LMR_DIVISOR` | 64 × 64 ints (remaining depth × moves already searched), values 0–8; 0.75 and 2.25 | code (`search._lmr_table`, generated at import from `trunc(LMR_BASE + log(depth) · log(move) / LMR_DIVISOR)`, floored at 1 ply and capped at `depth - 2` so a reduced search is never shallower than depth 1) | none (formula) | 2026-09-08 | textbook-magnitude late-move reduction, untuned. Replaces the flat `LMR_REDUCTION = 1` of v1.0, which reduced the fortieth move of a twenty-ply node exactly as much as the fourth move of a three-ply node. Generated from the formula rather than stored, so what ships is the derivation and not a list of numbers; also recorded in `weights/PROVENANCE.json`, which is the copy inside the zip |
 | `ASPIRATION_MIN_DEPTH`, `ASPIRATION_WINDOW`, `ASPIRATION_WIDEN`, `ASPIRATION_MAX_FAILS` | 4, 40 cp, ×4, 2 | code | none | 2026-09-07 | textbook-magnitude aspiration window, untuned |
 | `FUTILITY_MARGINS` | 150 (depth 1), 300 (depth 2) | code | none | 2026-09-07 | textbook-magnitude margins (a minor piece and two), untuned |
 | `DELTA_MARGIN` | 200 | code | none | 2026-09-07 | textbook-magnitude quiescence delta margin, untuned |

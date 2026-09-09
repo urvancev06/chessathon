@@ -234,11 +234,16 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
         (
             "search.late_move_reductions",
             f"min depth {search.LMR_MIN_DEPTH}, first {search.LMR_FULL_DEPTH_MOVES} moves full,"
-            f" reduction {search.LMR_REDUCTION}",
+            f" then a {len(search.LMR_TABLE)}x{len(search.LMR_TABLE[0])} table of"
+            f" trunc({search.LMR_BASE} + log(depth) * log(move) / {search.LMR_DIVISOR}),"
+            f" values {min(min(r) for r in search.LMR_TABLE)}"
+            f"-{max(max(r) for r in search.LMR_TABLE)}",
             code,
             TEXTBOOK,
             "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a "
-            "fail-high",
+            "fail-high. Generated from the formula at import rather than stored, so what ships is "
+            "the derivation and not a list of numbers; floored at 1 ply and capped at depth - 2 so "
+            "a reduced search is never shallower than depth 1",
         ),
         (
             "search.aspiration",

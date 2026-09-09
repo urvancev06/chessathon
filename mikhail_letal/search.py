@@ -28,7 +28,9 @@ caused cutoffs at the same distance from the root), then the remaining quiet mov
 
 Repetition and the fifty-move rule are handled inside the tree so the engine neither drifts into
 a draw when it is winning nor avoids one when it is losing. The referee's 600-ply cap is applied
-the same way.
+the same way. *Mate-distance pruning* clamps every node's window to the best and worst a node
+that far from the root could possibly be worth, which keeps a won position looking for the
+shortest mate rather than any mate.
 
 v0.2 adds five textbook ways of searching less without (in practice) missing more, each behind a
 switch so its effect could be measured in games: *null-move pruning* (if passing already holds
@@ -37,6 +39,12 @@ searched a ply shallower unless they surprise), *aspiration windows* at the root
 narrow window around the previous score, widen on failure), *futility pruning* (near the horizon,
 skip quiet moves from positions far below alpha) and *delta pruning* in quiescence (skip captures
 that cannot possibly reach alpha). The comments at the switches below explain each one.
+
+Interior nodes also use *principal variation search*: only the first move of a node is searched
+with the full window, and every later one is first tested with a null window that asks the much
+cheaper question "is this move better than the best so far?". A move that answers yes is searched
+again with the real window. It has no switch because it is not a heuristic -- it changes how the
+same tree is proved, not which moves are believed.
 
 Everything is deterministic: identical inputs and limits produce identical output. The only
 clock-dependent behaviour is the abort at the hard deadline.
@@ -48,6 +56,7 @@ import operator
 import time
 from collections.abc import Hashable, Iterator, Mapping
 from dataclasses import dataclass
+from math import log
 
 import chess
 
@@ -94,7 +103,52 @@ NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remainin
 LATE_MOVE_REDUCTIONS = True  # switch for bisection in development; the shipped value is True
 LMR_MIN_DEPTH = 3  # reduce only where a ply of depth is worth saving
 LMR_FULL_DEPTH_MOVES = 3  # this many moves of the node are searched at full depth first
-LMR_REDUCTION = 1  # plies taken off the late quiet moves
+
+# How many plies come off a late quiet move. A flat one ply treats the fortieth move of a
+# twenty-ply node exactly like the fourth move of a three-ply node, and those are not the same
+# bet: the deeper the node the more a ply is worth skipping, and the later a move sorts the less
+# the ordering believes in it. The reduction therefore grows with both, logarithmically in each,
+# which is the usual shape and the one every derivation of it argues for -- the ordering's
+# confidence decays like the logarithm of the move number, not linearly.
+#
+#     reduction(depth, move) = trunc(LMR_BASE + log(depth) * log(move) / LMR_DIVISOR)
+#
+# floored at one ply (a reduction of zero is not a reduction) and capped at `depth - 2` so the
+# reduced search is never shallower than depth 1: a reduced search that lands in quiescence
+# proves nothing about a quiet move. The two parameters are textbook magnitudes, taken as they
+# stand rather than tuned, and the table is generated from the formula below so that its origin
+# is in the source rather than in a list of numbers (docs/PROVENANCE.md, weights/PROVENANCE.json).
+LMR_BASE = 0.75  # what a shallow node with few moves behind it reduces by, before the log term
+LMR_DIVISOR = 2.25  # how slowly the reduction grows with depth and move number
+LMR_TABLE_DEPTHS = 64  # rows; a deeper node reuses the last row
+LMR_TABLE_MOVES = 64  # columns; a later move reuses the last column
+
+
+def _lmr_table() -> tuple[tuple[int, ...], ...]:
+    """The reduction for every (remaining depth, moves already searched) the table covers.
+
+    Row and column zero exist only so the table can be indexed without a special case; the search
+    never reads them, because it reduces nothing below `LMR_MIN_DEPTH` or before
+    `LMR_FULL_DEPTH_MOVES` moves have been searched at full depth.
+    """
+    rows = []
+    for depth in range(LMR_TABLE_DEPTHS):
+        row = []
+        for move in range(LMR_TABLE_MOVES):
+            raw = LMR_BASE + log(max(depth, 1)) * log(max(move, 1)) / LMR_DIVISOR
+            row.append(min(max(int(raw), 1), max(depth - 2, 0)))
+        rows.append(tuple(row))
+    return tuple(rows)
+
+
+LMR_TABLE = _lmr_table()
+
+
+def lmr_reduction(depth: int, searched: int) -> int:
+    """Plies to take off a late quiet move, from the table, with both indices clamped to it."""
+    row = LMR_TABLE[depth if depth < LMR_TABLE_DEPTHS else LMR_TABLE_DEPTHS - 1]
+    return row[searched if searched < LMR_TABLE_MOVES else LMR_TABLE_MOVES - 1]
+
 
 # Aspiration windows: from this root depth on, the iteration is searched with a narrow window
 # around the previous iteration's score rather than the full one, which prunes far more. A score
@@ -614,7 +668,23 @@ class Engine:
         if board.halfmove_clock >= 100:
             return self._game_over_score(board, ply)
 
-        # (4) Check extension: a side in check has few sensible replies and the position is
+        # (4) Mate-distance pruning. A node ``ply`` plies from the root cannot be worth less than
+        # being mated here, -(MATE_SCORE - ply), nor more than mating on this very move,
+        # MATE_SCORE - ply - 1, whatever the position is. Clamping the window to that costs two
+        # comparisons and ends the search of a line as soon as a shorter mate is already known
+        # somewhere above it, which is what stops a mate search from wandering off looking for a
+        # longer one. The clamp is safe because it only removes values the node could never return,
+        # so `alpha` is a true bound on the value in both directions when the window closes.
+        mated_here = -(MATE_SCORE - ply)
+        mate_next = MATE_SCORE - ply - 1
+        if alpha < mated_here:
+            alpha = mated_here
+        if beta > mate_next:
+            beta = mate_next
+        if alpha >= beta:
+            return alpha
+
+        # (5) Check extension: a side in check has few sensible replies and the position is
         # tactically hot, so it is searched one ply deeper rather than handed to quiescence. It
         # comes before the table probe so that the probe and the store below agree on the depth
         # of this node; otherwise an in-check node would accept an entry one ply too shallow.
@@ -622,7 +692,7 @@ class Engine:
         if in_check:
             depth += 1
 
-        # (5) Transposition table probe. Stored mate scores are distances from the stored node;
+        # (6) Transposition table probe. Stored mate scores are distances from the stored node;
         # convert them to distances from the root before comparing with this node's window.
         tt = self._tt
         entry = tt.get(key)
@@ -648,11 +718,11 @@ class Engine:
         if ply >= MAX_PLY:
             return self._static_score(board, ply, in_check)
 
-        # (6) Horizon: resolve captures before evaluating.
+        # (7) Horizon: resolve captures before evaluating.
         if depth <= 0:
             return self._quiescence(search_board, alpha, beta, ply, in_check, 0)
 
-        # (7) Interior node. Register the position on the current line for repetition checks,
+        # (8) Interior node. Register the position on the current line for repetition checks,
         # and start a fresh path-draw flag for the subtree (the caller's is restored after).
         path = self._path
         path[key] = 1
@@ -667,7 +737,7 @@ class Engine:
         # and "doing nothing" are exactly what decides the position.
         mate_bounds = alpha <= -MATE_THRESHOLD or beta >= MATE_THRESHOLD
 
-        # (8) Null-move pruning (see NULL_MOVE_PRUNING for the idea and the guards).
+        # (9) Null-move pruning (see NULL_MOVE_PRUNING for the idea and the guards).
         if (
             NULL_MOVE_PRUNING
             and null_allowed
@@ -692,7 +762,7 @@ class Engine:
                 self._store(key, depth, beta, LOWER, tt_code, ply, tainted)
                 return beta
 
-        # (9) Futility: decided once for the node, applied to its quiet moves in the loop.
+        # (10) Futility: decided once for the node, applied to its quiet moves in the loop.
         futility_bound = -_INFINITY
         if FUTILITY_PRUNING and depth < len(FUTILITY_MARGINS) and not in_check and not mate_bounds:
             bound = self._evaluate(search_board) + FUTILITY_MARGINS[depth]
@@ -712,15 +782,38 @@ class Engine:
                 pruned_any = True
                 continue
             search_board.push(move)
-            if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES:
-                # (10) Late-move reduction, with a full-depth re-search if the move surprises.
-                score = -negamax(
-                    search_board, child_depth - LMR_REDUCTION, -beta, -alpha, child_ply
-                )
-                if score > alpha:
-                    score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
-            else:
+            if searched == 0:
+                # (11) The first move searched is the principal variation candidate: the
+                # ordering believes in it, so it gets the full window and its score is what
+                # every later move is measured against. It is never reduced.
                 score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
+            else:
+                # (12) Principal variation search. Later moves are expected to be worse than the
+                # first, and proving "no better than alpha" is far cheaper than measuring how
+                # much better a move is: the null window (alpha, alpha + 1) cuts off at the
+                # first refutation in every subtree. Only a move that beats alpha is measured
+                # properly, with a re-search inside the real window.
+                #
+                # (13) Late-move reduction rides on the same scan, and the re-searches compose
+                # in a fixed order -- reduced null window, full-depth null window, full window.
+                # Skipping the middle step would spend full depth *and* the full window on a
+                # move the shallow search only hinted at.
+                reduction = (
+                    lmr_reduction(depth, searched)
+                    if reduce_late and stage == STAGE_QUIET and searched >= LMR_FULL_DEPTH_MOVES
+                    else 0
+                )
+                score = -negamax(
+                    search_board, child_depth - reduction, -alpha - 1, -alpha, child_ply
+                )
+                if reduction and score > alpha:
+                    score = -negamax(search_board, child_depth, -alpha - 1, -alpha, child_ply)
+                if alpha < score < beta:
+                    # The null window only proved the move beats alpha, never by how much, and
+                    # the score lands inside the real window, so this node needs the exact
+                    # value. When the caller already gave a null window (beta == alpha + 1) no
+                    # integer sits strictly between the two and this never fires.
+                    score = -negamax(search_board, child_depth, -beta, -alpha, child_ply)
             search_board.pop()
             searched += 1
             if score > best_score:

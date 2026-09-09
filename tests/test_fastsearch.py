@@ -38,6 +38,8 @@ from mikhail_letal.fastsearch import (
     JITTED,
     FastEngine,
     _cached_eval,
+    _has_legal,
+    _has_unpinned_move,
     _make_null,
     _unmake_null,
     negamax,
@@ -58,6 +60,16 @@ HANGING_QUEEN = "rnb1kbnr/pppp1ppp/8/4p3/7q/5N2/PPPPPPPP/RNBQKB1R w KQkq - 0 3"
 QUEEN_VS_ROOK_WHITE_TO_MOVE = "5rk1/8/8/8/3Q4/8/8/6K1 w - - 0 1"
 QUEEN_VS_ROOK_BLACK_TO_MOVE = "5rk1/8/8/8/3Q4/8/8/6K1 b - - 0 1"
 STALEMATE_ROOT = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1"
+# Stalemates with the side to move holding progressively more material, so the cheap legality
+# probe has to answer "cannot tell" for a bare king, for blocked pawns and for a boxed-in piece.
+STALEMATES = (
+    STALEMATE_ROOT,  # bare king, boxed by a queen
+    "k7/8/1Q6/8/8/8/8/7K b - - 0 1",  # bare king in the corner
+    "8/8/8/8/8/1q6/2k5/K7 w - - 0 1",  # the same the other way round
+    "8/8/8/8/8/8/p7/k1K5 b - - 0 1",  # a king and one blocked pawn
+    "8/8/8/8/8/4k3/4p3/4K3 w - - 0 1",  # a king with a pawn in front of it
+    "5bnr/4p1pq/4Qpkr/7p/2P4P/8/PP1PPPP1/RNB1KBNR b KQ - 0 1",  # a full army, none of it mobile
+)
 CHECKMATE_ROOT = "7k/6Q1/6K1/8/8/8/8/8 b - - 0 1"
 BUSY_MIDDLEGAME = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
 # Eight queens a side: the position that used to make one depth-1 iteration cost hundreds of
@@ -152,6 +164,7 @@ def test_an_expired_deadline_skips_every_phase_and_still_returns() -> None:
     keeps its conservative default rather than being left at zero."""
     engine = FastEngine()
     assert engine.node_rate == DEFAULT_NODE_RATE
+    arm(None)  # the budget is shared and `warm_up` only sets its deadline: start its log empty
     try:
         # `budget()` is one shared record whose `skipped` list accumulates across calls, so the
         # test arms it itself rather than reading whatever earlier tests (or the agent import)
@@ -180,6 +193,7 @@ def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
     budget that fits some of them runs those; and the two that need a compiled `negamax` are
     skipped once it is, because running them would compile it anyway."""
     engine = FastEngine()
+    arm(None)  # see the note in the test above
     try:
         # Three seconds fits `quiescence` (2.1 reference seconds) and `tie_break` (1.6) but not
         # `helpers` (5.3) or `negamax` (12.5).
@@ -198,6 +212,7 @@ def test_a_partial_deadline_runs_the_phases_that_fit() -> None:
 
 def test_a_generous_deadline_runs_the_whole_warm_up() -> None:
     engine = FastEngine()
+    arm(None)  # see the note two tests above
     try:
         warm_up(engine, deadline=time.perf_counter() + 3600.0)
         skipped = list(budget().skipped)
@@ -323,6 +338,80 @@ def test_checkmate_root_has_no_move_and_mated_score() -> None:
     result = run_search(CHECKMATE_ROOT, max_depth=3)
     assert result.move is None
     assert result.score == -MATE_SCORE
+
+
+def test_stand_pat_cutoff_never_trusts_a_position_without_moves() -> None:
+    """The compiled twin of the same question in `tests/test_search.py`. A mated or stalemated
+    side can evaluate far above beta; the quiescence stand-pat must still score the position as
+    the mate or the draw, whichever it is, and never as the evaluation."""
+    from mikhail_letal.fastboard import from_board, in_check
+    from mikhail_letal.fastsearch import quiescence
+    from mikhail_letal.search import QS_EVASION_PLIES
+
+    engine = FastEngine()
+    st = engine.state
+    low_beta = -50_000  # far below any static evaluation, so a stand pat would cut off
+
+    stalemate = chess.Board(STALEMATE_ROOT)
+    assert stalemate.is_stalemate()
+    pos = from_board(stalemate)
+    assert int(quiescence(pos, st, EVAL_TABLES, -MATE_SCORE, low_beta, 1, 0, 0)) == DRAW_SCORE
+
+    mate = chess.Board(CHECKMATE_ROOT)
+    assert mate.is_checkmate()
+    pos = from_board(mate)
+    checked = int(in_check(pos))
+    # Beyond QS_EVASION_PLIES a check is handled like any other node: still a mate here.
+    deep = QS_EVASION_PLIES
+    assert int(quiescence(pos, st, EVAL_TABLES, -MATE_SCORE, low_beta, 1, checked, deep)) == -(
+        MATE_SCORE - 1
+    )
+    assert int(quiescence(pos, st, EVAL_TABLES, -MATE_SCORE, MATE_SCORE, 1, checked, 0)) == -(
+        MATE_SCORE - 1
+    )
+
+
+def test_the_cheap_legality_probe_is_one_way_and_never_misses_a_mate() -> None:
+    """`_has_unpinned_move` is a *sufficient* reason to believe the side to move has a move, and
+    `_has_legal` has to stay exact whatever it answers. Both are checked against python-chess on
+    a playout sample: the probe may say "cannot tell", but a "yes" must be true, and a position
+    with no legal move must never get one."""
+    from mikhail_letal.fastboard import from_board
+
+    engine = FastEngine()
+    st = engine.state
+    asked = 0
+    answered = 0
+    terminal = 0
+
+    def audit(board: chess.Board) -> None:
+        nonlocal asked, answered, terminal
+        pos = from_board(board)
+        before = pos.board.tolist()
+        in_chk = int(board.is_check())
+        want = 1 if any(board.legal_moves) else 0
+        assert int(_has_legal(pos, st, 1, in_chk)) == want, board.fen()
+        assert pos.board.tolist() == before, board.fen()  # the probe leaves the board alone
+        if in_chk:
+            return
+        asked += 1
+        probe = int(_has_unpinned_move(pos))
+        answered += probe
+        assert probe == 0 or want == 1, board.fen()  # one-way: a yes is never wrong
+        if want == 0:
+            terminal += 1
+            assert probe == 0, board.fen()  # a stalemate is never called free
+
+    # Random playouts almost never end in stalemate, so the positions the test exists for are
+    # named rather than sampled.
+    for fen in STALEMATES:
+        board = chess.Board(fen)
+        assert board.is_stalemate(), fen
+        audit(board)
+    for board in playout_boards(4_000, 20260908, sample_starts()):
+        audit(board)
+    assert terminal == len(STALEMATES)  # every one of them reached the "no legal move" branch
+    assert answered > asked * 0.9  # and the probe settles the great majority without generating
 
 
 # ----------------------------------------------------------------------------- (d) limits

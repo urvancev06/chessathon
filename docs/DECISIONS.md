@@ -697,6 +697,246 @@ compile inside the search, which is where the 15.9 s came from and which leaves 
 to compile at unpredictable moments later in the game; and refusing to search at all while the
 jit is cold, which never compiles anything and so plays fallback moves for the whole game.
 
+## 2026-09-08 — Principal variation search at interior nodes
+
+`negamax` searched every child of every interior node with the full window `(-beta, -alpha)`.
+Only the first child needs that. Once the ordering's first move has raised alpha, the question
+asked of every later move is not "how good is it?" but "is it better than alpha?", and a null
+window `(alpha, alpha + 1)` answers that at the first refutation in every subtree. Only a move
+that answers yes is measured, with a re-search inside the real window. Both engines now do it —
+`search._negamax` as the readable version, `fastsearch.negamax` as the compiled one.
+
+**The interaction with late-move reductions, which is where the classic bug lives.** A late quiet
+move can now be searched three times, and the order is fixed: reduced depth with the null window,
+then full depth with the null window, then full depth with the real window. The middle step is
+the one that is easy to drop, and dropping it pays full depth *and* the full window for a move
+that only a shallow search has hinted at. Two guards make the chain terminate: the full-depth
+null-window repeat runs only when a reduction was applied, and the full-window re-search runs
+only when `alpha < score < beta`, which is unsatisfiable when the caller already handed down a
+null window (`beta == alpha + 1`), so a null-window node never re-searches at all.
+
+**Measured, compiled engine, nodes to a fixed depth** (`FastEngine`, fresh table per position).
+Depth 10: standard start 228 763 → 199 510 nodes (0.51 s → 0.37 s); Kiwipete middlegame
+3 007 599 → 3 193 943 (5.76 s → 6.21 s); rook ending 161 025 → 165 683 (0.21 s → 0.25 s). Over
+fifteen positions (those three plus twelve openings drawn from `data/openings.txt`, seed
+20260908) at depth 9: 8 521 852 → 8 313 522 nodes, −2.4 %.
+
+**Why the saving is small here, honestly.** Isolated, principal variation search is worth much
+more than 2 %: with late-move reductions, null-move pruning and futility pruning switched off,
+the Python engine's four-position depth-6 total falls 690 628 → 579 103 nodes, −16 %. With those
+heuristics on they have already taken most of the same tree, and what is left is partly spent on
+the extra re-searches. The change is kept because the two effects are not the same tree — the
+window is exact where the heuristics are approximations — and because the strength screen, not
+the node count, is the verdict.
+
+**Search instability, and the test that had to change.** At a fixed depth the root move and score
+are no longer bit-identical to the old search: the middlegame above answers d5e6/−83 where it
+answered e2a6/−87. Nothing there is unsound. Delta pruning's floor, the futility bound, the
+null-move threshold and the reduced-search re-search test are all comparisons against alpha, so a
+narrower window prunes a different tree and returns a different (still valid) fail-soft bound.
+`test_aspiration_windows_start_at_depth_four_and_keep_the_score_exact` asserted that the aspirated
+and full-window searches return the *same score*; that was always a property of the heuristics
+rather than of aspiration, and it stopped holding. It is now two tests: the move must still match,
+and — the invariant actually worth pinning — with the four window-dependent heuristics switched
+off the two searches agree exactly, which is what says the aspiration re-searches lose nothing.
+
+**Rejected: principal variation search at the root as well.** The root loop still gives every
+move the full window, and that is where the largest single subtree saving would be. It is left
+alone for now because `root_scores` feeds `_break_draw_tie`, which counts moves scoring exactly
+`DRAW_SCORE`, and a null-window root search returns bounds rather than values there; the mop-up
+behaviour that depends on it is tested and would need re-establishing first.
+
+## 2026-09-08 — Mate-distance pruning, which the docstrings already claimed
+
+`fastsearch`'s module docstring and `docs/DESIGN.md` both listed mate-distance pruning among the
+things the search does. Neither engine had it. This adds it, in both, as step (4) of the node —
+after the draw checks, before the check extension and the table probe, so the probe and the store
+still see the same depth.
+
+A node `ply` plies from the root is worth at least `-(MATE_SCORE - ply)` (being mated right here)
+and at most `MATE_SCORE - ply - 1` (mating on this very move). Clamping `alpha` and `beta` to that
+removes only values the node could never return, so when the clamped window closes the node can
+answer `alpha` immediately: in the fail-high case `alpha` is `-(MATE_SCORE - ply)`, a true lower
+bound; in the fail-low case `alpha` is at or above the ceiling, a true upper bound. Two
+comparisons per node, and it stops a search that has already found a mate in n from spending the
+rest of the iteration proving a mate in n + 2 somewhere else.
+
+**Measured, compiled engine.** Ordinary positions are untouched, as they should be — depth 10
+from the standard start, the Kiwipete middlegame and the rook ending give byte-identical node
+counts (199 510 / 3 193 943 / 165 683) because the clamp only bites once a mate bound is in the
+window. Where it does bite: a mate in three to depth 5, 13 052 → 2 914 nodes (−78 %, 25 ms →
+4 ms); KR vs k to depth 12 unchanged at 1 365 801; KQ vs k to depth 12 3 472 742 → 3 595 700
+(+3.5 %, the mop-up tie-break searching a different tree, same move and same score).
+
+**Rejected: clamping after the table probe** instead of before it. It would let a probe return a
+score from outside the window the node can actually be worth, and it is one comparison later for
+no gain.
+
+**Rejected: also clamping in `quiescence`.** Quiescence has no depth left to shorten and its
+stand-pat score is never a mate score, so the clamp could only ever cost the comparison.
+
+## 2026-09-08 — The compiled quiescence gets the cheap legality test the Python one already had
+
+`search.Engine._has_legal_move` (v0.3) answers "does the side to move have a move at all?" without
+generating one: with no check on the board, a piece that is not shielding its king cannot expose
+it by moving, so any pseudo-legal move of such a piece is legal, and one pawn that can step
+forward settles it. The compiled port never got that. `fastsearch._has_legal` ran a full
+`gen_pseudo` plus a make/unmake, and the quiescence stand-pat cutoff asks it at **36 % of all
+nodes** in the Kiwipete middlegame (1 155 753 calls in a 3.19 M-node depth-10 search) — the most
+common path in the whole tree, and it exists only so that a mate or a stalemate is never scored as
+a stand-pat.
+
+`_has_unpinned_move` is the compiled twin. It differs from the Python original in two ways: the
+caller passes `in_chk` in rather than the function recomputing it, and "not shielding the king" is
+the cruder test that the piece is not on a rank, file or diagonal *through* the king, because an
+0x88 board has no bitboard to compute python-chess's exact slider-blocker set from. The crude test
+is the generous one on purpose — a piece wrongly called "possibly pinned" costs the scan of one
+more piece, a piece wrongly called free would be a stalemate scored as a stand-pat. En passant is
+left out, being the one move that can uncover a check from a piece the mover never stood in front
+of. Each "yes" costs reading one piece's destinations: no make/unmake, no attack scan. How often
+it can say yes, counted inside a depth-10 search: **100 %** of the calls from the standard start,
+**99.9 %** in the Kiwipete middlegame, **86.6 %** in the rook ending, where there is much less
+material to find an unpinned piece among. Over a 76 000-position random playout, 97 %.
+
+**Measured, best of four runs each, alternating between the two builds** (the box was busy, so
+absolute times drift; the pairs were taken back to back). Depth 10: standard start 0.271 s →
+0.247 s; Kiwipete middlegame **5.282 s → 4.791 s, −9.3 %**; rook ending 0.195 s → 0.185 s. Node
+counts are unchanged to the last node (199 510 / 3 193 943 / 165 683), which is the point: this is
+the same search, done faster. An unsound build with the test deleted outright ran the middlegame
+in 5.213 s against 6.250 s in the same session, so the probe recovers essentially all of the
+available saving.
+
+**Rejected: probing the king's moves instead**, with `attacked()` on each square the king could go
+to and the king lifted off the board. It is sound and it hits 98.7 % of the time, but `attacked()`
+scans eight rays to the edge of the board, so one or two calls cost about what the whole
+`gen_pseudo` cost: measured 6.313 s against 6.250 s, i.e. nothing.
+
+**Rejected: hoisting the call so it runs once per node.** It already does — the stand-pat branch
+returns immediately either way. The cost is that the branch is taken at a third of all nodes, not
+that it is taken twice at any of them.
+
+**Rejected: skipping the test when the side to move has little material.** There is no material
+bound on stalemate: the six named stalemates in `tests/test_fastsearch.py` run from a bare king to
+a side with every piece still on the board and none of it mobile.
+
+## 2026-09-08 — Late-move reductions become depth- and move-aware
+
+`LMR_REDUCTION = 1` took one ply off every late quiet move, so the fortieth move of a twenty-ply
+node was reduced exactly as much as the fourth move of a three-ply node. Those are not the same
+bet. The deeper the node, the more a ply is worth skipping; the later a move sorts, the less the
+ordering believes in it, and that belief decays like the logarithm of the move number rather than
+linearly. The reduction is now a table, generated at import in `search._lmr_table` from
+
+    trunc(LMR_BASE + log(depth) * log(move) / LMR_DIVISOR)   with 0.75 and 2.25
+
+floored at one ply (a reduction of zero is not a reduction) and capped at `depth - 2`, so the
+reduced search is never shallower than depth 1: a reduced search that lands in quiescence proves
+nothing about a *quiet* move. It runs from 1 at (depth 3, move 3), the old flat value, to 8 at the
+table's far corner. Both engines read the same table; the compiled one indexes a numpy view of it
+and clamps both indices to its 64 × 64 edges.
+
+**Measured, compiled engine, nodes to depth 10** (the pairs taken back to back on a busy box).
+Standard start 199 510 → 141 701 (−29 %, 0.253 s → 0.193 s); Kiwipete middlegame
+3 193 943 → 1 657 996 (**−48 %**, 4.801 s → 2.450 s); rook ending 165 683 → 94 970 (−43 %,
+0.185 s → 0.113 s).
+
+**What that number is and is not.** It is a much smaller tree to the same nominal depth, which is
+what late-move reductions are for. It is not, on its own, a stronger engine: a reduction is a bet
+that a late quiet move is not the best one, and a bigger reduction is a bigger bet. All three
+positions answer differently at depth 10 than the flat version did (the rook ending plays e2e3
+where it played b4f4), so the verdict is the strength screen at the real time control, not this
+table. Recorded here as a measurement of the tree, with the games still to come.
+
+**Where the numbers are recorded.** `docs/PROVENANCE.md` and, for the first time for a search
+constant, `weights/PROVENANCE.json` — the only provenance file inside the zip, which until now
+covered the evaluation tables alone. The table ships as the formula that generates it, not as a
+list of numbers, which is the same argument `tools/gen_pst.py` makes for the piece-square tables:
+its origin is provable from the source.
+
+**Rejected: tuning `LMR_BASE` and `LMR_DIVISOR`.** They are textbook magnitudes taken as they
+stand. Tuning them against anything other than games would be fitting to the wrong objective, and
+tuning them against games costs the arena time the strength screen needs first.
+
+## 2026-09-08 — The compiled futility prune stops making the move it is about to throw away
+
+`fastsearch.negamax` made every move before it decided whether to futility-prune it, then unmade
+it: a full `make_move`/`unmake_move` bought nothing at every pruned move. The comment said why —
+"no legal move below" has to keep meaning mate or stalemate, and a node that has pruned everything
+must not be mistaken for one that has nothing to play. That reasoning holds only until the node
+has seen one legal move; after that it is neither mate nor stalemate whatever the rest of the list
+does. So the prune now happens before `make_move` as soon as `legal_seen` is set, and only the
+first legal move of a futility node is still made and thrown away.
+
+`search._negamax` never had the problem: `_staged_moves` yields legal moves only, so the Python
+engine could always prune before pushing. This is the compiled port catching up.
+
+**Measured, depth 10, best of three, pairs back to back.** Node counts are identical to the last
+node (141 701 / 1 657 996 / 94 970), which is the check that matters: the same moves are pruned
+and the same tree is searched. Time: 0.203 s → 0.203 s from the start, 2.562 s → 2.493 s in the
+Kiwipete middlegame (−2.7 %), 0.163 s → 0.111 s in the rook ending; totals 2.929 s → 2.808 s.
+Small, because futility only fires at depths 1 and 2, and free.
+
+**One deliberate imprecision.** A quiet move pruned before it is made has not been tested for
+legality, so an illegal one can now set `pruned_any`. That can only raise the node's fail-soft
+score to `futility_bound`, which is at most `alpha_original`, so the node still stores an UPPER
+bound and the bound is still true — a looser upper bound is always sound. Nothing in the three
+measured positions changed by a single node.
+
+## 2026-09-08 — Rejected: a history malus, and history gravity
+
+Tried, measured, and not shipped. The history heuristic only ever *rewards* a quiet move that
+causes a beta cutoff, and an audit suggested the two standard additions: a **malus** that lowers
+the score of the quiet moves the same node tried and which failed to cut off, and **gravity**,
+which scales each update by how close the entry already is to `_HISTORY_MAX` so that scores
+approach the limit instead of piling up against it. Both were implemented in both engines — the
+compiled loop marking the slots it skipped so the malus could tell a move that was searched and
+beaten from one that was never given the chance — and then measured over fifteen positions
+(the three benchmark positions plus twelve openings from `data/openings.txt`, seed 20260908) at a
+fixed depth 10.
+
+| build | nodes to depth 10, fifteen positions |
+|---|---|
+| shipped (bonus only) | 8 634 847 |
+| gravity, no malus | 8 634 847 |
+| gravity + malus | 9 624 902 (**+11.5 %**) |
+| gravity + malus, bonus and malus capped at 400 | 9 624 902 |
+
+**Gravity is exactly a no-op here, to the node**, and the third row says the cap is too. Both
+answers have the same cause and it is worth writing down: the bonus is `depth * depth`, so at
+depth 10 it never exceeds 100, while `_HISTORY_MAX` is 999 999 and the whole table is halved at
+the start of every move. Entries never get near the limit, so there is nothing for gravity to
+scale down and nothing for a cap to cut. The saturation the audit predicted does not happen in
+this engine, and adding code that measurably changes nothing is not worth the lines.
+
+**The malus costs 11.5 % more nodes at the same depth.** That is the wrong sign for a
+move-ordering change, which is the one kind of change whose node count at fixed depth is a fair
+verdict on its own: better ordering cuts off sooner, and nothing is traded away for it. The
+likely reason is the asymmetry between the two updates at this bonus shape — a node hands out one
+bonus and up to thirty maluses, each as large as the bonus and each scaled by `depth * depth`, so
+a quiet move that is tried and beaten in a deep node is driven far more negative than the same
+move is ever raised by cutting off in a shallow one. What the table then ranks is "how often was
+this move tried near the root", not "how often did it work". Making that work would need a
+different bonus shape, and that is a tuning exercise against games, not something to bolt on.
+
+Kept for the record rather than deleted: the numbers above are the reason the shipped engine still
+has a reward-only history table, and anyone who reads the audit and reaches for the same two ideas
+should start from here.
+
+## 2026-09-08 — Sanity match for the batch above (not a strength verdict)
+
+Twenty games against `versions/v1.0` at 10 s + 0.1 s, two workers, openings from
+`data/openings.txt`. The point is that nothing crashes, no clock goes negative and no game ends in
+a failed termination — not who is stronger, which needs the real time control and many more games
+than this.
+
++7 =7 −6, score 52.5 % ± 18.1 %, Elo +17 (−112 to +152). Terminations: checkmate 13, threefold
+repetition 5, fifty moves 1, insufficient material 1 — every game ended on a rule, none on a
+flag, a crash or an illegal move. Lowest agent clock 1 647 ms after a move and before the
+increment, in the 247-ply game 12. Load average 4.8 → 6.2 throughout, because the box was busy
+with another measurement, so the clock figures measure the load as much as the engine.
+
+The interval spans zero by a wide margin at twenty games, as it must. **This row is not evidence
+that the batch is an improvement**; the strength screen at the event time control is.
 ## 2026-09-08 — The next depth is started on a prediction, not on a fixed share of the budget
 
 The platform's rated logs for **v0.2.1** show per-move times in two lumps and nothing between:
