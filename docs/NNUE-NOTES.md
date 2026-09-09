@@ -65,3 +65,29 @@ on are the first thing that would catch gross nonsense, and they are a floor, no
   weights the loss is computed on are the weights that ship.
 - Nothing of anyone else's network is here. The rules allow training on positions an engine
   labelled; Stockfish labels the data and no part of Stockfish ships.
+
+## Observations recorded during the screen, before its result
+
+Written while the screen was running and 12 of 300 games were in, so that if the result is negative
+these are notes made *before* it rather than an explanation constructed after it.
+
+**Game 1 (`game-0001.pgn`), lost as White by checkmate.** Our evaluation stayed roughly level while
+v1.2's own score climbed steadily from −0.3 at move 19 to +3.8 by move 27, and at move 27 we played
+`Rxe4`, giving rook for bishop. The shape — our score flat while the position deteriorates over ten
+moves, then a material concession — is `handoff/FINDING-round85-evaluation-blindness.md` with the
+sign reversed: there the hand-crafted evaluation held +100 to +200 while Stockfish had the position
+at −139 to −674. One game licenses nothing, and the eleven games beside it are unremarkable. It is
+recorded because it is the first place to look if the screen comes back negative, and because a note
+written before a result is worth more than the same note written after one.
+
+**The floor, checked before letting it run to 300.** 12 of 12 terminations were checkmate: no flags,
+no crashes, no illegal moves, no adjudications. Lowest clock seen across all games 17.8 s of 120 s,
+typical low 25–45 s, so the measured 14.6 % node cost is not pushing the time manager into trouble at
+this control. Zero draws, so nothing is shuffling its way out of a position. Game lengths 38 to 78
+moves. The engine plays real chess with the network; whether it plays *better* chess is what the
+screen is for.
+
+**A harness defect, logged rather than fixed.** The PGNs carry `[%eval]` annotations for only one
+side — the opponent's. We can see what v1.2 thought of each position and not what we thought, which
+is backwards for diagnosing our own evaluation. Every game is therefore half-diagnostic. Not touched
+mid-run; it belongs on the list for after the screens.
