@@ -241,26 +241,44 @@ I invented a fatal flaw that is not one.
 \textbf{2. ``We have an incremental accumulator.''} We do not. The code rebuilds it from scratch
 on every call, deliberately, and says so in its own comment. I stated the opposite repeatedly.
 
-\textbf{3. Mobility as the leading candidate --- and then a correction to the correction.}
-I wrote that mobility was \emph{ruled out} as a net loss. \textbf{That overstated what we
-measured, and the arithmetic was ours.} The 1.7$\times$ figure is nodes-to-depth, which is a fair
-currency only when the evaluation is unchanged: the mobility build's depth 6 is not the
-baseline's depth 6, so the metric prices the cost and credits none of the knowledge. It is a
-\emph{price the term must beat}, not a verdict.
+\textbf{3. Mobility --- and then three corrections to the same number.}
+I wrote that mobility was \emph{ruled out} as a net loss. That was the first of three attempts at
+one figure tonight, and the sequence is worth showing because it is the most honest thing in this
+document.
 
-Running it honestly: published gains are $+27.6$, $+41 \pm 14$ and $+62$ in engines that lacked
-the term, and those are net of a near-zero cost because they are bitboard engines counting an
-attack set they already hold. Ours is a mailbox and has no attack sets. So our net is roughly
-$(27.6 \text{ to } 62) - (60 \text{ to } 65) = $ \textbf{$-37$ to $+2$} --- break-even with wide
-uncertainty. \textbf{We do not know the sign.} That is not ``ruled out'' and it is not
-``comfortably worth it''.
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Estimate of mobility's cost & Net effect & Source \\
+\midrule
+$-10$ to $-23$ Elo & clearly worth it & first arithmetic \\
+$60$--$65$ Elo & net loss & mine, in this document \\
+$38$--$54$ Elo & $-26$ to $+24$ & corrected Elo-per-ply factor \\
+$7$--$10$ Elo & $+19$ to $+57$ & tree effect is noise, rate only \\
+\bottomrule
+\end{tabular}
+\end{center}
 
-Two ten-minute diagnostics decide it, and neither needs games: scale the term down and see
-whether the tree cost falls with it, and turn reverse futility off and see whether the tree cost
-disappears. \textbf{If the second one fires it is bigger than mobility} --- our reverse-futility
-margin is 85 centipawns while our evaluation's median error at those same positions is 342, so
-every future evaluation change would be carrying an artificial tax from a threshold that was
-never coherent with our own noise.
+\textbf{The estimates span a factor of seven and the sign of the answer flips across them.} Two
+disagreements are live: whether an evaluation term measurably grows the search tree (measured at
+2.19, 1.13, 1.58 and 0.96 across position samples --- which may simply be noise), and what one ply
+of depth is worth in Elo.
+
+\begin{keybox}
+\textbf{And the second disagreement dissolves the first.} The textbook conversion --- 50 to 70 Elo
+per doubling of thinking time --- assumes depth converts into strength at the normal rate.
+\textbf{Round 90 is direct evidence that it does not here: depth 19 over 2.28 million positions
+failed to reveal a 435-centipawn error.} If our evaluation caps what depth can buy, then the
+constant underwriting every speed-to-Elo figure in this document is not ours.
+
+\textbf{We have never measured it, and it is measurable} --- screen a build against itself with
+one side given double the time. That single number calibrates everything: what our search
+improvements are worth, what mobility costs, what the network's 14.6\% slowdown cost. It has been
+silently underwriting the whole project.
+\end{keybox}
+
+So the honest statement about mobility is: \textbf{we do not know the sign, and the reason we do
+not know is more interesting than the answer.}
 
 \section{The plan that replaces it}
 
