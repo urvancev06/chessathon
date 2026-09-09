@@ -295,6 +295,42 @@ def summarise(run: dict[str, object]) -> None:
         )
 
 
+def side_by_side(first: dict[str, object], second: dict[str, object]) -> None:
+    """Both arms in one table, counts beside every rate.
+
+    The denominators are here and not in an appendix on purpose. Every table this project has
+    produced today reported a rate without the count it was taken over, and a thin row reads
+    exactly like a real effect until you go looking for how many samples made it. Reading the
+    counts first is the rule; putting them in the same row is what makes the rule easy to keep.
+    """
+    labels = (str(first["label"]), str(second["label"]))
+    print(f"\n{'':>5}  {labels[0]:^26}  {labels[1]:^26}")
+    print(f"{'depth':>5}  {'reach   skip    share':^26}  {'reach   skip    share':^26}")
+    for depth in range(1, LATE_MOVE_PRUNING_MAX_DEPTH + 1):
+        cells = []
+        for run in (first, second):
+            samples: list[dict[str, object]] = run["samples"]  # type: ignore[assignment]
+            reachable = [s for s in samples if s["depth"] == depth and s["reachable"]]
+            skipped = [s for s in reachable if s["would_skip"]]
+            share = f"{100 * len(skipped) / len(reachable):.1f}%" if reachable else "n/a"
+            cells.append(f"{len(reachable):>5}  {len(skipped):>5}  {share:>8}")
+        print(f"{depth:>5}  {cells[0]:^26}  {cells[1]:^26}")
+    totals = []
+    for run in (first, second):
+        samples = run["samples"]  # type: ignore[assignment]
+        reachable = [s for s in samples if s["reachable"]]
+        skipped = [s for s in reachable if s["would_skip"]]
+        share = f"{100 * len(skipped) / len(reachable):.1f}%" if reachable else "n/a"
+        totals.append(f"{len(reachable):>5}  {len(skipped):>5}  {share:>8}")
+    print(f"{'all':>5}  {totals[0]:^26}  {totals[1]:^26}")
+    print(
+        "\n'reach' is the nodes LMP could touch at all: the best move was quiet, was not the table\n"
+        "move and was not a killer. 'skip' is those where its quiet index reached the pruning\n"
+        "count. A row whose 'reach' is far below its neighbours is not a finding, it is a thin\n"
+        "sample -- distrust it rather than explain it."
+    )
+
+
 def report(path: Path) -> int:
     runs = [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
@@ -302,6 +338,7 @@ def report(path: Path) -> int:
     for run in runs:
         summarise(run)
     if len(runs) == 2:
+        side_by_side(runs[0], runs[1])
         moved = sorted(
             name
             for name in set(runs[0]["engine_source"]) | set(runs[1]["engine_source"])
