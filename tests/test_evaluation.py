@@ -18,6 +18,7 @@ from mikhail_letal.evaluation import (
     evaluate,
     game_phase,
     is_mate_score,
+    mobility,
 )
 from tools import gen_pst, tune_texel
 
@@ -261,6 +262,102 @@ def test_structure_terms_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
     assert evaluate(board) != plain
     assert evaluate(board.mirror()) == evaluate(board)  # the terms keep the colour symmetry
+
+
+# (c3) mobility. The term counts squares, so every test here fixes a position whose count a
+# reader can work out on a board and compares that number, rather than comparing one
+# implementation of the term against another.
+
+
+def test_mobility_counts_the_squares_a_piece_attacks_and_does_not_stand_on() -> None:
+    # A knight on d4 reaches b3, b5, c2, c6, e2, e6, f3 and f5 -- eight squares, none of them the
+    # a1 or h1 the kings stand on. Kings are not counted, so eight is the whole position's count.
+    assert mobility(chess.Board("8/8/8/8/3N4/8/8/K6k w - - 0 1")) == 8
+    # The same knight in a corner reaches two. This is the case an off-board test gets wrong.
+    assert mobility(chess.Board("N7/8/8/8/8/8/8/K6k w - - 0 1")) == 2
+    # A queen on d5 of an otherwise empty board: 3 up the file and 4 down, 3 left along the rank
+    # and 4 right, and 3, 3, 4, 3 on the four diagonals.
+    assert mobility(chess.Board("7k/8/8/3Q4/8/8/8/K7 w - - 0 1")) == 27
+    # Black's count is subtracted, so the same knight in Black's hands is the same number negated.
+    assert mobility(chess.Board("7k/8/8/8/3n4/8/8/K7 w - - 0 1")) == -8
+
+
+def test_mobility_stops_at_the_first_piece_on_a_ray() -> None:
+    """The case the definition turns on: a ray ends at the first piece it meets, and that square
+    counts only when the piece is not the mover's own."""
+    # White rooks a1 and a2, kings h1 and h8. The a1 rook's file ray ends immediately on its own
+    # rook and counts nothing; along the rank it has b1..g1 and then stops on its own king, so 6.
+    # The a2 rook has a3..a8 and b2..h2 and nothing at all down the file, so 13.
+    assert mobility(chess.Board("7k/8/8/8/8/8/R7/R6K w - - 0 1")) == 6 + 13
+    # Make the blocker Black's and the a1 rook gains exactly one square: the capture.
+    # Black's rook on a2 then has a3..a8, b2..h2, and a1.
+    assert mobility(chess.Board("7k/8/8/8/8/8/r7/R6K w - - 0 1")) == (6 + 1) - (6 + 7 + 1)
+
+
+def test_mobility_counts_only_knights_bishops_rooks_and_queens() -> None:
+    """Pawns and kings attack squares too, and none of those squares are counted.
+
+    Both positions are deliberately lopsided. The obvious pair -- a full symmetric pawn wall, and
+    a lone knight beside two kings -- gives 0 and 3 whether or not pawns and kings are counted,
+    because what they add cancels between the colours. They passed against an implementation that
+    counted every piece, which is why they are not the positions here.
+    """
+    # Kings and pawns only, three of them on one side and none on the other: still zero.
+    assert mobility(chess.Board("7k/8/8/8/8/2P5/PP6/K7 w - - 0 1")) == 0
+    # A knight on g1 behind its own pawn wall: e2 is its own pawn, so it counts f3 and h3 alone.
+    # Counting the eight pawns and the two kings as well would make this 13.
+    assert mobility(chess.Board("4k3/8/8/8/8/8/PPPPPPPP/4K1N1 w - - 0 1")) == 2
+
+
+def test_mobility_does_not_exclude_squares_defended_by_enemy_pawns() -> None:
+    """The plain count, not "safe" mobility.
+
+    Pinned as a test because the two differ by very little and the shipped weights were fitted
+    for the plain one: a later change to the safe variant has to be a deliberate refit, not a
+    quiet edit that leaves the weights measuring something else.
+    """
+    # The black pawn on d7 defends c6 and e6, and the white knight on d4 reaches both. Safe
+    # mobility would count six squares here.
+    assert mobility(chess.Board("7k/3p4/8/8/3N4/8/8/K7 w - - 0 1")) == 8
+
+
+def test_mobility_is_antisymmetric_under_mirroring() -> None:
+    """White's count less Black's has to flip sign when the colours are swapped, or a position
+    and its mirror would not get exactly opposite scores."""
+    for board in random_positions(60, seed=4242):
+        assert mobility(board.mirror()) == -mobility(board), board.fen()
+
+
+def test_mobility_term_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Round 70 after 8...O-O-O. The position ``test_structure_terms_can_be_switched_off`` uses
+    # has a mobility of exactly zero -- both sides developed the same pieces to mirrored squares
+    # -- so switching the term off there would change nothing and prove nothing.
+    board = chess.Board("2kr1b1r/pp1qpppp/2n2n2/3p4/3P1Bb1/1QPB4/PP1N1PPP/R3K1NR w KQ - 7 9")
+    assert mobility(board) != 0, "a position where the term contributes nothing proves nothing"
+    monkeypatch.setattr(ev, "MOBILITY_TERM", False)
+    without = evaluate(board)
+    monkeypatch.setattr(ev, "MOBILITY_TERM", True)
+    assert evaluate(board) != without
+    assert evaluate(board.mirror()) == evaluate(board)  # the term keeps the colour symmetry
+
+
+def test_mobility_enters_both_phases_with_a_weight_each(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The two weights and the phase blend, written out by hand and compared to the evaluation."""
+    board = chess.Board("4k3/pp6/5b2/8/8/2N5/PP6/4K3 w - - 0 1")
+    monkeypatch.setattr(ev, "MOBILITY_TERM", False)
+    without = evaluate(board)
+    monkeypatch.setattr(ev, "MOBILITY_TERM", True)
+    mobile = mobility(board)
+    assert mobile != 0
+    weights = ev.STRUCTURE_WEIGHTS
+    phase = game_phase(board)
+    contribution = (
+        weights["mobility_mg"] * mobile * phase
+        + weights["mobility_eg"] * mobile * (PHASE_TOTAL - phase)
+    ) / PHASE_TOTAL
+    # Within one centipawn: the blend truncates the whole of mg and eg together, so the term's
+    # own share of the score cannot be separated out exactly.
+    assert abs(evaluate(board) - (without + contribution)) <= 1.0
 
 
 # (d) mop-up

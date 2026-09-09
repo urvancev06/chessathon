@@ -25,6 +25,10 @@ pawn can stop them), doubled and isolated pawns, the bishop pair, rooks on open 
 pawn shield in front of the king. They are all computed from bitboards with shifts and masks,
 their weights are listed in ``STRUCTURE_WEIGHTS`` with a one-line reason each, and the whole
 group sits behind ``STRUCTURE_TERMS`` so its effect can be measured in games.
+
+Two later terms sit beside them behind switches of their own, so that each can be measured apart:
+``KING_DANGER_TERM``, a capped quadratic in the enemy force bearing on a king's zone, and
+``MOBILITY_TERM``, the count of squares each piece attacks that its own side does not occupy.
 """
 
 from __future__ import annotations
@@ -49,6 +53,12 @@ STRUCTURE_TERMS = True  # switch for bisection in development; the shipped value
 # tools/gen_pst.py STRUCTURE_PRIOR. tools/tune_texel.py can refit them toward that prior, and then
 # rewrites the numbers and the provenance line below; its fits of 2026-09-07 lost to v0.2 in the
 # arena (DECISIONS.md), so the prior ships.
+#
+# The two mobility weights are the exception: they are a regression on held-out positions rather
+# than a textbook guess, and their comments below say so. Every weight here is an integer number
+# of centipawns, which is what the whole evaluation is denominated in and what
+# tune_texel.structure_from_vector rounds its fits to, so a fitted fraction is rounded once, here,
+# and never again downstream.
 # tuned-by: tools/gen_pst.py prior, untuned (tune_texel.py fits of 2026-09-07 rejected in the arena)
 STRUCTURE_WEIGHTS: dict[str, int] = {
     # Per rank a passed pawn has advanced (2nd rank = 1 ... 7th rank = 6). Modest in the
@@ -70,7 +80,18 @@ STRUCTURE_WEIGHTS: dict[str, int] = {
     # Middlegame only: per own pawn on the king's file or its neighbours, one or two ranks
     # ahead of the king. The pawns keep checks and mating attacks away from the king.
     "king_shield": 10,
+    # Per square a knight, bishop, rook or queen attacks that its own side does not stand on,
+    # White's count less Black's. This is the one thing a piece-square table cannot express: a
+    # knight on d5 is worth what it is because of what it reaches from there, and what it reaches
+    # depends on where everything else stands. Fitted at 6.11 and rounded (see the note above).
+    "mobility_mg": 6,
+    # A square is worth more once there is less on the board, so the endgame weight is the larger
+    # and the phase blend tapers between the two. Fitted at 10.19 and rounded.
+    "mobility_eg": 10,
 }
+
+# Switch for the mobility term, separate from the other two so all three can be measured apart.
+MOBILITY_TERM = True
 
 # Switch for the king-danger term, separate from STRUCTURE_TERMS so the two can be measured apart.
 KING_DANGER_TERM = True
@@ -488,6 +509,43 @@ def king_danger(board: chess.Board, white_pawns: int, black_pawns: int) -> int:
     return black_danger - white_danger
 
 
+def mobility(board: chess.Board) -> int:
+    """White's mobile squares less Black's, over the knights, bishops, rooks and queens.
+
+    A piece's mobility is the number of squares it attacks that its own side does not already
+    stand on -- ``popcount(attacks & ~own)``. ``attacks_mask`` stops a slider's ray at the first
+    occupied square of either colour, so a rook standing behind its own rook counts nothing along
+    that file, while the enemy piece that blocks a ray *is* counted, because taking it is a move.
+
+    Why the term is here at all: a piece-square table says what a knight on d5 is worth, and it
+    has to say one number for every position, because a table indexed by one square cannot know
+    what the knight reaches from there. Mobility is that missing half, and it is the cheapest
+    positional term that measures a piece by what it can do rather than by where it stands.
+
+    Pawns and kings are left out. A pawn's activity is what the pawn-structure terms already
+    measure, and a king's mobility says more about how exposed it is -- which is the king-danger
+    term's subject -- than about how useful it is.
+
+    Squares defended by enemy pawns are **not** excluded. Excluding them is a different term
+    ("safe mobility") needing its own weights; this is the plain count, and the plain count is the
+    one the shipped weights were fitted for.
+
+    ``mikhail_letal.fasteval._mobility`` is the compiled port: it walks 0x88 rays instead of
+    reading attack masks, and ``tests/test_fasteval.py`` compares the two position by position.
+    """
+    total = 0
+    for colour in (chess.WHITE, chess.BLACK):
+        own = board.occupied_co[colour]
+        bb = own & (board.knights | board.bishops | board.rooks | board.queens)
+        count = 0
+        while bb:
+            lsb = bb & -bb
+            count += (board.attacks_mask(lsb.bit_length() - 1) & ~own).bit_count()
+            bb ^= lsb
+        total += count if colour == chess.WHITE else -count
+    return total
+
+
 def material_pst(board: chess.Board) -> tuple[int, int, int]:
     """The three running totals of the evaluation, computed from scratch.
 
@@ -571,6 +629,13 @@ def evaluate_running(board: chess.Board, mg: int, eg: int, phase: int) -> int:
     # Middlegame only, so it is added to mg alone and the phase blend below tapers it out.
     if KING_DANGER_TERM:
         mg += king_danger(board, pawns & white, pawns & black)
+
+    # Both phases, with a weight each: a mobile square is worth more in the endgame, so the two
+    # weights differ and the phase blend below tapers between them rather than away.
+    if MOBILITY_TERM:
+        mobile = mobility(board)
+        mg += STRUCTURE_WEIGHTS["mobility_mg"] * mobile
+        eg += STRUCTURE_WEIGHTS["mobility_eg"] * mobile
 
     # Blend the two phases. Truncate toward zero rather than floor so that a position and its
     # colour-swapped mirror get exactly opposite scores (floor division would bias negatives).

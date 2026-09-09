@@ -269,6 +269,48 @@ def rooks_on_semi_open_files(board: chess.Board, colour: chess.Color) -> int:
     return count
 
 
+_KNIGHT_STEPS = ((1, 2), (2, 1), (2, -1), (1, -2), (-1, -2), (-2, -1), (-2, 1), (-1, 2))
+_DIAGONALS = ((1, 1), (1, -1), (-1, 1), (-1, -1))
+_ORTHOGONALS = ((1, 0), (-1, 0), (0, 1), (0, -1))
+_SLIDER_STEPS: dict[chess.PieceType, tuple[tuple[int, int], ...]] = {
+    chess.BISHOP: _DIAGONALS,
+    chess.ROOK: _ORTHOGONALS,
+    chess.QUEEN: _DIAGONALS + _ORTHOGONALS,
+}
+
+
+def mobile_squares(board: chess.Board, colour: chess.Color) -> int:
+    """Squares the colour's knights, bishops, rooks and queens attack and do not stand on.
+
+    Rays are walked a step at a time and stop at the first piece met; that square counts only if
+    the piece is not the mover's own. ``evaluation.mobility`` says the same thing as
+    ``attacks_mask & ~own``, and ``build_dataset`` checks the two agree on every position.
+    """
+    own = board.occupied_co[colour]
+    total = 0
+    for square in board.pieces(chess.KNIGHT, colour):
+        file, rank = chess.square_file(square), chess.square_rank(square)
+        for step_file, step_rank in _KNIGHT_STEPS:
+            to_file, to_rank = file + step_file, rank + step_rank
+            if 0 <= to_file < 8 and 0 <= to_rank < 8:
+                if not own & chess.BB_SQUARES[chess.square(to_file, to_rank)]:
+                    total += 1
+    for piece_type, steps in _SLIDER_STEPS.items():
+        for square in board.pieces(piece_type, colour):
+            file, rank = chess.square_file(square), chess.square_rank(square)
+            for step_file, step_rank in steps:
+                to_file, to_rank = file + step_file, rank + step_rank
+                while 0 <= to_file < 8 and 0 <= to_rank < 8:
+                    target = chess.BB_SQUARES[chess.square(to_file, to_rank)]
+                    if board.occupied & target:
+                        if not own & target:
+                            total += 1
+                        break
+                    total += 1
+                    to_file, to_rank = to_file + step_file, to_rank + step_rank
+    return total
+
+
 def king_shield_pawns(board: chess.Board, colour: chess.Color) -> int:
     """Own pawns on the king's file or a neighbouring file, one or two ranks ahead of the king."""
     king = board.king(colour)
@@ -318,6 +360,11 @@ def features(board: chess.Board) -> Vector:
     x[structure_index("rook_open_file")] = difference(rooks_on_open_files)
     x[structure_index("rook_semi_open_file")] = difference(rooks_on_semi_open_files)
     x[structure_index("king_shield")] = difference(king_shield_pawns) * mg_share
+    # Mobility is in both phases with a weight each, so it enters the row twice, split by phase
+    # exactly as the two tables are.
+    mobile = difference(mobile_squares)
+    x[structure_index("mobility_mg")] = mobile * mg_share
+    x[structure_index("mobility_eg")] = mobile * eg_share
     return x
 
 

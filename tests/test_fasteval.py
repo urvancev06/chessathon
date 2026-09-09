@@ -15,6 +15,9 @@ every insufficient-material combination, and pawnless mop-ups from both sides.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import chess
 import pytest
@@ -26,6 +29,7 @@ from mikhail_letal.fastboard import Position, new_position, set_from_board
 from tests.test_fastboard import TRICKY_POSITIONS, playout_boards, sample_starts
 
 FULL_GATES = os.environ.get("LETAL_FULL_GATES") == "1"
+ROOT = Path(__file__).resolve().parent.parent
 
 # One position per structural term, so a term that is simply never exercised by the playouts
 # cannot slip through. The comment on each says what it is there to catch.
@@ -129,6 +133,117 @@ MIDDLEGAME_TERM_POSITIONS = [
 ]
 
 TERM_POSITIONS += MIDDLEGAME_TERM_POSITIONS
+
+
+# --------------------------------------------------------------------- the mobility oracle
+#
+# Mobility is the one term in the compiled evaluation that walks rays rather than reading a
+# summary, and a wrong ray shows up in the score comparison above only as "a few centipawns out
+# somewhere". So the count itself is compared, position by position, against python-chess's own
+# attack masks: a third implementation, written by someone else, which is what makes it an oracle
+# and not a restatement of our own code.
+
+
+def python_chess_mobility(board: chess.Board) -> int:
+    """``popcount(attacks & ~own)`` over both sides' knights, bishops, rooks and queens.
+
+    Written out here rather than imported from ``evaluation``, deliberately. The subject is the
+    0x88 ray walk in ``fasteval``, and comparing it against the other copy of our own definition
+    would prove only that the two copies match.
+    """
+    total = 0
+    for colour in (chess.WHITE, chess.BLACK):
+        own = board.occupied_co[colour]
+        count = 0
+        for piece_type in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN):
+            for square in board.pieces(piece_type, colour):
+                count += (board.attacks_mask(square) & ~own).bit_count()
+        total += count if colour == chess.WHITE else -count
+    return total
+
+
+# One piece besides the two kings, so the position's whole count is that piece's and the expected
+# number is one a reader can check on a board. Kings are not counted by the term.
+SINGLE_PIECE_MOBILITY = [
+    ("8/8/8/8/3N4/8/8/K6k w - - 0 1", 8),  # knight in the centre: b3 b5 c2 c6 e2 e6 f3 f5
+    ("N7/8/8/8/8/8/8/K6k w - - 0 1", 2),  # knight in a corner: what an off-board check gets wrong
+    ("7k/8/8/3Q4/8/8/8/K7 w - - 0 1", 27),  # queen on an empty board: all eight rays run out
+    ("7k/8/8/8/8/8/1P6/B5K1 w - - 0 1", 0),  # the bishop's one ray blocked by its own pawn
+    ("7k/8/8/8/8/8/1p6/B5K1 w - - 0 1", 1),  # ... blocked by an enemy pawn, which it may take
+    ("7k/8/8/8/8/8/R7/R6K w - - 0 1", 19),  # a rook behind its own rook: nothing up the file
+    ("7k/8/8/8/8/8/r7/R6K w - - 0 1", -7),  # behind an enemy rook: the capture counts
+    ("7k/3p4/8/8/3N4/8/8/K7 w - - 0 1", 8),  # c6 and e6 are pawn-defended and still counted
+]
+
+TERM_POSITIONS += [fen for fen, _ in SINGLE_PIECE_MOBILITY]
+
+
+@pytest.mark.parametrize(("fen", "expected"), SINGLE_PIECE_MOBILITY)
+def test_compiled_mobility_one_piece_at_a_time(fen: str, expected: int) -> None:
+    """Per piece rather than per position: with only kings beside it, the position's count is the
+    one piece's, so a ray that is wrong for one piece type cannot be masked by the others."""
+    board = chess.Board(fen)
+    pos = new_position()
+    set_from_board(pos, board)
+    assert int(fe._mobility(pos)) == expected, fen
+    # If the oracle disagrees with the hand-worked number, it is the oracle that is on trial.
+    assert python_chess_mobility(board) == expected, f"the oracle itself disagrees: {fen}"
+
+
+def test_compiled_mobility_matches_python_chess_on_the_curated_openings() -> None:
+    """Every rated game starts from one of these, so they are compared exactly, not sampled."""
+    from tests.test_fastboard import load_openings
+
+    pos = new_position()
+    fens = load_openings()
+    assert len(fens) == 219
+    for fen in fens:
+        board = chess.Board(fen)
+        set_from_board(pos, board)
+        assert int(fe._mobility(pos)) == python_chess_mobility(board), fen
+
+
+def test_compiled_mobility_matches_python_chess_position_by_position() -> None:
+    """Each position asserted on its own, never summed: a ray counted short in one direction and
+    long in another would cancel in a total and survive.
+
+    Reduced to 2,000 unless ``LETAL_FULL_GATES=1``, like the score comparison below.
+    """
+    count = 20_000 if FULL_GATES else 2_000
+    pos = new_position()
+    compared = 0
+    for board in playout_boards(count, seed=27182818, starts=sample_starts()):
+        set_from_board(pos, board)
+        assert int(fe._mobility(pos)) == python_chess_mobility(board), board.fen()
+        compared += 1
+    assert compared == count
+
+
+def test_compiled_mobility_is_compiled_by_the_import_itself() -> None:
+    """``_mobility`` is reached only through ``evaluate``, so nothing calls it by name at warm-up.
+    It still has to arrive compiled, or its first call would compile it on the game clock -- and
+    numba gives no error when that happens, only a slow move.
+
+    A fresh interpreter is the only honest way to ask. Asking in this process answers yes whatever
+    the import did, because the oracle tests above have already called ``fe._mobility`` directly
+    and that compiles it; the first version of this test asserted exactly that tautology and could
+    not be made to fail.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from mikhail_letal import fasteval; print(len(fasteval._mobility.signatures))",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=True,
+    )
+    # Exactly one: the signature `evaluate` calls it with. A second would mean the search is
+    # passing it something else and paying to compile that too.
+    assert result.stdout.strip() == "1", result.stdout + result.stderr[-2000:]
 
 
 @pytest.mark.parametrize("fen", MIDDLEGAME_TERM_POSITIONS)

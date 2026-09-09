@@ -40,13 +40,13 @@ from numba import njit
 
 from mikhail_letal import warmup
 from mikhail_letal.evaluation import (
-    MOBILITY_TERM,
     DRAW_SCORE,
     KING_ATTACK_UNITS,
     KING_DANGER_CAP,
     KING_DANGER_SCALE,
     KING_DANGER_SHELTERED_PAWNS,
     KING_DANGER_TERM,
+    MOBILITY_TERM,
     PHASE_TOTAL,
     STRUCTURE_TERMS,
     STRUCTURE_WEIGHTS,
@@ -572,20 +572,21 @@ def _king_danger(pos: Position) -> int:
 
 @njit(cache=False)
 def _mobility(pos: Position) -> int:
-    """White's mobile squares minus Black's, over the knights, bishops, rooks and queens.
+    """White's mobile squares less Black's: the port of `evaluation.mobility`.
 
     A piece's mobility is the number of squares it attacks that its own side does not already
-    occupy -- `popcount(attacks & ~own)` in bitboard terms, which is what makes the two engines
-    comparable square for square. Sliders are blocked: a ray stops at the first occupied square,
-    and that square counts only when the piece standing there can be captured, so a rook behind
-    its own rook contributes nothing along that file.
+    stand on -- `popcount(attacks & ~own)` in the bitboard terms the specification uses. Here
+    there are no attack masks, so each ray is walked square by square from the piece: an empty
+    square counts and the walk goes on; the first occupied square ends the walk, and counts only
+    if the piece standing there is not our own. A rook behind its own rook therefore counts
+    nothing along that file, and one behind an enemy rook counts the capture.
 
-    Pawns and kings are left out. A pawn's activity is already what the pawn-structure terms
-    measure, and a king's mobility says more about how exposed it is than about how useful it is,
-    which is the king-danger term's job.
+    Pawns and kings are left out, and squares defended by enemy pawns are **not** excluded --
+    the reasons are in `evaluation.mobility`, which is the specification for this function.
 
-    Squares defended by enemy pawns are *not* excluded. That would be "safe mobility", a
-    different term needing its own weights; this is the plain count.
+    The walk is what makes the term cost what it does: a queen on an open board is 8 rays of up
+    to 7 squares each, and it runs at every node. `tests/test_fasteval.py` checks it against
+    `board.attacks_mask(sq) & ~own` in python-chess, position by position.
     """
     board = pos.board
     total = 0

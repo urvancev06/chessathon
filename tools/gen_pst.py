@@ -6,7 +6,8 @@ it is, how far advanced, whether it sits on a rim, a long diagonal or a castled 
 by a named parameter from ``PARAMETERS``. Nothing is copied from any published engine: the numbers
 are ours by construction, and re-running this script reproduces them bit for bit. The piece values
 are the universal textbook 100/320/330/500/900 and the structural weights (``STRUCTURE_PRIOR``) are
-hand-chosen at textbook magnitudes; all are recorded as such (untuned).
+hand-chosen at textbook magnitudes; all are recorded as such (untuned). The two mobility weights
+are the exception -- a regression rather than a guess -- and their entries say so.
 
 This module is what ``tools/tune_texel.py`` regularises toward: the shipped ``weights/pst.json``
 and the ``STRUCTURE_WEIGHTS`` in ``mikhail_letal/evaluation.py`` are the tuner's output (v0.3),
@@ -423,6 +424,8 @@ STRUCTURE_PRIOR: dict[str, Param] = {
     "rook_open_file": Param(20, "a rook on a pawnless file reaches the enemy camp"),
     "rook_semi_open_file": Param(10, "a rook on a file without an own pawn presses the enemy pawn"),
     "king_shield": Param(10, "middlegame, per own pawn one or two ranks in front of the king"),
+    "mobility_mg": Param(6, "per square a piece attacks and does not stand on; fitted 6.11"),
+    "mobility_eg": Param(10, "the same square is worth more with less on the board; fitted 10.19"),
 }
 
 
