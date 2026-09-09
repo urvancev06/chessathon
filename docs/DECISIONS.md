@@ -1789,6 +1789,15 @@ search reads at every node, to save a dtype.
 
 ## 2026-09-09 — Three pruning techniques, chosen by published Elo rather than by plausibility
 
+> **This batch measured −21 Elo and has not shipped. Read to the end of the file before acting on
+> anything below.** Screened head-to-head against the identical build without it, 300 games:
+> +120 =42 −138, 47.0 % ± 5.2 %. Two defects were found in it afterwards — late move pruning had
+> no principal-variation guard, and the justification quoted below describes an ordering
+> (captures sorted by static exchange evaluation) that exists only on a branch. This guard is here
+> because `DECISIONS.md` reads newest-at-the-bottom, so a reader in a hurry meets the published
+> +116 in this entry and would have to keep reading to find that it did not transfer. Pointed out
+> by `chessathon-86`, which found the same defect in its own entry first.
+
 A four-lane research pass read the literature for techniques with **measured** Elo, then checked
 each against this code, then had a separate pass try to refute it. The ranking criterion was not
 "is this a good idea" but **"is the published effect large enough for a 300-game screen resolving
