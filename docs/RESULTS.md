@@ -20,6 +20,41 @@ start and end of the run (16-core machine); "solo" means nothing else was runnin
 
 ## Other measurements
 
+### 2026-09-09 — Quiescence checks (`QS_CHECK_PLIES`), node cost and effect
+
+`.venv/bin/python tools/bench_qchecks.py --depth 7 --positions 24 --plies 0 1 2`, on branch
+`ct-qchecks` rebased onto `main` at `0f3562b`. Node counts are deterministic and reproduced
+exactly across two runs; load average was 12-14 throughout (a concurrent 300-game screen), so the
+seconds column is contaminated and is not quoted -- the same two runs gave 1.11x and 1.07x for
+the same node ratio of 1.12x, which is a direct measurement of that noise.
+
+| QS_CHECK_PLIES | nodes | x | moves changed | scores changed | max cp shift |
+|---|---|---|---|---|---|
+| 0 | 1,608,956 | 1.00 | -- | -- | -- |
+| 1 | 1,799,192 | 1.12 | 2/24 | 4/24 | 20 |
+| 2 | 1,932,703 | 1.20 | 2/24 | 4/24 | 27 |
+
+Two plies changes the same two moves as one ply for twice the extra cost, so one ply is the
+setting. At depth 6 the cost was 1.07x, so the multiplier grows with depth: deeper search means
+proportionally more quiescence nodes, and at the real time control it will exceed 1.12x.
+
+Why the cost is this low, which is not the filter being clever: quiet checks are rare. Across 60
+played-out opening positions there were 54 legal quiet checks in total -- under one per position
+-- and only 27% of positions had one survive `_check_is_safe`, which keeps 44% of what is offered.
+
+The two moves that changed, judged by Stockfish at depth 18 (yardstick only, never in the zip):
+
+| position | checks off | checks on | verdict |
+|---|---|---|---|
+| `rn1qkbnr/pp2pppp/2p3b1/8/3P4/4B1N1/PPP2PPP/R2QKBNR b KQkq - 4 6` | g8f6 (-24) | d8b6 (-22) | better by 2 cp |
+| `rnbqk1nr/1p3ppp/p7/2bp4/P7/1N6/1PP2PPP/R1BQKBNR b KQkq - 1 7` | c5e7 (-1) | c5d6 (+14) | better by 15 cp |
+
+Both changed moves are the better one, but this is **not a strength claim**: n = 2, two of two
+agreeing has probability 0.25 by chance, and the 2 cp difference is inside Stockfish's own
+evaluation jitter at that depth. One move is clearly better, one is a wash, and nothing is known
+about the 22 positions where the move did not change. This supports running a match. It does not
+support shipping.
+
 ### 2026-09-06/07 — Stage 0 integration (dev box, not the platform core)
 
 | measurement | value | how |

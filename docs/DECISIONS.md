@@ -1786,3 +1786,54 @@ there.
 **Rejected: two int32 halves in `meta`.** It avoids the int64 undo stack and keeps "every array is
 int32" intact, but every read and write of the key becomes a shift-and-mask pair, on a value the
 search reads at every node, to save a dtype.
+
+## 2026-09-09 — Quiescence searches the quiet checking moves for one ply
+
+A capture-only quiescence calls a position quiet whenever the move that decides it happens to
+take nothing, and hands the static evaluation a position that is about to be mated. `gen_checks`
+adds the quiet half of the forcing moves for the first `QS_CHECK_PLIES` quiescence plies.
+
+**How the checks are found. Alternative rejected: make the move and ask the board.** Testing a
+quiet move by playing it and calling `in_check` is a few lines and obviously correct, but it
+costs a make/unmake for every quiet move at every quiescence node, which is most of a move
+generation on top of the one already done. Instead the answer is geometry: in the 0x88 layout the
+direction from one square to another depends only on their difference, so `_DIR_TABLE` and
+`_KNIGHT_HOP` answer "does a piece on this square attack that king" with a table lookup, and a
+single ray walk settles whether the line is clear. Discovered checks are the same walk from the
+square the piece leaves. The risk this takes on is a geometry bug that silently mis-reports a
+check, which is why the test compares against python-chess move by move over every legal quiet
+move rather than on spot positions, and requires the sample to contain both a direct and a
+discovered check.
+
+**Alternative rejected: a dedicated generator.** `gen_checks` filters `gen_pseudo`'s output in
+place rather than generating checking moves directly. A dedicated generator would save the writes
+but not the work -- finding a rook's quiet destinations *is* the ray walk `gen_pseudo` already
+does -- and it would put a second copy of the move rules in the engine to keep correct.
+
+**Castling and under-promotions are excluded.** A castling check is delivered by the rook, which
+a from-to test does not see, and a knight-promotion check is rare enough not to earn a special
+case in either generator. Both are omissions of tactics, not correctness bugs: the moves are
+simply not searched in quiescence.
+
+**The safety filter is a stand-in and lives in one function.** `_check_is_safe` keeps every pawn
+check and drops any other check that lands on a square the opponent defends, on the grounds that
+a quiet check that hangs a piece usually just loses it. It is deliberately blunt and it is wrong
+in two known ways, both recorded at the function: defenders are counted before the move, and a
+square defended only by the enemy king counts as defended. The correct answer is a static
+exchange evaluation, and the reason the filter is one function with one call site is so that
+swapping it is a one-line change.
+
+**A note on the SEE contract, because it cost a round trip.** The `see(pos, move)` signature was
+fixed as "a quiet move returns 0", and the plan was to filter checking moves with `see(...) < 0`.
+Most checking moves are quiet, so every one of them scores 0 and the filter is a no-op -- exactly
+the unbounded case it exists to prevent. A SEE that is useful here has to run the exchange with
+the mover standing on the destination square and the opponent to move.
+
+**One ply, not two, and not yet shipped.** Measured at depth 7 over 24 curated openings: one ply
+costs 1.12x nodes, two costs 1.20x and changes the same two moves of twenty-four, so two buys
+nothing. The feature changes the engine's move in 2 of 24 positions and its score in 4; both
+changed moves are better by Stockfish at depth 18, by 2 cp and 15 cp. That is n = 2, it has a
+one-in-four chance of coming out that way by luck, and the 2 cp case is inside Stockfish's own
+jitter -- so it is a reason to run a match and not a reason to ship. The multiplier also grows
+with depth (1.07x at depth 6, 1.12x at depth 7), so the real time control will cost more than the
+measurement does. Recorded in RESULTS.md, 2026-09-09.

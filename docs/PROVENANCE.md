@@ -19,6 +19,7 @@ and a judge asking "where did this number come from?" has nothing else to read.
 | `MAX_PLY` | 128 | code | none | 2026-09-06 | structural: recursion bound for search + quiescence + extensions |
 | check extension | +1 ply when in check | code | none | 2026-09-06 | textbook; applied before the TT probe |
 | `QS_EVASION_PLIES` | 4 | code | none | 2026-09-07 | quiescence searches all evasions this deep; chosen so eight-queens-a-side positions keep depth 1 under 100k nodes |
+| `QS_CHECK_PLIES` | 1 | `tools/bench_qchecks.py --depth 7 --positions 24` | 24 curated openings at depth 7, node counts deterministic (RESULTS.md, 2026-09-09) | 2026-09-09 | how many quiescence plies generate the quiet checking moves. 1 costs 1.12x nodes, 2 costs 1.20x and changes the same two moves of 24, so 2 buys nothing for the extra cost; 0 turns the feature off and is how it is measured. **Not validated by a match.** The two moves it changes are both better by Stockfish at depth 18 (+2 and +15 cp), which is n=2 and a direction, not an Elo |
 | `DRAW_TIEBREAK_MARGIN` | 300 | code | none | 2026-09-07 | root tie-break threshold: "clearly ahead" = at least a minor piece |
 | history heuristic bonus | `depth * depth` | code | none | 2026-09-06 | textbook |
 | time constants | see CALIBRATION.md | code | none | 2026-09-06 | brief §6.2 initial values, calibrated on 2026-09-08 in the rows below |
