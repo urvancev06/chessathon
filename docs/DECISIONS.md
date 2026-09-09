@@ -1959,3 +1959,44 @@ direction the author already leaned, which is not a coincidence and should not b
 
 Recorded by chessathon-4c from the day's incidents; the predicate question is 86's, the
 pre-registration habit was d9's ask and became all three sessions' practice.
+
+## 2026-09-09 — Rejected: a passed-pawn race term, on a position with no passed pawns
+
+Round 88 was lost by trading into a king-and-pawn ending the engine misread by about 435 cp at
+depth 19 over 2.28M nodes. The proposed fix was a passed-pawn race term — king distance to the
+promotion square plus an unstoppable-passer bonus by the square rule — on the grounds that a
+passer is currently worth `passed_pawn_eg` (20) per rank and nothing more, so a pawn that queens
+by force scores the same as one that is merely advanced. That gap is real and the term was
+written.
+
+**It is rejected because the position that motivated it has no passed pawns.** After 41.Kxe2 the
+position is `8/8/2k5/1pp3p1/p5P1/P4P2/1P2K3/8 b - - 0 41`: a4 is held by a3, b5 and c5 by b2, g4
+and g5 block each other, f3 is stopped by g5. **Not one passed pawn on either side**, so neither
+the square rule nor a king-distance term could have fired. The term would have done exactly
+nothing in the game it was designed for.
+
+What actually decided it is visible in the continuation — 42.f4 gxf4 43.g5 b4 ... 48...b2
+49...b1=Q. Black had a three-against-two queenside majority and **created** a passer by force
+while our kingside majority was neutralised. That is majority and breakthrough evaluation —
+*candidate* passers, not existing ones — which is a substantially harder and more expensive
+computation than the square rule, and there is no cheap targeted version of it.
+
+**Two things worth keeping from how this was caught.**
+
+The check that stopped it was **asking for the FEN before writing code against the story**. The
+mechanism was plausible, the missing term was real, the endgame statistic (15 of 18 games reach
+four or fewer non-pawn pieces) was true, and the conclusion was still wrong — because nobody had
+looked at whether the term would fire in the position that motivated it.
+
+And a cost claim was accepted that had not been measured: "cheaper than mobility" was a statement
+about the **node rate**, but mobility's cost was 8.7% rate against **1.556x nodes-to-depth** — the
+rate was the small half. Looping over fewer pieces controls the half that was not the problem.
+Worse, this term was to be deliberately *large* (a queen less a pawn), and large scores are what
+mis-guess a 40 cp aspiration window and flip positions across futility thresholds, which is the
+mechanism that took aspiration's hit rate from 8/10 to 5/10 on the mobility build. A rarely-firing
+large term may cost more tree per firing than an always-firing gentle one. Unmeasured, in both
+directions.
+
+**Not carried forward.** The code was written and discarded rather than left on a branch: a
+Python-only evaluation term breaks integer-for-integer parity with `fasteval`, and half-ported
+unvalidated work the night before a freeze is worth less than the record of why it was dropped.
