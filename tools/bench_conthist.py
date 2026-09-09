@@ -15,11 +15,23 @@ first. Each pair is then a minute apart rather than simultaneous, which controls
 not an instantaneous background spike -- hence the load check below, and hence per-round ratios
 rather than one pooled number, so a spike shows up as scatter instead of as an answer.
 
+**Name the baseline by commit, never by branch.** `main` moves several times a day on this
+repository, and the first version of this docstring said ``git checkout main -- mikhail_letal/``
+-- which by the time it was run would have measured continuation history against a pruning batch
+that landed after the branch point, and reported the difference as the cost of continuation
+history. The baseline is the branch's merge base, which ``git merge-base main HEAD`` prints:
+
+    BASE=$(git merge-base main HEAD)
     .venv/bin/python tools/bench_conthist.py --label conthist --json bench.jsonl
-    git checkout main -- mikhail_letal/
-    .venv/bin/python tools/bench_conthist.py --label main --json bench.jsonl
-    ...
+    git checkout "$BASE" -- mikhail_letal/
+    .venv/bin/python tools/bench_conthist.py --label baseline --json bench.jsonl
+    git checkout HEAD -- mikhail_letal/          # ... and alternate which arm goes first
     .venv/bin/python tools/bench_conthist.py --report bench.jsonl
+
+``--report`` records the hash of the engine source each arm imported and refuses a pair whose two
+arms share one. Note what that check does *not* do: it proves the arms differ, not that they
+differ only in the thing under test. Two builds separated by an unrelated feature also have two
+distinct hashes and satisfy it perfectly, which is why it prints the per-file breakdown as well.
 
 What the two numbers mean
 -------------------------
@@ -56,22 +68,31 @@ ROOT = Path(__file__).resolve().parent.parent
 OPENINGS = ROOT / "data" / "openings.txt"
 
 
-def engine_fingerprint() -> str:
-    """A hash of the engine source that this process actually imported.
+def engine_fingerprint() -> dict[str, str]:
+    """A hash per module of the engine source this process actually imported.
 
     Not the git commit. The two arms are produced by swapping ``mikhail_letal/`` under a fixed
     ``HEAD``, so ``git rev-parse HEAD`` says the same thing for both and would identify neither;
-    and `main` has moved twice in a day under people measuring against it, so a number without
+    and `main` moves several times a day under people measuring against it, so a number without
     something identifying its source is not comparable to anything. This hashes the files that
-    were imported, which is the only thing that is true regardless of what the branch says --
-    and it lets `--report` refuse a pair whose two arms turn out to be the same build, which is
-    the "measured the wrong engine" failure that a swap-based harness invites.
+    were imported, which is true regardless of what the branch says.
+
+    Per module rather than one hash for the tree, because one hash answers a narrower question
+    than it appears to. It proves the two arms *differ*; it cannot say they differ **only in the
+    thing under test**, and two builds separated by an unrelated feature satisfy it perfectly.
+    The per-module map lets ``--report`` print exactly which modules moved, so a baseline that
+    has drifted somewhere unexpected is visible rather than merely hashed.
     """
-    digest = hashlib.sha256()
+    fingerprint = {}
     for path in sorted((ROOT / "mikhail_letal").glob("*.py")):
-        digest.update(path.name.encode("utf-8"))
-        digest.update(path.read_bytes())
-    return digest.hexdigest()[:12]
+        fingerprint[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    return fingerprint
+
+
+def overall(fingerprint: dict[str, str]) -> str:
+    """One short hash standing for a whole engine source, for printing and equality."""
+    joined = "".join(f"{name}:{digest}" for name, digest in sorted(fingerprint.items()))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:12]
 
 
 def curated_positions(count: int) -> list[str]:
@@ -117,7 +138,7 @@ def measure(
 
     fingerprint = engine_fingerprint()
     load = os.getloadavg()[0]
-    print(f"[{label}] engine source {fingerprint}")
+    print(f"[{label}] engine source {overall(fingerprint)} ({len(fingerprint)} modules)")
     print(f"[{label}] depth {depth}, {len(fens)} curated positions, {rounds} measured rounds")
     print(f"[{label}] load average at start: {load:.2f} on {os.cpu_count()} cores")
     if load > 1.5:
@@ -173,21 +194,37 @@ def report(path: Path) -> int:
     # The check that a swap-based harness most needs: if the source that was actually imported is
     # the same on both sides, the swap did not happen and the whole comparison is of one build
     # against itself -- which would report a ratio of about 1.000 and look entirely reasonable.
-    sources = {name: {run["engine_source"] for run in by_label[name]} for name in labels}
-    for name, seen in sources.items():
+    sources: dict[str, dict[str, str]] = {}
+    for name in labels:
+        seen = {overall(run["engine_source"]): run["engine_source"] for run in by_label[name]}
         if len(seen) != 1:
             raise SystemExit(
-                f"'{name}' was measured on more than one engine source: {sorted(seen)}"
+                f"'{name}' was measured on more than one engine source: {sorted(seen)}. The tree "
+                "changed between its runs, so they are not repeats of one measurement."
             )
-    if sources[feature] == sources[baseline]:
+        sources[name] = next(iter(seen.values()))
+    if overall(sources[feature]) == overall(sources[baseline]):
         raise SystemExit(
-            f"both arms imported the same engine source ({sources[feature].pop()}): the source "
+            f"both arms imported the same engine source ({overall(sources[feature])}): the source "
             "was never swapped, so this compares a build with itself"
         )
 
+    # Which modules actually moved between the arms. The equality check above proves only that
+    # they differ; this is what shows whether they differ *only* in the thing under test. A
+    # baseline picked by branch rather than by merge base shows up right here, as modules nobody
+    # expected to be in the comparison.
+    moved = sorted(
+        name
+        for name in set(sources[feature]) | set(sources[baseline])
+        if sources[feature].get(name) != sources[baseline].get(name)
+    )
     print(f"pairing {len(by_label[feature])} run(s) of each, in the order taken")
     for name in (baseline, feature):
-        print(f"  {name:>10}: engine source {next(iter(sources[name]))}")
+        print(f"  {name:>10}: engine source {overall(sources[name])}")
+    print(f"  modules differing between the arms: {', '.join(moved) if moved else 'none'}")
+    print("  everything listed is inside this comparison. If a module you did not change is")
+    print("  there, the baseline is not the branch's merge base and the number means something")
+    print("  other than what you are about to call it.")
     print()
     ratios: list[float] = []
     totals = {name: [0, 0.0] for name in labels}
