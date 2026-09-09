@@ -966,6 +966,20 @@ no `flag` termination in any chunk, and `low_clock_ms` above 5 000 ms (three tim
 `panic_ms` floor). **If this fails, nothing is promoted, whatever the Elo shows**, and the failure
 is recorded in `RESULTS.md` as the reason. A flag in 300 games is disqualifying on its own.
 
+> **Superseded, 9 September, by amendment 7 below — read that before applying this step.** The
+> clock half of this condition is no longer operative. A minimum over `n` is an extreme-value
+> statistic: it can only worsen as games are added, so this rule got strictly harder to pass the
+> larger the sample it also demanded. Amendment 7 replaces it with a rate — at most 2 % of games
+> below 5 000 ms — authored blind by `chessathon-64` and adopted as written. **The flag half stands
+> unchanged**, and it is the half with a direct consequence.
+>
+> This note exists because the section it sits in announces that it "supersedes the numbered cases
+> above" and restates the rule whole, which invites reading it alone as operative. Found by
+> `chessathon-2c` re-deriving the v1.1 verdict from the surviving PGNs: applied as written, this
+> step **fails** on a single game at 3 729 ms and returns "nothing is promoted"; applied with
+> amendment 7, the same match **passes** at 2 of 200. A restatement that goes stale is worse than
+> the patchwork it replaced, because it tells the reader not to look further.
+
 **Step 2 — one look, on the pooled total.** The Elo decision is taken **once**, on every game
 completed, whatever that number turns out to be. The chunks exist to bound the cost of a crash, not
 to provide three chances. An early chunk may **stop** the match for futility — a disaster visible at
