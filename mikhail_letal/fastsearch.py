@@ -987,11 +987,17 @@ def negamax(
     # This is the pruning most likely to survive a weak evaluation: the margin is material-sized,
     # so the question it asks is "am I a clear piece up", which our evaluation answers reliably,
     # rather than a positional judgement, which it does not.
+    #
+    # The third guard is `beta - alpha == 1`, a null window, which is how principal variation
+    # search marks a node it does not expect to be on the principal variation. Returning a static
+    # bound at a PV node would replace a real score with an estimate and corrupt what reaches the
+    # root. This engine has no explicit node-type flag, so the window width is the test.
     if (
         REVERSE_FUTILITY_PRUNING
         and depth <= REVERSE_FUTILITY_MAX_DEPTH
         and in_chk == 0
         and not mate_bounds
+        and beta - alpha == 1
     ):
         margin = REVERSE_FUTILITY_MARGIN * depth
         static = _cached_eval(pos, st, ev, key)

@@ -559,7 +559,19 @@ def test_aspiration_windows_keep_the_score_exact_without_the_window_heuristics()
     heuristics off, aspiration and the full window agree exactly, which is what says the
     aspiration re-searches themselves lose nothing.
     """
-    flags = ("LATE_MOVE_REDUCTIONS", "NULL_MOVE_PRUNING", "FUTILITY_PRUNING", "DELTA_PRUNING")
+    flags = (
+        "LATE_MOVE_REDUCTIONS",
+        "NULL_MOVE_PRUNING",
+        "FUTILITY_PRUNING",
+        "DELTA_PRUNING",
+        # Added 9 September with the pruning batch. Reverse futility compares the static
+        # evaluation against beta and is gated on a null window; late move pruning is gated on the
+        # mate-bound test, which reads both. Both are window-dependent in exactly the way this
+        # test is about, and omitting them is what made it fail when they landed: aspiration and
+        # the full window disagreed by 8 cp on this position.
+        "REVERSE_FUTILITY_PRUNING",
+        "LATE_MOVE_PRUNING",
+    )
     saved = {name: getattr(search_module, name) for name in flags}
     saved_windows = search_module.ASPIRATION_WINDOWS
     try:

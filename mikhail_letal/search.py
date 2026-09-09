@@ -764,6 +764,24 @@ class Engine:
         # and "doing nothing" are exactly what decides the position.
         mate_bounds = alpha <= -MATE_THRESHOLD or beta >= MATE_THRESHOLD
 
+        # (8b) Reverse futility, "static null move" (see REVERSE_FUTILITY_PRUNING). The mirror of
+        # futility: the position is so far above beta that the opponent will not enter it, so no
+        # move is generated at all. Returns the margin-adjusted score, a valid and tighter lower
+        # bound than beta. Same two guards as futility, for the same reason.
+        if (
+            REVERSE_FUTILITY_PRUNING
+            and depth <= REVERSE_FUTILITY_MAX_DEPTH
+            and not in_check
+            and not mate_bounds
+            and beta - alpha == 1
+        ):
+            margin = REVERSE_FUTILITY_MARGIN * depth
+            static = self._evaluate(search_board)
+            if static - margin >= beta:
+                del path[key]
+                self._path_draw = outer_path_draw
+                return static - margin
+
         # (9) Null-move pruning (see NULL_MOVE_PRUNING for the idea and the guards).
         if (
             NULL_MOVE_PRUNING
@@ -797,6 +815,18 @@ class Engine:
                 futility_bound = bound
         pruned_any = False
 
+        # (10b) Late move pruning (see LATE_MOVE_PRUNING). Past a depth-scaled count the
+        # remaining quiet moves are not searched at all rather than merely reduced. Consults no
+        # evaluation, so it is worth exactly what the move ordering is worth.
+        prune_late_moves = (
+            LATE_MOVE_PRUNING
+            and depth <= LATE_MOVE_PRUNING_MAX_DEPTH
+            and not in_check
+            and not mate_bounds
+        )
+        lmp_count = LATE_MOVE_PRUNING_COUNTS[depth] if prune_late_moves else 0
+        quiets_searched = 0
+
         reduce_late = LATE_MOVE_REDUCTIONS and depth >= LMR_MIN_DEPTH and not in_check
         best_score = -_INFINITY
         best_move: chess.Move | None = None
@@ -808,7 +838,21 @@ class Engine:
                 # futility bound, which is at most alpha, so it cannot improve on what we have.
                 pruned_any = True
                 continue
+            if (
+                prune_late_moves
+                and stage > STAGE_KILLER
+                and searched != 0
+                and quiets_searched >= lmp_count
+            ):
+                # `stage > STAGE_KILLER` is the quiet band: the table move, the captures and both
+                # killers are all ordered ahead of anything this can reach. `searched != 0` keeps
+                # futility's rule that the first move is never skipped, so "no legal move below"
+                # still means mate or stalemate.
+                pruned_any = True
+                continue
             search_board.push(move)
+            if stage > STAGE_KILLER:
+                quiets_searched += 1
             if searched == 0:
                 # (11) The first move searched is the principal variation candidate: the
                 # ordering believes in it, so it gets the full window and its score is what
