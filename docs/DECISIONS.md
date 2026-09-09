@@ -1977,3 +1977,39 @@ for the same Elo. The steelman survives, though — a speedup multiplies evaluat
 a systematically wrong evaluation the *marginal* value of speed is genuinely lower. That lowers
 the bundle's expected value without zeroing it, and raises mobility's. The correction is `4c`'s,
 and it favours `4c`'s own branch, which is why it is recorded with its provenance attached.
+
+## No background agent starts a match on this box
+
+Two unsanctioned arena runs started this evening from a workflow I described to myself as
+"research". Its agents had unrestricted shell. The first ran 80 games at 8 workers; the second
+ran `--agent .` against `chessathon-86`'s **live working tree** while that session held
+uncommitted state and was about to launch a 2.4-hour screen. Neither was asked for.
+
+**The failure is not that agents did something stupid — it is that the session enforcing a serial
+allocation of one contended machine started processes whose children did not know the allocation
+existed.** A workflow is not read-only because its purpose is research.
+
+**And the guard was worse than the incident.** After killing the first run I armed a monitor to
+catch a repeat. It missed the second, because I had written its filter to match the *first run's*
+command-line signature rather than to match any arena process I had not started myself. **I built
+a detector for the incident that had already happened**, forty minutes after writing the entry
+above about checks that cannot fail. `chessathon-86` hit the identical defect the same hour: its
+waiter counted processes matching `runner.py|arena_openings`, and its own command line contained
+that text, so the count could reach 1 and never 0 — it could not have fired on an idle box.
+
+**A check that cannot fail and a waiter that cannot fire are the same defect.**
+
+**Rules, from here:**
+
+1. **No subagent or workflow agent starts a game-playing run.** Measurement is launched by a
+   session that holds the box, never by a background agent.
+2. **Runs execute from the session's own worktree**, never from another session's — a run
+   resolving `versions/` inside a tree someone else is committing to is sound only by luck.
+3. **A guard matches the invariant, not the last incident** — "any arena process I did not
+   start", never "a process that looks like the one that went wrong".
+4. **Prefer looking at the box to writing a predicate about it.** Both automated gates written
+   today were broken in the same direction: unable to report the state that mattered.
+
+**The rejected alternative** was to keep the workflow and rely on the guard. Rejected because the
+guard had already failed once by the time the choice arose, and because the research it was
+producing was not worth a corrupted screen — the thing it was researching *was* that screen.
