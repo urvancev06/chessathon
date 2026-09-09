@@ -185,8 +185,10 @@ REVERSE_FUTILITY_MARGIN = 85  # per remaining ply
 
 # Late move pruning: past a move count that grows with depth, remaining quiet moves are not
 # searched at all rather than merely reduced. It contains no evaluation term, so it is worth
-# exactly what the move ordering is worth -- and the ordering already puts the table move,
-# captures by static exchange evaluation, and two killers ahead of anything this can reach.
+# exactly what the move ordering is worth. NOTE: this originally read that the ordering puts
+# 'captures by static exchange evaluation' ahead of anything this reaches -- SEE is on a branch,
+# and main orders captures by MVV-LVA. The comment described the build intended rather than the
+# one screened, which is plausibly why the batch measured negative. Found by chessathon-4c.
 LATE_MOVE_PRUNING = True  # switch for bisection; the shipped value is True
 LATE_MOVE_PRUNING_MAX_DEPTH = 4  # deeper than this, a late quiet move is reduced but still searched
 LATE_MOVE_PRUNING_COUNTS = (0, 5, 9, 15, 23)  # quiet moves searched before pruning, by depth
@@ -818,11 +820,14 @@ class Engine:
         # (10b) Late move pruning (see LATE_MOVE_PRUNING). Past a depth-scaled count the
         # remaining quiet moves are not searched at all rather than merely reduced. Consults no
         # evaluation, so it is worth exactly what the move ordering is worth.
+        # Null window only, mirroring fastsearch: pruning a move out of a PV node removes it from
+        # the answer entirely rather than merely mis-scoring it.
         prune_late_moves = (
             LATE_MOVE_PRUNING
             and depth <= LATE_MOVE_PRUNING_MAX_DEPTH
             and not in_check
             and not mate_bounds
+            and beta - alpha == 1
         )
         lmp_count = LATE_MOVE_PRUNING_COUNTS[depth] if prune_late_moves else 0
         quiets_searched = 0

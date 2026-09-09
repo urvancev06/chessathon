@@ -1039,12 +1039,23 @@ def negamax(
     # (10b) Late move pruning: past a depth-scaled count, remaining quiet moves are not searched
     # at all rather than merely reduced. Unlike futility this consults no evaluation, so it is
     # worth exactly what the move ordering is worth -- and by the time it fires the table move,
-    # the captures ordered by static exchange evaluation and both killers have already been tried.
+    # the captures and both killers have already been tried. NOTE: this said "captures ordered by
+    # static exchange evaluation" -- SEE is on a branch and main orders by MVV-LVA, so the comment
+    # described the build intended rather than the one screened.
+    # `beta - alpha == 1` for the same reason reverse futility carries it, and the argument is
+    # STRONGER here. Reverse futility at a principal-variation node substitutes an estimate for a
+    # score: wrong, but a number. Late move pruning at a PV node removes the move from the search
+    # entirely -- if the best move is the sixth quiet one, it is never generated into the answer
+    # and the principal variation is built from something else. And `depth <= 4` is true at every
+    # node during iterations 1 to 4, which seed the table and the root ordering that every deeper
+    # iteration starts from, so a PV corrupted at depth 2 steers depth 8 rather than being
+    # discarded by it. Found by chessathon-4c reading this against the guard twenty lines above.
     prune_late_moves = (
         LATE_MOVE_PRUNING
         and depth <= LATE_MOVE_PRUNING_MAX_DEPTH
         and in_chk == 0
         and not mate_bounds
+        and beta - alpha == 1
     )
     lmp_count = _LMP_COUNTS[depth] if prune_late_moves else 0
     quiets_searched = 0
