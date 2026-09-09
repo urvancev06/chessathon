@@ -199,3 +199,18 @@ two-fold against the truth** — Stockfish's spread is 611 and its median absolu
 ours say 116 and 167. Leaf positions are far more decisive than either evaluation reports, and the
 pruning margins were tuned inside that mismatch. That is a property of the shipped engine, not of
 the network, and it is the more useful half of the result.
+
+### A hazard attached to the leaf finding, for whoever picks it up
+
+The measurement above invites one specific change: scale the evaluation, or equivalently scale the
+pruning margins, so that the margin-to-evaluation ratio matches the dynamic range the evaluation
+actually has at leaves. It is one constant and it has a plausible mechanism. It also has **no
+measurement behind it in either direction**, and the margins were never fitted to our evaluation's
+range — they were taken at textbook magnitude and screened as a batch, which is a different thing.
+
+**Scaling the evaluation is not free and is not equivalent to scaling the margins.** The evaluation's
+output is read by more than the pruning cuts: `MATE_SCORE` and `MATE_THRESHOLD` bound it,
+`DRAW_SCORE` sits at zero inside it, `DRAW_TIEBREAK_MARGIN` compares against it, and the time
+manager's stability test reads score changes between iterations. Multiplying the evaluation moves
+all of those; multiplying the margins moves none of them. If this is tried, scaling the **margins**
+is the smaller blast radius, and either version needs a screen rather than an argument.
