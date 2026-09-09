@@ -93,6 +93,46 @@ measured:
 
 Both are magnitude-dependent, which is what makes them testable.
 
+## Correction: the 1.556 was not quotable, and the tool said so
+
+`ct-mobility`'s own DECISIONS entry records the nodes-to-depth ratio as **not quotable**, coming
+out **2.19, 1.13, 1.58 and 0.96** across runs differing only in which positions were sampled. The
+1.556 above is a fifth draw from that. Pooling all five: mean **1.48**, and a crude interval of
+about **0.89 to 2.08** — it includes 1.0, so no-effect is not excluded; it is centred at 1.48, so
+no-effect is not established either. **Mobility's cost is unresolved between roughly 8 and 55 Elo.**
+
+And `tools/bench_mobility.py` prints *"a different evaluation searches a different tree; this is
+not a speed cost"* in its own output. The number was read off a screen containing that sentence
+and quoted as a cost anyway, by two people independently. **A new failure shape for the
+collection: not a check that could not fail, but a check that fired and was read past.**
+
+## But it is a mechanism, not noise — and the difference decides the remedy
+
+"Noise" implies expectation zero, averages away with more samples, and licenses ignoring the
+effect. What an evaluation term actually has is a **mechanism with no consistent sign**: real and
+directional at each position, varying in direction between positions. That allows a non-zero
+expectation, is estimable with enough samples, and — the part that matters — **is fixable**.
+
+An *ordering* change is different in kind: better first moves cause more cutoffs, so its tree
+effect has a sign, is systematic, and legitimately composes with the node rate. That is why
+`0.472 x 0.775` is sound for the ordering bundle and the same composition is not sound here.
+
+**The measured instance, and it is stronger than the ratio it explains** (86's point, which I had
+not made): the aspiration window's hit rate falls **8/10 to 5/10** with mobility on — and that is a
+**within-build** cost. The window is guessed from the previous iteration's score in the *same*
+search, so a term that makes scores less stable across depths pays it on every search it ever
+runs. It is not an artefact of comparing two builds. A 40 cp window mis-guessed by a term that
+moves scores by tens is a mechanism with a name and a magnitude.
+
+## If the diagnostic shows a mis-firing pruner: scale the MARGINS, never the evaluation
+
+Recorded before anyone tries it, because the obvious move is the wrong one. If reverse futility's
+85 cp margin is incoherent with our evaluation's dispersion, the fix is to change the **margins**.
+Do not rescale the evaluation to fit them: its output is also read by `MATE_SCORE` and
+`MATE_THRESHOLD`, by `DRAW_SCORE` at zero, by `DRAW_TIEBREAK_MARGIN`, and by the time manager's
+`easy_score_drop_cp` stability test. Multiplying the margins moves none of those. (Hazard from
+86's `NNUE-NOTES.md`.)
+
 ## What I would measure next, none of it needing games
 
 1. **Tree cost against term magnitude.** Run `tools/bench_mobility.py` with the weights scaled to
