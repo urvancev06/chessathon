@@ -47,10 +47,47 @@ differing only in which positions were sampled. It is not resolvable from that d
 
 The distinction that matters, and it is the one that came out of pricing the ordering bundle: an
 **ordering** change genuinely shrinks the tree, so its nodes-to-depth ratio is a real systematic
-effect and must be composed with the rate. A pure **evaluation** term has no such mechanism, so
-node rate is the whole story and the sampled tree ratio is noise. Applying the ordering framing to
-an evaluation term produces a cost roughly seven times too large. Mobility's honest price is 9–11 %
-of node rate, not 70 % of time-to-depth.
+effect and must be composed with the rate. Applying that framing to an evaluation term produces a
+cost roughly seven times too large.
+
+**Amended after `chessathon-4c` pushed back, and the correction is theirs.** The paragraph above
+originally continued: *"a pure evaluation term has no such mechanism, so node rate is the whole
+story and the sampled tree ratio is noise."* That is too strong and the weaker version changes what
+to do next.
+
+An ordering change has a mechanism with a **consistent sign** — better first moves, more cutoffs,
+smaller tree. An evaluation change has mechanisms **without a consistent sign**: the aspiration
+window's hit rate, futility and reverse-futility threshold flips, the usefulness of stored
+transposition bounds. Those are real and directional *per position*, but the direction varies, so
+the sample mean is unstable and the variance is large. "Noise" claims an expectation of zero that
+averages away; "mechanism without a consistent sign" allows a non-zero expectation that is
+estimable with enough samples and — the part that matters — **can be reduced by fixing the
+mechanism**.
+
+There is direct evidence of one. Measured on the mobility build, the aspiration window's hit rate
+falls from 8/10 to 5/10 over five positions at two depths, against a 40 cp window. That is
+**within-build**: the window is guessed from the previous iteration's score in the same search, so
+a term that makes scores less stable across depths pays this cost every search. It is a genuine
+cost of the term rather than an artefact of comparing two builds, which supports the weaker reading
+over mine.
+
+Five samples of the ratio now exist — 0.96, 1.13, 1.556, 1.58, 2.19, mean 1.48 — and a crude
+interval on that mean spans roughly 0.89 to 2.08. It includes 1.0, so no effect is not excluded; it
+is centred well above 1.0, so no effect is not established either. **Mobility's total cost is
+unresolved between about 8 and 55 Elo** and neither "net loss" nor "strongest candidate" is
+supportable. Node rate alone is 9–11 %; the tree term is unmeasured, not zero.
+
+The diagnostic that settles it (4c's design): run the same samples with **reverse futility off**.
+RFP's margin is 85 cp against a measured median evaluation error of 342 cp at real search leaves, so
+if threshold flipping is the mechanism the ratio should be large where RFP fires often and near 1.0
+where it does not — and the spread should collapse toward 1.0 with RFP disabled. Spread unchanged
+means noise or genuine cost; spread collapsing means a pruner mis-firing.
+
+**And that third outcome would be the largest result of the three**, because it would not be about
+mobility. It would say our pruning margins are fragile to *any* evaluation change, which is the same
+mismatch as §7 below: margins tuned at textbook magnitude against an evaluation that understates
+leaf positions roughly two-fold. That would make margin scaling a candidate that helps every future
+evaluation term rather than a fix for one.
 
 **Ray-walking terms are cheaper together than separately.** The Chessprogramming wiki notes that
 king-zone attack knowledge "is likely to be uncovered while calculating mobility" — the attack-unit
@@ -126,3 +163,18 @@ risk profile than anything on this page.
 network would gain Elo today and it lost 67. What this document establishes is *cost*, which is
 measurable without a screen, and *applicability*, which is a property of our code. Value still needs
 the box.
+
+## 7. A connection worth following, from tonight's leaf measurement
+
+`docs/NNUE-NOTES.md` records that at real search leaves **both** our evaluations are compressed
+about two-fold against the truth: Stockfish depth 12 has a spread of 611 and a median absolute score
+of 599 cp there, where the hand-crafted evaluation and the network give 279/333 and 116/167. Every
+pruning margin we have is an absolute centipawn threshold applied at exactly those positions —
+reverse futility 85, futility 0/150/300/500/750, the 40 cp aspiration window — and all were taken at
+textbook magnitude rather than fitted to our evaluation's actual dynamic range.
+
+If 4c's reverse-futility diagnostic shows the tree ratio collapsing toward 1.0, these are the same
+finding seen from two directions, and the remedy is one constant rather than a term. Note the
+hazard recorded in `NNUE-NOTES.md`: scaling the **evaluation** moves mate scores, draw scores, the
+draw tie-break margin and the time manager's stability test; scaling the **margins** moves none of
+them and is the smaller blast radius.
