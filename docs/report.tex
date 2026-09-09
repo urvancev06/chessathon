@@ -246,7 +246,7 @@ one, the accounted one is preferable --- a phase deferred instead would compile 
 not in v1.0}, the build this report describes; it is recorded here because the bound v1.0 ships with is
 weaker than it appears.
 
-\section{Board representation and move generation}
+\section{Board representation and move generation}\label{sec:board}
 \paragraph{What the shipped build uses.} v1.0 has its own board and its own move generator:
 \code{mikhail\_letal/fastboard.py}, a \textbf{0x88 mailbox} representation compiled by numba. A 0x88 board
 stores the 64 squares in a 128-entry array whose spare half makes the off-board test a single bit
@@ -292,6 +292,26 @@ The Stage 1 move generator will be perft-tested against python-chess to depth 4 
 positions and to depth 3 on every collected opening and on at least 2\,000 random playout positions, plus a
 legal-move-set equality test on at least 100\,000 random positions, before it replaces the library
 \src{brief, \S 5 Stage 1 DoD}; that table will be added here.
+
+
+\paragraph{Incremental Zobrist hashing, merged since v1.1 and unmeasured.} A Zobrist key identifies a
+position by exclusive-or of one random 64-bit word per (piece, square), plus words for the side to
+move, the castling rights and any en-passant file. Until commit \code{0f3562b} the compiled search
+rebuilt that key from the whole board wherever it needed one; now \code{make\_move} carries it forward
+by exclusive-or-ing only the handful of words the move changes, and the search reads it.
+
+That is sound only if the carried key is \emph{exactly} what building it from scratch would produce,
+and the branch establishes it on two independent grounds. The first is a test comparing the two after
+every make and every unmake across the curated openings, hand-built awkward positions and random
+playouts --- over 100\,000 comparisons --- which also \emph{audits its own sample}, asserting that the
+walk really did contain promotions, capture-promotions, en-passant captures, castling and all sixteen
+castling-rights combinations, because a walk that quietly stopped producing them would pass while
+testing nothing. The second is that the keying rule itself is unchanged from the previous build: an
+en-passant square is keyed only when a capture onto it is available, and that rule was already there
+--- the change extracts it into one function shared by both call sites rather than inventing it. Both
+grounds are needed. A test comparing two things that were changed together shows they agree with each
+other, not that either agrees with what came before, so the fixed point has to be something that did
+not move.
 
 \section{Search}\label{sec:search}
 \paragraph{The algorithm in one paragraph.} The search is a \emph{negamax} tree search: every score is
@@ -350,6 +370,43 @@ Queen over under-promotion on exact ties & If the first root move is an under-pr
 Urgency clamps & Not a search technique but a budget one: when the 600-ply cap or, in a pawnless mop-up, the fifty-move draw is near, \code{moves\_to\_go} is clamped to the moves left before it so the search gets the time a mate needs (Section~\ref{sec:time}). & Two won KQ-vs-K games had been drawn by rule with the normal budget \src{DECISIONS.md item C}. \\
 \end{longtable}
 }
+
+\paragraph{Merged since v1.1, and unmeasured.} Four further search techniques are on the development
+branch at commit \code{0f3562b}. They pass the full suite --- 667 tests --- and \textbf{none of them
+has a strength measurement}; a screen against v1.1 is running as this is written. What follows says
+what they do, and claims nothing about what they are worth.
+
+\emph{Principal variation search.} Only the first move of a node is searched with the full window.
+Every later move is first asked the cheaper question ``is this better than the best so far?'' with a
+null window $(\alpha, \alpha+1)$, which cuts off at the first refutation in the subtree; only a move
+that answers yes is searched again for its exact value. It is not a heuristic and nothing is risked
+by it: it changes how the same tree is proved, not which moves are believed.
+
+\emph{Depth- and move-aware late-move reductions.} The flat one-ply reduction becomes a table indexed
+by remaining depth and by how many moves the node has already searched, generated from
+$\mathrm{base} + \log(\mathrm{depth})\log(\mathrm{move})/\mathrm{divisor}$ with base $0.75$ and
+divisor $2.25$. The shape is the usual one and the reasoning is that the fortieth move of a
+twenty-ply node and the fourth move of a three-ply node are not the same bet: the deeper the node the
+more a ply is worth skipping, and the later a move sorts the less the ordering believes in it. The
+table is generated from the formula in the source rather than written out as numbers, so its origin
+is checkable, and every entry is floored at one ply and capped at $\mathrm{depth}-2$ so a reduced
+search is never shallower than depth~1 --- a reduction that lands in quiescence proves nothing about
+a quiet move.
+
+\emph{Mate-distance pruning.} A node $p$ plies from the root cannot be worth less than being mated
+where it stands, nor more than mating immediately, whatever the position is. Clamping the window to
+that costs two comparisons and stops a won search wandering after a longer mate when a shorter one is
+already known above it.
+
+\emph{A cheaper legality test at the quiescence stand-pat.} The stand-pat cutoff must not score a
+checkmate or a stalemate as an evaluation, so it has to know whether a legal move exists --- at about
+a third of all nodes. When the side to move is not in check, a piece standing on no rank, file or
+diagonal through its own king cannot be pinned, so any pseudo-legal move of it is legal outright and
+one such move settles the question without generating a move list. The test is one-way: it answers
+``yes, certainly'' or ``I could not tell'', and the full generation runs for the rest.
+
+\emph{Incremental Zobrist hashing} is the board-side change and is described in
+Section~\ref{sec:board}.
 
 \section{Evaluation}\label{sec:eval}
 \paragraph{Terms.} The static evaluation (\code{mikhail\_letal/evaluation.py}) has three terms: material,
@@ -727,6 +784,18 @@ On the shipped v1.0, measured 8~September: \code{ruff check} and \code{ruff form
 2~min 41~s, with the gates at their reduced sizes. The suite has more than quadrupled since Stage 0,
 which is where most of the compiled engine's correctness argument lives: the perft, legal-move-set,
 make/unmake and evaluation-parity gates above are all part of that count.
+
+\paragraph{A gap in the evidence chain: the platform log cannot say which build played.}
+\code{mikhail\_letal.\_\_version\_\_} reads \code{"1.0.0"} in v1.0, in v1.1 \emph{and} in the current
+development tree --- it was never advanced when a version was frozen. The per-move log lines the agent
+prints carry no build identifier either, so the only in-band evidence of which engine played a given
+rated game is the init line's timing, and that distinguishes builds only when their start-up costs
+happen to differ. Every statement in this report attributing a rated game to a particular build
+therefore rests on \emph{upload timing} --- which build was the latest valid one when the round was
+played --- rather than on anything the log itself asserts. That is a real weakness in the chain and it
+is recorded rather than glossed: it is a small fix, printing the version in the init line and advancing
+it at each freeze, and it should be made before more rated games are attributed.
+
 \paragraph{Perft and the compiled board's gates.} Stage 0 needed no perft, because python-chess
 generated the moves. Stage 1 has its own move generator, so it needs one, and \code{tests/test\_fastboard.py}
 is the gate. \textbf{The perft counts are not taken from a published table.} \code{chess\_perft} walks
