@@ -10,10 +10,18 @@ From the 1000-game real-clock screen of 2026-09-09 (`ct-ordering` vs `versions/v
 12 workers, otherwise idle 16-core box):
 
 ```
-1.74 - 1.80 games per minute        measured over the first 33 games
-~9.5 hours for 1000 games
+1.74 - 1.80 games per minute        over the FIRST 33 games   <- cold start, do not plan on this
+2.20 games per minute               steady state, at 384 games
+~7.6 hours for 1000 games
 ~346 s mean per game of engine play (from the tool's own per-game line)
 ```
+
+**Measure the rate after the ramp-up, not during it.** The first figure above and the second are
+the same run. Twelve workers all pay their first numba warm-up simultaneously at launch, so the
+opening minutes are the slowest the run will ever be, and a rate taken there over-estimates the
+total by about a quarter. I planned an ETA from the cold-start number and told the coordinating
+session 06:20 when the answer was 04:20 -- in the safe direction, but wrong, and wrong for a
+reason that will repeat every time somebody measures a fresh run too early.
 
 ## The term everybody forgets
 
