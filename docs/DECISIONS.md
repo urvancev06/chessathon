@@ -1786,3 +1786,94 @@ there.
 **Rejected: two int32 halves in `meta`.** It avoids the int64 undo stack and keeps "every array is
 int32" intact, but every read and write of the key becomes a shift-and-mask pair, on a value the
 search reads at every node, to save a dtype.
+
+## 2026-09-09 — Mobility: plain, not "safe"; integer weights; and what it costs
+
+The term counts, for each knight, bishop, rook and queen, the squares it attacks that its own side
+does not stand on — `popcount(attacks & ~own)`, rays blocked at the first occupied square.
+
+**Plain, not safe.** The alternative excludes squares defended by enemy pawns, which is the more
+usual formulation. Rejected: on held-out positions the safe variant explained 10.55% of the
+residual variance against plain's 10.65%, so it is not even better on the metric it would be
+chosen by, and it costs a pawn-attack map per node. The choice is pinned by
+`test_mobility_does_not_exclude_squares_defended_by_enemy_pawns`, so switching to the safe variant
+has to be a deliberate refit rather than a quiet edit that leaves the weights measuring something
+the term no longer computes.
+
+**Integer weights, 6 and 10.** The regression returned 6.11 and 10.19. Rejected: keeping the
+hundredths by storing the weights scaled and dividing in both engines. Every weight in this
+evaluation is an integer number of centipawns and `tune_texel.structure_from_vector` rounds its
+own fits to integers, so the fraction would have added a rounding site to `evaluation.py` and a
+second one to `fasteval.py` — a second place for the two engines to disagree, against a gate whose
+entire value is that they agree integer for integer. The rounding is worth under 5 cp at a
+25-square mobility differential, on piece-square tables quantised far more coarsely than that.
+
+**In `STRUCTURE_WEIGHTS`, and therefore in the tuner.** Unlike the king-danger term, which is a
+capped quadratic and cannot be represented by any vector of feature counts, mobility is linear in
+its weight and belongs in the fittable set. So `gen_pst.STRUCTURE_PRIOR` and
+`tune_texel.features` both gain it; `tune_texel.mobile_squares` is a third implementation, in that
+file's plain-loop style rather than with attack masks, and `build_dataset` checks it against
+`evaluate` on every position it fits. The tuner is dormant — its 2026-09-07 fit lost and was
+reverted — but a later refit with mobility missing would have had to compensate for it by
+distorting the piece-square tables.
+
+**What it costs: 9% of the node rate at depth 7, 11% at depth 8.** Measured by
+`tools/bench_mobility.py`: fixed depth over the curated openings, paired, alternating which arm
+goes first, the term switched by one array entry so both arms are the same machine code reaching a
+different branch. 120 pairs at depth 7 gave median 0.9109 and pooled 0.9127; 30 pairs at depth 8
+gave 0.8888 and 0.8966. Per node that is +122 ns and +155 ns on a node costing 1.27 and 1.34 us.
+
+No Elo estimate is recorded here, and none should be. The one time held-out variance was checked
+against real games, the candidate it ranked highest lost 100 Elo. Whether 9% of the node rate buys
+more than it costs is a question for a screen of mobility **alone** — bundled with other
+evaluation terms, a flat result could not distinguish worthless terms from mobility's node cost
+eating good ones.
+
+### Two measurement traps, both hit
+
+The first run of the benchmark reported the term making the engine **four times faster**, ratio
+5.4 with a standard deviation of 7.7. One search had taken 1.119 s where the identical search —
+same position, same arm, same node count, which is deterministic per arm — took 0.118 s in every
+later round. A one-off first-encounter cost of about 9x, once per position, on an idle box. The
+tool now runs a full warm-up round and discards it, and prints the median beside the pooled total
+so that a surviving outlier shows up as the two disagreeing. Before that change the pooled figure
+said 12% and the median 8.9%; they now agree to within 0.2 points.
+
+The **nodes-to-depth ratio is not quotable** and the tool says so where it prints it. It came out
+2.19, 1.13, 1.58 and 0.96 across runs differing only in which positions were sampled: a different
+evaluation searches a different tree, and at fixed depth that number is mostly the sample.
+
+### Three hollow tests, found by mutating the term
+
+Eleven mutations of the term were run against the suite (`tools/mutate_mobility.py`, which works
+on a copy of the repository so an interrupted run cannot leave a mutated engine behind); all eleven
+were caught, but the per-test breakdown showed two tests that never failed under any of them, and
+both were rewritten:
+
+- *counts only knights, bishops, rooks and queens* used a symmetric pawn wall and a lone knight
+  beside two kings. Both give the same answer when pawns and kings **are** counted, because what
+  they add cancels between the colours. It passed against an implementation that counted every
+  piece on the board. It now uses lopsided positions where counting them gives 2 instead of 0 and
+  13 instead of 2.
+- *was compiled at import* asked this process whether `_mobility` had a compiled signature — in a
+  file whose oracle tests have already called `_mobility` directly, which compiles it. It could
+  not be made to fail. It now asks a fresh interpreter, the same trick `tools/bench_fastboard.py`
+  uses for the same reason.
+
+A third was caught before the code was written: the switch-off test borrowed the position
+`test_structure_terms_can_be_switched_off` uses, whose mobility is exactly zero, so switching the
+term off changed nothing. Every one of the three would have passed forever.
+
+The rule this adds to the local standard: *mutation testing proves a test can fail; it does not
+prove the test is about what you think.* Run the mutations per test, not per suite — a suite-level
+"all mutations caught" hid two dead tests behind the parity gate catching everything. The tool
+reports both lists and exits non-zero on either, so a mutation nothing catches and a test nothing
+makes fail are both failures of the run.
+
+### One consequence for the existing tests
+
+`test_bishop_pair_bonus` and `test_king_shield_counts_pawns_in_front_of_the_king` isolate a term by
+differencing two positions, and both pairs differ in mobility as well — swap a bishop for a knight
+and it reaches a different number of squares; advance the pawns in front of a king and the pieces
+behind them see further. They take a `mobility_off` fixture now, following the file's existing
+idiom of switching off what a test is not measuring.

@@ -71,10 +71,22 @@ def evaluate(board: chess.Board) -> int               # static evaluation, side-
 def is_mate_score(score: int) -> bool
 def pawn_structure(white_pawns: int, black_pawns: int) -> tuple[int, int]  # (mg, eg), White's view
 def king_danger(board, white_pawns: int, black_pawns: int) -> int          # mg only, White's view
+def mobility(board: chess.Board) -> int               # White's mobile squares less Black's
 
 STRUCTURE_TERMS: bool                 # feature_flag("LETAL_EVAL_TERMS", True)
+KING_DANGER_TERM: bool                # switched apart from the structural terms, so each measures
+MOBILITY_TERM: bool                   # ... alone; all three are plain constants, no environment
 STRUCTURE_WEIGHTS: dict[str, int]     # every structural weight, one line of rationale each
 ```
+
+`mobility` counts, for each knight, bishop, rook and queen, the squares it attacks that its own
+side does not stand on — `popcount(attacks & ~own)`, rays blocked at the first occupied square, so
+a rook behind its own rook counts nothing along that file and one behind an enemy rook counts the
+capture. Pawns and kings are excluded: a pawn's activity is what the pawn-structure terms measure
+and a king's mobility is what the king-danger term is about. Enemy-pawn-defended squares are
+**not** excluded — that is "safe" mobility, a different term with different weights. It enters
+both phases, with `mobility_mg` and `mobility_eg`, so the phase blend tapers between them rather
+than away. It costs about 9% of the node rate at depth 7 (`tools/bench_mobility.py`).
 
 Behaviour:
 
@@ -641,7 +653,7 @@ class EvalTables(NamedTuple):      # eight preallocated arrays, built once at im
     pst_mg, pst_eg: NDArray[int32]        # [colour, piece type, 0x88 square], material folded in
     values_mg, phase_weights: NDArray[int32]
     weights: NDArray[int32]               # the structural weights, indexed by W_*
-    misc:    NDArray[int32]               # mop-up scalars and the STRUCTURE_TERMS switch, by E_*
+    misc:    NDArray[int32]               # mop-up scalars and the three term switches, by E_*
     centre:  NDArray[int32]               # distance to the nearest centre square, by 0x88 square
     scratch: NDArray[int32]               # per-file pawn summary and piece counts, reused per call
 
@@ -668,6 +680,15 @@ integer** on 20,000 positions from playouts of the curated openings (`LETAL_FULL
 otherwise), on all 219 openings, on the 58 rule-breakers, on a hand-built position per structural
 term and per insufficient-material combination, and on 2,000 colour-swapped mirrors. There is no
 rounding to excuse a difference: both sides compute the same integer arithmetic.
+
+`_mobility` is the one compiled term that walks rays rather than reading a summary, so it also has
+an **oracle** of its own: `board.attacks_mask(sq) & ~own` in python-chess, compared to the 0x88
+walk position by position — never summed, because a ray counted short in one direction and long in
+another cancels in a total. The oracle is written out in the test rather than imported from
+`evaluation.py`, so it compares the walk against python-chess and not against our own other copy
+of the definition. Eight positions holding one piece besides the two kings pin each piece type to
+a number worked out by hand, the corner knight among them, since a range check instead of `& 0x88`
+is the way a mailbox walk wraps around the edge of the board.
 
 ## `mikhail_letal/fastsearch.py` (Stage 1, phase 2)
 

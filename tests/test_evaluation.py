@@ -113,6 +113,20 @@ def structure_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ev, "STRUCTURE_TERMS", True)
 
 
+@pytest.fixture
+def mobility_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For tests that isolate one term by differencing two positions.
+
+    Two positions that differ in one structural feature almost always differ in mobility as well
+    -- swap a bishop for a knight and the piece reaches a different number of squares; advance the
+    pawns in front of a king and the pieces behind them see further. Those tests are about the one
+    term they name, so the mobility term is switched off rather than added to their arithmetic.
+    Mobility's own contribution to the evaluation is checked in
+    ``test_mobility_enters_both_phases_with_a_weight_each``.
+    """
+    monkeypatch.setattr(ev, "MOBILITY_TERM", False)
+
+
 def test_passed_pawn_bonus_grows_with_rank(structure_on: None) -> None:
     weights = ev.STRUCTURE_WEIGHTS
     # White pawn e4 against a black pawn on the a-file: passed, four ranks up (index 3).
@@ -154,7 +168,7 @@ def test_doubled_and_isolated_pawns_are_penalised(structure_on: None) -> None:
     assert ev._isolated_count(chess.BB_H2 | chess.BB_G4) == 0
 
 
-def test_bishop_pair_bonus(structure_on: None) -> None:
+def test_bishop_pair_bonus(structure_on: None, mobility_off: None) -> None:
     pair = "k7/8/8/8/8/8/8/KBB4R w - - 0 1"  # the rook keeps the mop-up out of the difference
     one = "k7/8/8/8/8/8/8/KBN4R w - - 0 1"  # the c1 bishop becomes a knight: same phase
     bonus = ev.STRUCTURE_WEIGHTS["bishop_pair"]
@@ -217,7 +231,9 @@ def test_rook_on_open_and_semi_open_file(structure_on: None) -> None:
     assert ev.pawn_structure(chess.BB_B2, chess.BB_B7) == (0, 0)
 
 
-def test_king_shield_counts_pawns_in_front_of_the_king(structure_on: None) -> None:
+def test_king_shield_counts_pawns_in_front_of_the_king(
+    structure_on: None, mobility_off: None
+) -> None:
     weights = ev.STRUCTURE_WEIGHTS
     # White king g1 with pawns f2 g2 h2 versus the same pawns moved far away (still on the same
     # files, so the pawn-structure terms are unchanged: no passed, doubled or isolated changes

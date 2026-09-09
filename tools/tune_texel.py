@@ -292,9 +292,9 @@ def mobile_squares(board: chess.Board, colour: chess.Color) -> int:
         file, rank = chess.square_file(square), chess.square_rank(square)
         for step_file, step_rank in _KNIGHT_STEPS:
             to_file, to_rank = file + step_file, rank + step_rank
-            if 0 <= to_file < 8 and 0 <= to_rank < 8:
-                if not own & chess.BB_SQUARES[chess.square(to_file, to_rank)]:
-                    total += 1
+            on_board = 0 <= to_file < 8 and 0 <= to_rank < 8
+            if on_board and not own & chess.BB_SQUARES[chess.square(to_file, to_rank)]:
+                total += 1
     for piece_type, steps in _SLIDER_STEPS.items():
         for square in board.pieces(piece_type, colour):
             file, rank = chess.square_file(square), chess.square_rank(square)
