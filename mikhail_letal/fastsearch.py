@@ -74,6 +74,7 @@ from mikhail_letal.fastboard import (
     BLACK,
     COLOUR_SHIFT,
     EMPTY,
+    FLAG_CASTLE,
     FLAG_EN_PASSANT,
     FLAG_SHIFT,
     KING,
@@ -644,8 +645,13 @@ def _least_valuable_attacker(board: npt.NDArray[np.int32], square: int, colour: 
 
 @njit(cache=False)
 def see(pos: Position, move: int) -> int:
-    """Centipawn result of the capture sequence on the destination square, from the mover's point
-    of view. Positive is a gain. A quiet move returns 0.
+    """Centipawn result of the exchange on the destination square, from the mover's point of view.
+
+    For a capture the victim is taken first. For a **quiet** move there is no victim and the
+    exchange begins with the mover's own piece standing on the square, so a move onto a square the
+    opponent wins comes back negative -- which is what makes the sign usable for filtering quiet
+    moves. Returning 0 for every quiet move, as the first version did, makes any `see(...) < 0`
+    filter over them a silent no-op.
 
     The standard swap-off: play the capture, then let each side recapture with its cheapest
     attacker in turn, then fold the sequence back assuming either side stops as soon as continuing
@@ -673,8 +679,14 @@ def see(pos: Position, move: int) -> int:
     else:
         victim = board[to] & PIECE_TYPE_MASK
 
-    if victim == EMPTY and promotion == 0:
-        return 0  # a quiet move wins nothing and loses nothing on this square
+    # Castling is left at 0: the rook's half of the move is not modelled here, and a king may not
+    # castle into an attacked square in the first place, so there is no exchange to evaluate.
+    if flag == FLAG_CASTLE:
+        return 0
+
+    # No early return for a quiet move. `victim` is EMPTY, `_SEE_VALUE[EMPTY]` is 0, and the loop
+    # below then evaluates exactly the right question: the mover's piece stands on the square and
+    # the opponent may take it.
 
     gain = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
     undo_square = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
