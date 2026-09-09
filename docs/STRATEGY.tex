@@ -259,10 +259,21 @@ $7$--$10$ Elo & $+19$ to $+57$ & tree effect is noise, rate only \\
 \end{tabular}
 \end{center}
 
-\textbf{The estimates span a factor of seven and the sign of the answer flips across them.} Two
-disagreements are live: whether an evaluation term measurably grows the search tree (measured at
-2.19, 1.13, 1.58 and 0.96 across position samples --- which may simply be noise), and what one ply
-of depth is worth in Elo.
+\textbf{The estimates span a factor of seven and the sign of the answer flips across them.}
+After both sessions checked each other's primary sources, the agreed position is that
+\textbf{mobility's cost is unresolved, somewhere between about 8 and 55 Elo}, with a named
+diagnostic pending. Not ``ruled out''. Not ``strongest candidate''. \emph{We do not know.}
+
+The tree-growth measurements across five position samples are 0.96, 1.13, 1.556, 1.58 and 2.19 ---
+centred at 1.48 with a crude interval of roughly 0.89 to 2.08. \textbf{That includes 1.0, so
+no-effect is not excluded; it is centred well above 1.0, so no-effect is not established either.}
+
+And it is probably not simple noise. An \emph{ordering} change grows or shrinks the tree with a
+consistent sign. An \emph{evaluation} change acts through mechanisms that have no consistent sign
+--- aspiration windows missing, futility thresholds flipping --- which are real and directional in
+each position but vary in direction between them. One is measured: \textbf{on the mobility build
+aspiration's hit rate falls from 8/10 to 5/10.} That is a mechanism, and mechanisms can be fixed;
+noise cannot.
 
 \begin{keybox}
 \textbf{And the second disagreement dissolves the first.} The textbook conversion --- 50 to 70 Elo
@@ -275,6 +286,12 @@ constant underwriting every speed-to-Elo figure in this document is not ours.
 one side given double the time. That single number calibrates everything: what our search
 improvements are worth, what mobility costs, what the network's 14.6\% slowdown cost. It has been
 silently underwriting the whole project.
+
+\textbf{And it is the one experiment 300 games can actually resolve.} Everything else we want to
+test is worth $+20$ to $+30$ against a $\pm39$ resolution floor --- which is why they all need
+1000 games and 9.6 hours, and why we keep running out of night. \textbf{A doubling of time is
+expected to be worth 50--70 Elo, comfortably outside that floor.} So the calibration costs about
+\textbf{2.5 hours rather than 9.5}. It does not compete for a full slot; it fits inside one.
 \end{keybox}
 
 So the honest statement about mobility is: \textbf{we do not know the sign, and the reason we do
