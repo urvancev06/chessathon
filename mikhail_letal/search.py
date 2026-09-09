@@ -166,7 +166,30 @@ ASPIRATION_MAX_FAILS = 2  # failures before the full window is used
 # skipped. Margins are per remaining depth; the deeper ply gets twice the room. Off in check and
 # when a mate bound is in the window, where quiet moves decide everything.
 FUTILITY_PRUNING = True  # switch for bisection in development; the shipped value is True
-FUTILITY_MARGINS = (0, 150, 300)  # indexed by remaining depth; depth 0 is quiescence
+# Extended 9 September from (0, 150, 300) to five plies. The two-ply version prunes almost nothing
+# above depth 2, and published testing puts the deeper margins among the best Elo-per-line changes
+# available (+37.4 +- 13.4 over 1780 games in an engine of comparable strength). The margin grows
+# roughly a minor piece a ply, because a quiet move that must recover more than that in one ply
+# essentially never does.
+FUTILITY_MARGINS = (0, 150, 300, 500, 750)  # indexed by remaining depth; depth 0 is quiescence
+
+# Reverse futility ("static null move"): the mirror of futility pruning. Where futility asks
+# whether a quiet move can lift a bad position to alpha, this asks whether the position is already
+# so far ABOVE beta that the opponent will avoid it entirely, and returns without generating a
+# move at all. The margin is material-sized, so what it tests is "am I a clear piece up here",
+# which is the part of the evaluation that is reliable -- unlike the positional terms, which on
+# this engine are coarse. That is why it transfers to a weak evaluation better than most pruning.
+REVERSE_FUTILITY_PRUNING = True  # switch for bisection; the shipped value is True
+REVERSE_FUTILITY_MAX_DEPTH = 6  # above this the static evaluation is too blunt to trust
+REVERSE_FUTILITY_MARGIN = 85  # per remaining ply
+
+# Late move pruning: past a move count that grows with depth, remaining quiet moves are not
+# searched at all rather than merely reduced. It contains no evaluation term, so it is worth
+# exactly what the move ordering is worth -- and the ordering already puts the table move,
+# captures by static exchange evaluation, and two killers ahead of anything this can reach.
+LATE_MOVE_PRUNING = True  # switch for bisection; the shipped value is True
+LATE_MOVE_PRUNING_MAX_DEPTH = 4  # deeper than this, a late quiet move is reduced but still searched
+LATE_MOVE_PRUNING_COUNTS = (0, 5, 9, 15, 23)  # quiet moves searched before pruning, by depth
 
 # Delta pruning in quiescence: a capture whose gain, even if the captured piece is simply won
 # with nothing lost, plus this margin cannot lift the stand-pat score to alpha is not searched.

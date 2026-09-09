@@ -141,6 +141,9 @@ from mikhail_letal.search import (
     FUTILITY_MARGINS,
     FUTILITY_PRUNING,
     GAME_PLY_CAP,
+    LATE_MOVE_PRUNING,
+    LATE_MOVE_PRUNING_COUNTS,
+    LATE_MOVE_PRUNING_MAX_DEPTH,
     LATE_MOVE_REDUCTIONS,
     LMR_FULL_DEPTH_MOVES,
     LMR_MIN_DEPTH,
@@ -154,6 +157,9 @@ from mikhail_letal.search import (
     NULL_MOVE_MIN_DEPTH,
     NULL_MOVE_PRUNING,
     QS_EVASION_PLIES,
+    REVERSE_FUTILITY_MARGIN,
+    REVERSE_FUTILITY_MAX_DEPTH,
+    REVERSE_FUTILITY_PRUNING,
     UPPER,
     SearchResult,
 )
@@ -163,6 +169,7 @@ from mikhail_letal.timing import DEFAULT_PARAMS, TimeParams, should_start_next_d
 # with a constant one.
 _FUTILITY = np.array(FUTILITY_MARGINS, dtype=np.int32)
 _FUTILITY_DEPTHS: Final = len(FUTILITY_MARGINS)
+_LMP_COUNTS = np.array(LATE_MOVE_PRUNING_COUNTS, dtype=np.int32)
 
 # The late-move reduction table, as an array so the compiled code can index it with two runtime
 # integers. `search.LMR_TABLE` is the definition; nothing is recomputed here.
@@ -968,6 +975,30 @@ def negamax(
     # "doing nothing" are exactly what decides the position.
     mate_bounds = alpha <= -MATE_THRESHOLD or beta >= MATE_THRESHOLD
 
+    # (8b) Reverse futility ("static null move"): if the position is already so far above beta
+    # that even conceding `REVERSE_FUTILITY_MARGIN` a ply would still hold it, the opponent will
+    # not enter this node and there is no point generating a move. Returns the margin-adjusted
+    # score rather than beta, which is a valid lower bound and a tighter one.
+    #
+    # Two guards matter. It is off in check, where the static evaluation says nothing about a
+    # position whose legal moves are forced. And it is off when a mate bound is in the window,
+    # where a static score cannot stand in for a forced sequence. Both mirror the futility guard.
+    #
+    # This is the pruning most likely to survive a weak evaluation: the margin is material-sized,
+    # so the question it asks is "am I a clear piece up", which our evaluation answers reliably,
+    # rather than a positional judgement, which it does not.
+    if (
+        REVERSE_FUTILITY_PRUNING
+        and depth <= REVERSE_FUTILITY_MAX_DEPTH
+        and in_chk == 0
+        and not mate_bounds
+    ):
+        margin = REVERSE_FUTILITY_MARGIN * depth
+        static = _cached_eval(pos, st, ev, key)
+        if static - margin >= beta:
+            ints[I_PATH_DRAW] = outer_path_draw
+            return static - margin
+
     # (9) Null-move pruning: if passing already holds beta, a real move surely does too.
     if (
         NULL_MOVE_PRUNING
@@ -999,6 +1030,19 @@ def negamax(
             futility_bound = bound
     pruned_any = 0
 
+    # (10b) Late move pruning: past a depth-scaled count, remaining quiet moves are not searched
+    # at all rather than merely reduced. Unlike futility this consults no evaluation, so it is
+    # worth exactly what the move ordering is worth -- and by the time it fires the table move,
+    # the captures ordered by static exchange evaluation and both killers have already been tried.
+    prune_late_moves = (
+        LATE_MOVE_PRUNING
+        and depth <= LATE_MOVE_PRUNING_MAX_DEPTH
+        and in_chk == 0
+        and not mate_bounds
+    )
+    lmp_count = _LMP_COUNTS[depth] if prune_late_moves else 0
+    quiets_searched = 0
+
     reduce_late = LATE_MOVE_REDUCTIONS and depth >= LMR_MIN_DEPTH and in_chk == 0
     killer_first = st.killers[ply, 0]
     killer_second = st.killers[ply, 1]
@@ -1018,6 +1062,19 @@ def negamax(
         # A quiet move from a position this far below alpha: its value is at most the futility
         # bound, which is at most alpha, so it cannot improve on what we have.
         futile = quiet and move != tt_move and futility_bound > -_INFINITY
+        # Late move pruning shares futility's structure exactly, including the reason the first
+        # legal move is never skipped: "no legal move below" has to keep meaning mate or stalemate.
+        if (
+            prune_late_moves
+            and quiet
+            and legal_seen != 0
+            and move != tt_move
+            and move != killer_first
+            and move != killer_second
+            and quiets_searched >= lmp_count
+        ):
+            pruned_any = 1
+            continue
         if futile and legal_seen != 0:
             # Nothing is made: the node has already found a legal move, so it is neither
             # checkmate nor stalemate whatever the rest of the list does, and the only reason the
@@ -1084,6 +1141,8 @@ def negamax(
             aborted = 1
             break
         searched += 1
+        if quiet:
+            quiets_searched += 1
         if score > best_score:
             best_score = score
             best_move = move

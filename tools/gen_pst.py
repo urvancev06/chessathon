@@ -258,8 +258,37 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
             json.dumps(list(search.FUTILITY_MARGINS)),
             code,
             TEXTBOOK,
-            "indexed by remaining depth: a minor piece at depth 1, two at depth 2; depth 0 is dead "
-            "because the search goes to quiescence there",
+            "indexed by remaining depth, growing about a minor piece a ply; depth 0 is dead "
+            "because the search goes to quiescence there. Extended from two plies to five on "
+            "9 September: the two-ply table pruned almost nothing above depth 2, and deeper "
+            "margins are among the best measured Elo-per-line changes published "
+            "(+37.4 +- 13.4 over 1780 games in an engine of comparable strength)",
+        ),
+        (
+            "search.reverse_futility",
+            f"depth <= {search.REVERSE_FUTILITY_MAX_DEPTH}, margin "
+            f"{search.REVERSE_FUTILITY_MARGIN} per ply",
+            code,
+            TEXTBOOK,
+            "static null move: return without generating a move when the static evaluation "
+            "exceeds beta by the margin, so the opponent would avoid the node. Off in check and "
+            "off when a mate bound is in the window, mirroring futility. Chosen because the "
+            "margin is material-sized -- it asks 'am I a clear piece up', which this evaluation "
+            "answers reliably, rather than a positional judgement, which it does not. Published "
+            "+57.1 +- 16.9 over 1209 games, the largest measured gain available to this engine",
+        ),
+        (
+            "search.late_move_pruning",
+            f"depth <= {search.LATE_MOVE_PRUNING_MAX_DEPTH}, counts "
+            f"{json.dumps(list(search.LATE_MOVE_PRUNING_COUNTS))}",
+            code,
+            TEXTBOOK,
+            "past a depth-scaled count the remaining quiet moves are not searched at all rather "
+            "than merely reduced. Consults no evaluation, so it is worth exactly what the move "
+            "ordering is worth; the table move, the captures ordered by static exchange and both "
+            "killers are all tried before it can fire, and the first legal move is never skipped "
+            "so that 'no legal move' still means mate or stalemate. Published +21.9 +- 11.4 "
+            "over 2000 games",
         ),
         (
             "search.delta_margin",
