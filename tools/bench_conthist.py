@@ -37,6 +37,7 @@ more than the whole effect being measured.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import statistics
@@ -53,6 +54,24 @@ from mikhail_letal.fastsearch import FastEngine
 
 ROOT = Path(__file__).resolve().parent.parent
 OPENINGS = ROOT / "data" / "openings.txt"
+
+
+def engine_fingerprint() -> str:
+    """A hash of the engine source that this process actually imported.
+
+    Not the git commit. The two arms are produced by swapping ``mikhail_letal/`` under a fixed
+    ``HEAD``, so ``git rev-parse HEAD`` says the same thing for both and would identify neither;
+    and `main` has moved twice in a day under people measuring against it, so a number without
+    something identifying its source is not comparable to anything. This hashes the files that
+    were imported, which is the only thing that is true regardless of what the branch says --
+    and it lets `--report` refuse a pair whose two arms turn out to be the same build, which is
+    the "measured the wrong engine" failure that a swap-based harness invites.
+    """
+    digest = hashlib.sha256()
+    for path in sorted((ROOT / "mikhail_letal").glob("*.py")):
+        digest.update(path.name.encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:12]
 
 
 def curated_positions(count: int) -> list[str]:
@@ -96,7 +115,9 @@ def measure(
     fens = curated_positions(positions)
     engine = FastEngine()
 
+    fingerprint = engine_fingerprint()
     load = os.getloadavg()[0]
+    print(f"[{label}] engine source {fingerprint}")
     print(f"[{label}] depth {depth}, {len(fens)} curated positions, {rounds} measured rounds")
     print(f"[{label}] load average at start: {load:.2f} on {os.cpu_count()} cores")
     if load > 1.5:
@@ -124,6 +145,7 @@ def measure(
 
     return {
         "label": label,
+        "engine_source": fingerprint,
         "depth": depth,
         "positions": len(fens),
         "load_at_start": load,
@@ -148,7 +170,25 @@ def report(path: Path) -> int:
     if len({len(v) for v in by_label.values()}) != 1:
         raise SystemExit(f"unequal numbers of runs: { {k: len(v) for k, v in by_label.items()} }")
 
-    print(f"pairing {len(by_label[feature])} run(s) of each, in the order taken\n")
+    # The check that a swap-based harness most needs: if the source that was actually imported is
+    # the same on both sides, the swap did not happen and the whole comparison is of one build
+    # against itself -- which would report a ratio of about 1.000 and look entirely reasonable.
+    sources = {name: {run["engine_source"] for run in by_label[name]} for name in labels}
+    for name, seen in sources.items():
+        if len(seen) != 1:
+            raise SystemExit(
+                f"'{name}' was measured on more than one engine source: {sorted(seen)}"
+            )
+    if sources[feature] == sources[baseline]:
+        raise SystemExit(
+            f"both arms imported the same engine source ({sources[feature].pop()}): the source "
+            "was never swapped, so this compares a build with itself"
+        )
+
+    print(f"pairing {len(by_label[feature])} run(s) of each, in the order taken")
+    for name in (baseline, feature):
+        print(f"  {name:>10}: engine source {next(iter(sources[name]))}")
+    print()
     ratios: list[float] = []
     totals = {name: [0, 0.0] for name in labels}
     for index, (one, two) in enumerate(zip(by_label[feature], by_label[baseline], strict=True)):
