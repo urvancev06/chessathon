@@ -1832,3 +1832,91 @@ had been introduced without being declared, which is not something the author no
 
 **Not claimed:** any Elo for this engine. The published numbers come from a different engine, and
 three static-margin pruners overlap heavily, so they do not add. The screen decides.
+
+## 2026-09-09 — The eight structural weights, fitted and mostly not applied
+
+The eight weights had never been tuned: textbook values chosen on day one. `tools/fit_structure.py`
+fits them to `data/tuning/labels.csv` (25 994 Stockfish depth-10 labels, already in the repository),
+one at a time and jointly, and scores every candidate on positions the fit never saw.
+
+**This is not the Texel run in `RESULTS.md`,** and the difference is the reason to try it at all.
+That fit moved 768 piece-square parameters and lost 100 Elo — capacity enough to fit the labeller
+rather than the game. This fits eight scalars. The design's condition number is 17.6 and no two
+columns correlate above 0.7, so the parameters are individually determined rather than trading off
+against each other. That is a different risk profile, not a smaller version of the same one.
+
+**The model.** Everything the evaluation computes that is not one of the eight is a constant with
+respect to them, so `white_evaluation = base + sum_k w_k c_k` and the fit is ordinary least squares
+in eight unknowns. `base` comes from `material_pst` plus `king_danger`, unblended and unrounded.
+Every position is checked against `evaluate()` before it enters the fit, to within the engine's one
+truncation, and the run stops if the model ever fails to reproduce the engine.
+
+**Two traps, both of which silently produce a plausible wrong answer.**
+
+`evaluation._PAWN_CACHE` memoises `pawn_structure` by the two pawn bitboards, and `pawn_structure`
+has the weights *baked into* the values it returns. Any line search that sets a candidate weight and
+re-evaluates therefore scores every repeated pawn structure with the **old** weights — no error, and
+a line search is the pathological case because it re-evaluates the same positions while changing
+exactly what the cache baked in. It put an early version of this tool 12 cp out. The tool now never
+changes a weight, which removes the trap by construction rather than by remembering to clear a cache.
+
+A `base` that is itself a truncated evaluation rounds a second time, and where `base` is positive and
+the score negative the two truncations bias in opposite directions: the error bound is 2 cp, not 1.
+Keeping `base` unrounded leaves the model exact to the engine's single truncation.
+
+**Results.** Twenty independent 3 000/3 000 splits, and 20 more at 10 000/10 000; figures are the
+joint fit, held-out ΔMSE against a shipped-weight baseline of 70 129.
+
+| weight | shipped | joint, no mobility column | joint, with mobility |
+| --- | --- | --- | --- |
+| passed_pawn_mg | 10 | 15.1 ± 3.0 | 12.5 ± 5.9 |
+| passed_pawn_eg | 20 | 12.1 ± 1.3 | 12.9 ± 3.4 |
+| doubled_pawn | 12 | 32.1 ± 4.9 | 30.5 ± 6.9 |
+| isolated_pawn | 15 | 3.6 ± 2.6 | 5.0 ± 4.1 |
+| bishop_pair | 30 | 70.7 ± 4.3 | 57.6 ± 8.5 |
+| rook_open_file | 20 | 85.0 ± 3.6 | 62.5 ± 9.3 |
+| rook_semi_open_file | 10 | 70.4 ± 3.0 | 50.0 ± 8.5 |
+| king_shield | 10 | 48.0 ± 4.2 | 48.0 ± 6.6 |
+
+The joint fit beats the shipped weights held-out by 3 805 ± 208 MSE. The weights that clear their own
+spread individually are `rook_open_file`, `rook_semi_open_file`, `king_shield`, `bishop_pair` and
+`passed_pawn_eg`. `doubled_pawn` moves a long way in the joint fit while having no individual signal
+at all (ΔMSE +5.9 ± 33.2): it is being carried by its interaction with `isolated_pawn`, and it is not
+a weight to move on this evidence.
+
+**`king_shield`: the hypothesis was wrong and the number stands.** The concern was that a shield
+weight of 40+ was absorbing the job of a king-danger term that barely fires — and specifically that
+`tune_texel.white_evaluation` switches `KING_DANGER_TERM` off, which would leave the only king-related
+weight in the model to soak up king safety entirely. Measured both ways: with king danger off
+`king_shield` fits to 56.6 ± 7.9, with it on, 49.2 ± 7.7. The convention accounts for about 7 of a
+39-point rise, not for the rise. The mechanism is visible in `KING_DANGER_SHELTERED_PAWNS = 2`: the
+danger term is *gated off* whenever the king still has two shield pawns, so the two terms are nearly
+complementary rather than overlapping, and removing one barely frees the other. The rise is signal in
+the labels. It is still not applied — see below.
+
+**`rook_open_file`: the mobility hypothesis was right and it is large.** A rook on an open file is a
+rook with a great deal of mobility, so a fit with no mobility column must explain that variance with
+`rook_open_file`. Adding two mobility columns moves the joint `rook_open_file` from 85.0 to 62.5,
+`rook_semi_open_file` from 70.4 to 50.0 and `bishop_pair` from 70.7 to 57.6. About a quarter of the
+headline rise in the rook weights is mobility wearing a rook's coat. `king_shield` does not move,
+which is the control: it is the one of the four with no mobility story.
+
+**Mobility's own weights disagree with the ones on `ct-mobility`.** Fitted here: `mobility_mg`
+13.1 ± 0.6, `mobility_eg` −3.3 ± 0.7, and `mobility_mg` alone improves held-out MSE by 5 277 ± 862 —
+several times any structural weight. The shipped pair is mg 6.11, eg 10.19: this fit puts the
+middlegame weight twice as high and the endgame weight *negative*, reversing which phase the term
+belongs to. The two mobility columns correlate at only +0.49, so this is not a collinear artifact.
+Different method and possibly different data, so it settles nothing — but it is a disagreement about
+the phase split of a term that is about to be screened, and screening the wrong split would answer
+the wrong question.
+
+**Nothing is applied.** Rejected: applying the joint fit now. The correct value of three of the eight
+depends on whether mobility ships — `rook_open_file` is 85 without it and 62 with it — and mobility's
+screen has not run. Applying weights now guarantees refitting them the moment that screen returns,
+and screening weights that were fitted against an evaluation missing a term the engine is about to
+gain is the same mistake this entry is otherwise about. The order that avoids it: screen mobility,
+then fit the eight against whichever evaluation won, then screen those.
+
+No Elo figure appears here. Held-out MSE against an engine's labels is precisely the metric that
+ranked the Texel disaster highest, and it is reported as what it is: evidence that a weight is worth
+screening, not evidence that it is worth shipping.
