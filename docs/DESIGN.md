@@ -498,12 +498,12 @@ Python object in the hot path. Phase 1 is this file only; the compiled search an
 will call it are a later phase, and until they exist nothing in `agent.py`'s move path uses it.
 
 ```python
-class Position(NamedTuple):        # five preallocated int32 arrays, mutated in place
+class Position(NamedTuple):        # five preallocated arrays, mutated in place
     board: NDArray[int32]          # 128 entries, 0x88 indexed: piece_type | colour << 3, or 0
     plist: NDArray[int32]          # colour * 16 + slot -> square
     pidx:  NDArray[int32]          # square -> slot in its colour's list, else -1
     meta:  NDArray[int32]          # side, castling, ep, halfmove, fullmove, undo depth, kings, counts
-    undo:  NDArray[int32]          # MAX_UNDO x UNDO_N
+    undo:  NDArray[int64]          # (MAX_UNDO + 1) x UNDO_N; int64 because U_KEY is a Zobrist key
 
 def new_position() -> Position
 def new_move_buffer() -> NDArray[int32]                     # MAX_MOVES
@@ -518,7 +518,8 @@ def make_move(pos, move: int) -> int                        # 1 if legal; ALWAYS
 def unmake_move(pos) -> None
 def has_legal_move(pos, out) -> int
 def perft(pos, stack, depth: int, ply: int) -> int
-def hash_position(pos, zob) -> int                          # Zobrist key; ZOBRIST at import
+def ep_key_index(board, ep: int, side: int) -> int           # where ep is keyed, or -1
+def hash_position(pos, zob) -> int                          # Zobrist key from scratch; the reference
 
 # boundary, plain Python
 def from_board(board: chess.Board) -> Position;  def from_fen(fen: str) -> Position
@@ -530,6 +531,7 @@ def pack_move(frm, to, promotion=0, flag=FLAG_NORMAL) -> int
 def move_from / move_to / move_promotion / move_flag (move) -> int
 def sq88(square: int) -> int;  def sq64(square: int) -> int
 def check_invariants(pos) -> None                           # tests only
+def running_key(pos) -> int                                 # undo[meta[M_PLY], U_KEY]
 def position_key(board: chess.Board) -> int                 # hash_position for a chess.Board
 def warm_up(deadline: float | None = None) -> float         # called at import; WARM_UP_SECONDS
 JITTED: tuple[str, ...]                                     # every compiled function here
@@ -546,7 +548,8 @@ the boundary:
 - A move is one int32: `from | to << 7 | promotion << 14 | flag << 17`. The flag distinguishes a
   double push, an en passant capture and a castling move, none of which make/unmake can infer
   from the squares alone.
-- Every array is int32. One dtype means one numba specialisation per function and no implicit
+- Every array is int32, except the undo stack, which is int64 because one of its columns is the
+  position's Zobrist key. One dtype means one numba specialisation per function and no implicit
   casts.
 
 Behaviour:
@@ -558,9 +561,20 @@ Behaviour:
 - `make_move` always plays the move and always pushes an undo record, whatever it returns, so the
   caller must `unmake_move` exactly once either way. That is what makes the legality test free in
   a search: the move it wants to keep is already on the board.
-- `unmake_move` restores the board, both piece lists, the castling rights, the en passant square
-  and both clocks exactly. The captured piece's piece-list slot is stored in the undo record,
-  because the swap-with-last removal would otherwise lose it.
+- `unmake_move` restores the board, both piece lists, the castling rights, the en passant square,
+  both clocks and the position key exactly. The captured piece's piece-list slot is stored in the
+  undo record, because the swap-with-last removal would otherwise lose it.
+- The position key is **incremental**. `undo[meta[M_PLY], U_KEY]` is the Zobrist key of the
+  position as it stands (`running_key`); `make_move` reads this ply's row, XORs in only the terms
+  the move changes (the piece that left and the one that arrived, any captured piece on its real
+  square, the rook of a castling move, the rights combination if any right was lost, the side to
+  move, and the en passant term of the square set and of the square cleared), and writes the
+  result to the *next* row. `unmake_move` therefore restores nothing: dropping the ply uncovers
+  the row the position already had. The key rides in the undo stack rather than in a sixth array
+  because a sixth array in the `Position` tuple costs about 8% of perft on its own -- every
+  compiled function that takes a `Position` passes one more array descriptor (measured, see
+  docs/DECISIONS.md). The search reads it and never recomputes; `hash_position` is the reference
+  implementation that `set_from_board` seeds it with and that gate 4 checks it against.
 - `to_fen` reproduces `chess.Board.fen()` byte for byte, including python-chess's default
   en passant rule: the target square is printed only when a legal en passant capture exists.
 - Both fixed-size buffers are guarded at runtime. `gen_pseudo` refuses to start on a piece unless
@@ -568,8 +582,9 @@ Behaviour:
   `make_move` refuses the ply after the last undo slot. Both raise `IndexError`, which `agent.py`
   answers with the fallback; the alternative — writing past the end of a numpy array — is silent
   on the platform and its consequences arbitrary.
-- `hash_position` is the Zobrist key of the position: piece placement, side to move, castling
-  rights, and the en passant file **only when a pawn of the side to move stands ready to take**.
+- `hash_position` is the Zobrist key of the position, built from scratch: piece placement, side
+  to move, castling rights, and the en passant file **only when a pawn of the side to move stands
+  ready to take** (`ep_key_index` is that test, shared with `make_move` so the two cannot drift).
   It is what the compiled search uses for its table and for repetition, and what `GameState`
   records alongside python-chess's own key so the two sides of the engine agree about which
   positions are equal. python-chess's `_transposition_key` applies the stricter test of a fully
@@ -579,7 +594,10 @@ Behaviour:
   between games and every cache path points there, so a disk cache would never hit. It runs in
   four phases — `generate`, `make_unmake`, `hash`, `perft` — each of which the shared
   `warmup.WarmUpBudget` may skip if it would overrun `deadline`; `perft` is last because only the
-  tests call it. See `mikhail_letal/warmup.py`.
+  tests call it. Building the two warm-up positions compiles `hash_position` and `ep_key_index`
+  before the first phase, because `set_from_board` seeds the position key with them, so the
+  `hash` phase measures 0.000 s and its reference is 0.0; that ~0.2 s is the only compilation the
+  budget does not gate, and the import as a whole is unchanged. See `mikhail_letal/warmup.py`.
 
 Gates (`tests/test_fastboard.py`, python-chess is the oracle throughout; `LETAL_FULL_GATES=1`
 runs the full sizes, and `NUMBA_BOUNDSCHECK=1` makes numba check every compiled array index):
@@ -591,7 +609,12 @@ runs the full sizes, and `NUMBA_BOUNDSCHECK=1` makes numba check every compiled 
    pawns on the seventh and terminal positions.
 3. Make/unmake round trip: FEN with both clocks byte-identical, `meta` unchanged, and
    `check_invariants` green after every make and unmake in a Python-level perft.
-4. No jitted function gains a signature under load, so nothing compiles after import.
+4. The running key equals `hash_position` after **every** make and every unmake, over forty-ply
+   walks from the openings, the rule-breaking positions and random playouts, with every
+   pseudo-legal move tried at each ply (1,092,414 comparisons at the full size) and the sample
+   audited for promotions, capture-promotions, en passant captures, castling and all sixteen
+   rights combinations. `check_invariants` checks the same thing inside gate 3.
+5. No jitted function gains a signature under load, so nothing compiles after import.
 
 ## `mikhail_letal/fasteval.py` (Stage 1, phase 2)
 

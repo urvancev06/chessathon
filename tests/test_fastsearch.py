@@ -38,6 +38,8 @@ from mikhail_letal.fastsearch import (
     JITTED,
     FastEngine,
     _cached_eval,
+    _make_null,
+    _unmake_null,
     negamax,
     new_state,
     warm_up,
@@ -115,6 +117,11 @@ def test_nothing_compiles_during_a_game() -> None:
 
     before = {name: list(getattr(module, name).signatures) for name in JITTED}
     engine = FastEngine()
+    # Ask for an unbounded warm-up explicitly. `agent` arms the shared budget with a 70-second
+    # deadline when pytest imports `tests/test_properties.py` during collection, and by the time
+    # this test runs that deadline can already have passed; the phases would then be *skipped*,
+    # which leaves their names in the shared budget and breaks the two tests below that read it.
+    arm(None)
     warm_up(engine)
     after_warm = {name: list(getattr(module, name).signatures) for name in JITTED}
 
@@ -476,7 +483,7 @@ def test_the_evaluation_cache_returns_what_the_evaluation_would() -> None:
 def test_negamax_leaves_the_position_exactly_as_it_found_it() -> None:
     """Including when the abort fires in the middle of a line: the search returns through every
     ``unmake_move`` on the way out, so the board is never left half-played."""
-    from mikhail_letal.fastboard import new_position, set_from_board
+    from mikhail_letal.fastboard import new_position, running_key, set_from_board
 
     state = new_state()
     pos = new_position()
@@ -495,11 +502,15 @@ def test_negamax_leaves_the_position_exactly_as_it_found_it() -> None:
             pos.pidx.copy(),
             pos.meta.copy(),
         )
+        # The running Zobrist key is part of the position now, and every `unmake_move` on the way
+        # out has to put it back; an abort in mid-line must not leave it drifted.
+        key_before = running_key(pos)
         negamax(pos, state, EVAL_TABLES, 6, -MATE_SCORE - 1, MATE_SCORE + 1, 1, 1)
         for expected, actual in zip(
             snapshot, (pos.board, pos.plist, pos.pidx, pos.meta), strict=True
         ):
             assert (expected == actual).all(), f"position changed with node limit {limit}"
+        assert running_key(pos) == key_before, f"key changed with node limit {limit}"
 
 
 # ----------------------------------------------------------------------------- (f) legality
@@ -548,3 +559,43 @@ def test_a_forced_move_is_returned_without_a_deep_search() -> None:
     assert result.move is not None
     assert result.move in board.legal_moves
     assert result.depth == 1
+
+
+def test_the_null_move_keeps_the_position_key_exact() -> None:
+    """`_make_null` maintains the running key that `make_move` maintains everywhere else.
+
+    Passing touches no piece, so only two terms of the key can change: the side-to-move term,
+    which always flips, and the en passant term, which the pass clears -- and which counts only
+    when a pawn of the side to move was standing ready to take. That last condition is why this
+    is checked against `hash_position` rather than argued: it is evaluated on the position before
+    the pass and has to be removed from the key of the position after it.
+    """
+    from mikhail_letal.fastboard import (
+        ZOBRIST,
+        hash_position,
+        new_position,
+        running_key,
+        set_from_board,
+    )
+
+    # Positions with an en passant square that can be taken, one that cannot, and none at all,
+    # ahead of a broad sample from random playouts.
+    fens = [
+        "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+        "rnbqkbnr/pppp1ppp/8/8/3pP3/8/PPP2PPP/RNBQKBNR b KQkq e3 0 3",
+        "8/8/8/8/1pPp4/8/8/K5k1 b - c3 0 1",
+        "8/8/8/8/7p/2P5/8/K5k1 b - c3 0 1",
+        BUSY_MIDDLEGAME,
+    ]
+    boards = [chess.Board(fen) for fen in fens]
+    pos = new_position()
+    checked = 0
+    for board in [*boards, *playout_boards(600, seed=31415926, starts=sample_starts())]:
+        set_from_board(pos, board)
+        before = running_key(pos)
+        saved = _make_null(pos)
+        assert running_key(pos) == int(hash_position(pos, ZOBRIST)), board.fen()
+        _unmake_null(pos, *saved)
+        assert running_key(pos) == before, board.fen()
+        checked += 1
+    assert checked == len(fens) + 600
