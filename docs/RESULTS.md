@@ -168,3 +168,84 @@ plies as well, so the two are on the same edge, not on opposite sides of it.
 | v1.0-vs-sf2000-real | . | tools/yardstick (YARDSTICK_ELO=2000) | 120+0.5 s | 16 | +11 =2 -3 | 75.0% | ±20.0% | +191 (+35 to +512) | 12.5% | checkmate 14, threefold_repetition 2 | 5 | 1.80 3.75 3.26 / 3.19 5.48 4.85 | data/openings.txt |
 | v1.0-vs-sf2200-real | . | tools/yardstick (YARDSTICK_ELO=2200) | 120+0.5 s | 16 | +10 =1 -5 | 65.6% | ±23.2% | +112 (-53 to +360) | 6.2% | checkmate 15, threefold_repetition 1 | 5 | 3.19 5.48 4.85 / 4.45 6.11 5.96 | data/openings.txt |
 | v1.0-vs-sf2400-real | . | tools/yardstick (YARDSTICK_ELO=2400) | 120+0.5 s | 16 | +8 =2 -6 | 56.2% | ±23.5% | +44 (-125 to +238) | 12.5% | threefold_repetition 2, checkmate 14 | 5 | 4.45 6.11 5.96 / 5.53 6.35 6.48 | data/openings.txt |
+| v1.1-bundle-vs-v1.0-real-c0 | . | versions/v1.0 | 120+0.5 s | 100 | +43 =23 -34 | 54.5% | ±8.6% | +31 (-29 to +93) | 23.0% | threefold_repetition 19, checkmate 77, insufficient_material 3, fifty_moves 1 | 4 | 4.18 4.97 4.19 / 1.24 2.73 3.70 | data/openings.txt |
+| v1.1-bundle-vs-v1.0-real-c100 | . | versions/v1.0 | 120+0.5 s | 100 | +34 =28 -38 | 48.0% | ±8.3% | -14 (-73 to +44) | 28.0% | threefold_repetition 21, checkmate 72, insufficient_material 7 | 4 | 1.24 2.73 3.70 / 1.31 2.65 3.56 | data/openings.txt |
+
+### 2026-09-09 — v1.1 promoted on the safety criterion, not on Elo
+
+The bundle match against `versions/v1.0` — the timing refit (`82b20e2`) and the king-danger term
+(`897e1e2`), measured together. Three chunks of 100 were planned; the machine lost power at 02:28
+during the third. **The decision is taken on the 200 games of the two chunks that completed**, which
+is what the pre-registered rule provides for: one look, on every game completed, whatever that
+number turns out to be, the chunks existing to bound the cost of a crash (`DECISIONS.md`,
+2026-09-08, amendment 4, step 2).
+
+| pooled, 200 games | +77 =51 −72 | 51.25 % | **Elo +8.7 (−33.1 to +50.7)** |
+|---|---|---|---|
+
+**The interval straddles zero, so no strength improvement is claimed.** With the non-inferiority
+margin at `n = 200` of −49.0, this is the third row of the operative rule: point estimate at or above
+zero, lower bound above the margin, interval not above zero. It promotes on the **safety** criterion
+and the record says so. **The king-danger term therefore ships unproven**: it has no independent
+safety argument and rode along in the bundle.
+
+**The two safety gates disagree, and that is a finding rather than a footnote.**
+
+| gate | written | verdict |
+|---|---|---|
+| original — no `flag`, and lowest clock above 5 000 ms | pre-registered 2026-09-08, before any result | **FAILS** (lowest 3 729 ms) |
+| adopted — no `flag`, and at most 2 % of games below 5 000 ms | amendment 7, 2026-09-08, authored blind | **PASSES** (2 of 200 = 1.00 %, against 4 allowed) |
+
+v1.1 ships because of the second. Had the first stood, nothing would have been promoted. The
+replacement was adopted because the original is an extreme-value statistic and so gets strictly
+harder as the sample grows — 300 games can only score worse on a minimum than 100 — while the same
+rule requires the decision on the pooled total; the reasoning is in amendment 7 and the author had
+seen no figure from the match.
+
+**The distribution, so a judge can apply their own threshold instead of trusting ours** (our own
+clock after our own move, 200 games, every game carrying clock data):
+
+| minimum | p10 | median | below 5 000 ms | below `panic_ms` (1 650) |
+|---|---|---|---|---|
+| 3 729 ms (`data/pgn/v1.1-bundle/game-0031.pgn`) | 9 520 ms | 25 333 ms | **2** (1.00 %) | **0** |
+
+Terminations: checkmate 149, threefold repetition 40, insufficient material 10, fifty moves 1,
+**flag 0**.
+
+**How much the gate outcome is worth: very little, and that was said before the result existed.**
+The adopted gate allows 6 of 300 and chunk A's rate projected ≈6.3, so a pass and a fail differ by
+one game and nothing else. The figures that carry the safety argument are the non-marginal ones —
+**no flag, and no game below `panic_ms`** — not the margin by which the rate cleared 2 %.
+
+**Platform-side evidence, quoted from `handoff/RUNBOOK-adjudication.md` §4a rather than recomputed.**
+Across four rated games on the competition core (rounds 71, 73, 74, 75; 297 of our moves), the
+hard-deadline abort path was reached nine times and **held to one or two clock-check intervals in
+every one of them** — 512 nodes at ~505 k nodes/s is 1.01 ms. Not "1 ms every time": round 75 overshot
+by 2 ms on `g2h2`, a 4.88 M-node search to depth 16/29 that ran 8.1 s against a 2.7 s soft budget,
+which is the heaviest load observed in any rated game and so the best of the nine cases rather than
+the worst. The same parse gives **62 of 297 moves (21 %) past the soft budget** and a **median spend
+of 0.66–0.71 of soft**, the latter corroborating from platform data the 0.70 figure `moves_to_go` was
+fitted to.
+
+**This does not fix round 73.** The bundle addresses neither of that game's surviving candidate
+defects. Round 73 has five refuted explanations and no confirmed diagnosis, and five of them died to
+a matched baseline — comparing our behaviour against the field's — rather than to further analysis of
+our own games. A promotion landing the morning after that loss should not be read as answering it.
+
+**No blind second read was made of this verdict, and the reason is not the reboot.** The runbook
+names a blind read as a step. The coordinating session's briefing to this one contained the verdict,
+the interval, the safety counts and the excluded-chunk figure, so no blind reader remained. What was
+done instead is an **independent re-derivation from primary data**: the chunk JSONs were lost with
+the scratchpad in the reboot, so every figure above was recomputed from the 250 surviving PGNs and
+their `[%clk]` tags, touching neither the summary nor the two chunk rows. It reproduces them exactly.
+That is a different assurance from a blind read and a weaker one, and it is recorded as what it is.
+
+**The interrupted chunk's 50 games are excluded, and the choice is immaterial.** Including them gives
++104 =66 −80 over 250, 54.80 %, Elo +33.5 (−3.4 to +71.1) — a better-looking number, and a stop chosen
+by a power cut that lands on a favourable streak is the optional stopping the rule exists to prevent.
+It changes nothing: at `n = 250` the margin is −43.8 and the lower bound −3.4, so the result lands in
+the same third row and ships on the same criterion either way.
+
+**One incidental fact worth keeping.** The chunk JSONs did not survive the reboot and the PGNs did.
+The derived artefact was the convenient form; the primary evidence was the durable one, and the
+verdict was reconstructable only because of that.
