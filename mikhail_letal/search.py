@@ -289,6 +289,13 @@ _ORDER_CAPTURE = 2_000_000
 _ORDER_KILLER_FIRST = 1_000_001
 _ORDER_KILLER_SECOND = 1_000_000
 _HISTORY_MAX = _ORDER_KILLER_SECOND - 1
+# Captures that static exchange evaluation says lose material sit below every quiet move, scored
+# by how much they lose so the least bad is tried first. Without this a capture that hangs a queen
+# is searched before a killer, because `_ORDER_CAPTURE` bands every capture above every quiet.
+# Below the quiets rather than merely below the killers: a losing capture is worse than an
+# untried quiet move, and the alternative would need a band that does not exist between
+# `_HISTORY_MAX` and `_ORDER_KILLER_SECOND`.
+_ORDER_LOSING_CAPTURE = -1_000_000
 
 # Continuation-history geometry (see CONTINUATION_HISTORY above). One entry is addressed by
 #

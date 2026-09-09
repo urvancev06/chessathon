@@ -107,3 +107,50 @@ def test_the_board_is_left_exactly_as_it_was() -> None:
     before = pos.board.copy()
     see(pos, fb.move_from_chess(pos, chess.Move.from_uci("e2e5")))
     assert (pos.board == before).all(), "see did not restore the board"
+
+
+def test_a_losing_capture_is_ordered_below_the_quiet_moves() -> None:
+    """The ordering change SEE exists for.
+
+    Every capture used to be banded above every killer and every quiet, so a queen taking a
+    defended pawn was searched before any of them. Here White has `Qd1xd5`, which SEE scores at
+    -800, and a board full of ordinary quiet moves. The losing capture must now score below all
+    of them; before the change it scored above every one.
+    """
+    from mikhail_letal.fastsearch import _score_moves, new_state
+    from mikhail_letal.search import _ORDER_CAPTURE
+
+    board = chess.Board("4k3/8/2p5/3p4/8/8/4P3/3QK3 w - - 0 1")
+    pos = fb.from_board(board)
+    state = new_state()
+    count = int(fb.gen_pseudo(pos, state.moves[1]))
+    _score_moves(pos, state, 1, count, fb.NO_MOVE)
+
+    losing = fb.move_from_chess(pos, chess.Move.from_uci("d1d5"))
+    scores = {int(state.moves[1, i]): int(state.order[1, i]) for i in range(count)}
+    assert losing in scores, "the losing capture was not generated"
+    quiet_scores = [v for m, v in scores.items() if m != losing]
+
+    assert scores[losing] < min(quiet_scores), (
+        f"losing capture scored {scores[losing]}, not below every quiet move "
+        f"(lowest quiet {min(quiet_scores)})"
+    )
+    assert scores[losing] < _ORDER_CAPTURE, "it is still in the capture band"
+
+
+def test_a_winning_capture_keeps_its_place_at_the_top() -> None:
+    """The demotion must not touch captures MVV-LVA already ranks correctly: a pawn taking a
+    queen is winning by inspection and SEE is never consulted for it."""
+    from mikhail_letal.fastsearch import _score_moves, new_state
+    from mikhail_letal.search import _ORDER_CAPTURE
+
+    board = chess.Board("4k3/8/8/3q4/4P3/8/8/4K3 w - - 0 1")
+    pos = fb.from_board(board)
+    state = new_state()
+    count = int(fb.gen_pseudo(pos, state.moves[1]))
+    _score_moves(pos, state, 1, count, fb.NO_MOVE)
+
+    winning = fb.move_from_chess(pos, chess.Move.from_uci("e4d5"))
+    scores = {int(state.moves[1, i]): int(state.order[1, i]) for i in range(count)}
+    assert scores[winning] >= _ORDER_CAPTURE, "a winning capture was demoted"
+    assert scores[winning] == max(scores.values()), "it is not searched first"

@@ -130,6 +130,7 @@ from mikhail_letal.search import (
     _ORDER_CAPTURE,
     _ORDER_KILLER_FIRST,
     _ORDER_KILLER_SECOND,
+    _ORDER_LOSING_CAPTURE,
     _ORDER_TT,
     ASPIRATION_MAX_FAILS,
     ASPIRATION_MIN_DEPTH,
@@ -792,6 +793,15 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
             # The MVV-LVA rank of a piece is its piece type; only the order matters.
             attacker = board[frm] & PIECE_TYPE_MASK
             order[i] = _ORDER_CAPTURE + 10 * (victim + promotion) - attacker
+            # SEE is consulted only where MVV-LVA cannot already answer. Taking something worth at
+            # least as much as the attacker is winning or equal by inspection and no swap-off can
+            # change that, so the scan runs on the minority of captures that might be losing --
+            # which is what keeps it off the hot path. Promotions are left alone: the new piece,
+            # not the pawn, is what stands on the square afterwards.
+            if promotion == 0 and _SEE_VALUE[victim] < _SEE_VALUE[attacker]:
+                exchange = see(pos, move)
+                if exchange < 0:
+                    order[i] = _ORDER_LOSING_CAPTURE + exchange
         elif move == killer_first:
             order[i] = _ORDER_KILLER_FIRST
         elif move == killer_second:
