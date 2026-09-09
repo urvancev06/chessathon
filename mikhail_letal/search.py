@@ -197,6 +197,18 @@ GAME_PLY_CAP = 600
 # hundreds of thousands of nodes before this cap).
 QS_EVASION_PLIES = 4
 
+# Quiescence checks: for this many quiescence plies, the *quiet* moves that give check are
+# searched alongside the captures. A capture-only quiescence walks past every forcing line whose
+# first move takes nothing -- a quiet check that wins material on the reply, or mates -- and
+# evaluates the position as if it were quiet. Generating checks finds those.
+#
+# The number is small on purpose and is the one thing standing between this feature and an
+# explosion. Every check searched hands the child a position where the side to move is in check,
+# and the child then searches *every* legal evasion (QS_EVASION_PLIES), so a check costs far more
+# than a capture does. One ply means only the first quiescence node generates them; the evasions
+# it spawns generate none of their own. Zero turns the feature off, which is how it is measured.
+QS_CHECK_PLIES = 1
+
 # Root tie-break (see Engine._break_draw_tie): when every root move scores a draw although the
 # static evaluation says we are ahead by at least this much, the draw is a rule draw inside the
 # horizon and the tied moves are told apart by the static evaluation of the positions they reach.
@@ -1202,6 +1214,7 @@ class Engine:
             if len(moves) > 1:
                 self._order_moves(board, moves, _NO_MOVE_CODE, ply)
             best_score = -_INFINITY
+            checks: list[chess.Move] = []  # every legal move is searched here, checks among them
         else:
             best_score = self._evaluate(search_board)  # stand pat
             if best_score >= beta:
@@ -1213,7 +1226,8 @@ class Engine:
             if best_score > alpha:
                 alpha = best_score
             moves = self._capture_moves(board, True, in_check)
-            if not moves:
+            checks = self._check_moves(board) if qs_ply < QS_CHECK_PLIES else []
+            if not moves and not checks:
                 if not self._has_legal_move(board, in_check):
                     return -(MATE_SCORE - ply) if in_check else DRAW_SCORE
                 return best_score
@@ -1267,7 +1281,49 @@ class Engine:
                     return score
                 if score > alpha:
                     alpha = score
+
+        # Quiet checks, after the captures and only if none of them held beta. A capture-only
+        # quiescence calls a position quiet whenever the move that decides it happens to take
+        # nothing, and evaluates it statically; these are the forcing moves that fills that gap.
+        if len(checks) > 1:
+            self._order_moves(board, checks, _NO_MOVE_CODE, ply)
+        for move in checks:
+            search_board.push(move)
+            nodes = self._nodes + 1
+            self._nodes = nodes
+            if nodes % NODE_CHECK_INTERVAL == 0:
+                self._check_limits()
+            score = -quiescence(search_board, -beta, -alpha, child_ply, True, child_qs_ply)
+            search_board.pop()
+            if score > best_score:
+                best_score = score
+                if score >= beta:
+                    return score
+                if score > alpha:
+                    alpha = score
         return best_score
+
+    def _check_moves(self, board: chess.Board) -> list[chess.Move]:
+        """The quiet moves that give check and are worth a quiescence node.
+
+        ``fastsearch.gen_checks`` and ``fastsearch._check_is_safe`` in the terms python-chess
+        offers, and the two must stay the same rule: quiet moves, no castling and no promotion,
+        that give check, minus the ones that put a piece where the opponent already defends it.
+        The compiled engine explains why those are the exclusions and what the filter gives up.
+        """
+        them = not board.turn
+        out: list[chess.Move] = []
+        for move in board.generate_legal_moves():
+            if move.promotion is not None or board.is_capture(move) or board.is_castling(move):
+                continue
+            if not board.gives_check(move):
+                continue
+            if board.piece_type_at(move.from_square) != chess.PAWN and board.is_attacked_by(
+                them, move.to_square
+            ):
+                continue
+            out.append(move)
+        return out
 
     @staticmethod
     def _has_legal_move(board: chess.Board, in_check: bool) -> bool:

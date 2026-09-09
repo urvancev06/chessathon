@@ -70,10 +70,13 @@ from mikhail_letal.fastboard import (
     _KNIGHT_DIRS,
     _SLIDER_DIRS,
     _SLIDER_N,
+    BISHOP,
     BLACK,
     COLOUR_SHIFT,
     EMPTY,
+    FLAG_CASTLE,
     FLAG_EN_PASSANT,
+    FLAG_MASK,
     FLAG_SHIFT,
     KING,
     KNIGHT,
@@ -95,6 +98,7 @@ from mikhail_letal.fastboard import (
     PROMO_MASK,
     PROMO_SHIFT,
     QUEEN,
+    ROOK,
     SQ_BITS,
     SQ_MASK,
     U_KEY,
@@ -102,6 +106,7 @@ from mikhail_letal.fastboard import (
     Z_SIDE,
     ZOBRIST,
     Position,
+    attacked,
     ep_key_index,
     gen_legal,
     gen_pseudo,
@@ -153,6 +158,7 @@ from mikhail_letal.search import (
     NULL_MOVE_DEPTH_DIVISOR,
     NULL_MOVE_MIN_DEPTH,
     NULL_MOVE_PRUNING,
+    QS_CHECK_PLIES,
     QS_EVASION_PLIES,
     UPPER,
     SearchResult,
@@ -531,6 +537,215 @@ def gen_captures(pos: Position, out: npt.NDArray[np.int32]) -> int:
     return n
 
 
+# ----------------------------------------------------------------------------- lines and checks
+#
+# Whether one square attacks another along a line depends only on the difference between the two
+# in the 0x88 layout -- that is what the layout is for -- so "which way does this square lie from
+# that one" is a table lookup rather than a search. `gen_checks` leans on it hard: it asks "does
+# this move give check?" of every quiet move in the position, so the answer has to cost a few
+# nanoseconds or the feature is not worth having.
+
+
+def _build_line_tables() -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
+    """The two geometry tables, indexed by `to - frm + 128`.
+
+    `_DIR_TABLE` holds the 0x88 step from one square towards another, or zero when the two share
+    no rank, file or diagonal. `_KNIGHT_HOP` holds 1 when the difference is a knight's move.
+    Built at import from the direction tables the move generator already uses, so the geometry
+    exists once rather than twice.
+    """
+    directions = np.zeros(256, dtype=np.int32)
+    hops = np.zeros(256, dtype=np.int32)
+    for frm in range(128):
+        if (frm & OFF_BOARD_MASK) != 0:
+            continue
+        for step in _KING_DIRS:
+            to = frm + int(step)
+            while (to & OFF_BOARD_MASK) == 0:
+                directions[to - frm + 128] = step
+                to += int(step)
+        for hop in _KNIGHT_DIRS:
+            to = frm + int(hop)
+            if (to & OFF_BOARD_MASK) == 0:
+                hops[to - frm + 128] = 1
+    return directions, hops
+
+
+_DIR_TABLE, _KNIGHT_HOP = _build_line_tables()
+
+
+@njit(cache=False)
+def _diagonal(step: int) -> int:
+    """Is this 0x88 direction a diagonal? The four straight steps are the ones that are not."""
+    if step == 16 or step == -16 or step == 1 or step == -1:
+        return 0
+    return 1
+
+
+@njit(cache=False)
+def _first_occupied(
+    board: npt.NDArray[np.int32], origin: int, step: int, vacated: int, filled: int
+) -> int:
+    """First occupied square walking from `origin` along `step`, on the board as it *would* look
+    after a move: `vacated` counts as empty and `filled` counts as occupied. `origin` itself is
+    not examined. Returns NO_SQ if the ray leaves the board without meeting one."""
+    sq = origin + step
+    while (sq & OFF_BOARD_MASK) == 0:
+        if sq == filled:
+            return sq
+        if sq != vacated and board[sq] != EMPTY:
+            return sq
+        sq += step
+    return NO_SQ
+
+
+@njit(cache=False)
+def _direct_check(
+    board: npt.NDArray[np.int32], kind: int, side: int, frm: int, to: int, ksq: int
+) -> int:
+    """Would a `side` piece of type `kind` standing on `to` attack the king on `ksq`, once `frm`
+    has been vacated? Returns 1 or 0. This is the check the moving piece gives itself; a check
+    uncovered behind it is `_discovered_slider`'s business."""
+    if kind == PAWN:
+        # A white pawn on `to` attacks to+15 and to+17, a black one the two squares below.
+        if side == WHITE:
+            return 1 if (to + 15 == ksq or to + 17 == ksq) else 0
+        return 1 if (to - 15 == ksq or to - 17 == ksq) else 0
+    if kind == KNIGHT:
+        return 1 if _KNIGHT_HOP[to - ksq + 128] != 0 else 0
+    if kind == KING:
+        # A king can only attack the enemy king by standing next to it, which is illegal, so no
+        # legal king move gives check directly. (A pseudo-legal one can, and `make_move` rejects
+        # it; a king move that uncovers a slider is a discovered check and is found below.)
+        return 0
+    step = _DIR_TABLE[to - ksq + 128]
+    if step == 0:
+        return 0
+    diagonal = _diagonal(step)
+    if kind == BISHOP and diagonal == 0:
+        return 0
+    if kind == ROOK and diagonal != 0:
+        return 0
+    # The queen needs no direction test: it moves every way the table can point. What is left is
+    # whether the line is clear, which is true exactly when the piece itself is the first thing
+    # the king sees along it.
+    return 1 if _first_occupied(board, ksq, step, frm, to) == to else 0
+
+
+@njit(cache=False)
+def _discovered_slider(board: npt.NDArray[np.int32], side: int, frm: int, ksq: int) -> int:
+    """Square of the `side` slider that would attack the king on `ksq` once `frm` is vacated, or
+    NO_SQ when leaving `frm` uncovers nothing.
+
+    Anything standing between the king and `frm` blocks the line and is met first, so the whole
+    test is "the first piece behind `frm`, seen from the king, is ours and slides this way". It
+    cannot wrongly find a slider in *front* of `frm`: that would be the side to move already
+    checking a king it is not to move against, which no legal position holds.
+    """
+    step = _DIR_TABLE[frm - ksq + 128]
+    if step == 0:
+        return NO_SQ
+    behind = _first_occupied(board, ksq, step, frm, NO_SQ)
+    if behind == NO_SQ:
+        return NO_SQ
+    piece = board[behind]
+    if (piece >> COLOUR_SHIFT) != side:
+        return NO_SQ
+    kind = piece & PIECE_TYPE_MASK
+    if kind == QUEEN:
+        return behind
+    if _diagonal(step) != 0:
+        return behind if kind == BISHOP else NO_SQ
+    return behind if kind == ROOK else NO_SQ
+
+
+@njit(cache=False)
+def _discovery_survives(to: int, ksq: int, slider: int, step: int) -> int:
+    """Does an uncovered check still stand once the mover lands on `to`? It does not if the mover
+    has stepped onto the very line it opened, between the king and the slider."""
+    if _DIR_TABLE[to - ksq + 128] != step:
+        return 1
+    if _DIR_TABLE[slider - to + 128] != step:
+        return 1  # on the line, but past the slider rather than in front of it
+    return 0
+
+
+@njit(cache=False)
+def _check_is_safe(pos: Position, move: int) -> int:
+    """Is this quiet checking move worth a quiescence node? Returns 1 or 0.
+
+    The whole check filter lives here, so tightening it is a change to this function and to
+    nothing else. The rule is cheap and blunt on purpose: a quiet check that puts a piece on a
+    square the opponent defends usually just loses the piece, because nothing was captured to pay
+    for it, and searching those is exactly what makes a checking quiescence explode. A pawn check
+    is always kept -- it risks a pawn and it is the cheapest way to force a king to move.
+
+    Two known inaccuracies, both accepted for the cost: the opponent's defenders are counted on
+    the board *before* the move, so a defender whose line the mover itself unblocks is missed;
+    and a square defended only by the enemy king counts as defended, which drops a few real
+    checks. A static exchange evaluation answers the question properly -- keep the check when the
+    exchange on the destination does not lose material, so a defended square is still searched
+    when we have the attackers to win it. This body becomes `see(pos, move) >= 0` when `see`
+    lands; see docs/DECISIONS.md for why that needs a SEE that scores quiet moves.
+    """
+    if (pos.board[move & SQ_MASK] & PIECE_TYPE_MASK) == PAWN:
+        return 1
+    to = (move >> SQ_BITS) & SQ_MASK
+    return 1 if attacked(pos.board, to, 1 - pos.meta[M_SIDE]) == 0 else 0
+
+
+@njit(cache=False)
+def gen_checks(pos: Position, out: npt.NDArray[np.int32]) -> int:
+    """Write the quiet moves that give check, and survive `_check_is_safe`, into `out`.
+
+    Captures, en passant and queen promotions are `gen_captures`'s list; this is the quiet half of
+    the forcing moves, so the two lists are disjoint and quiescence can search one after the other
+    without searching anything twice.
+
+    The moves come from `gen_pseudo` and are filtered in place. Generating them directly would
+    save the writes but not the work -- finding a rook's quiet destinations *is* the ray walk
+    `gen_pseudo` already does -- and it would put a second copy of the move rules in the engine to
+    keep correct. Castling and under-promotions are left out: a castling check and a
+    knight-promotion check are rare enough not to be worth a special case in either generator.
+    """
+    board = pos.board
+    side = pos.meta[M_SIDE]
+    ksq = pos.meta[M_KING + (1 - side)]
+    count = gen_pseudo(pos, out)
+
+    n = 0
+    slider_from = NO_SQ  # square the hoisted discovery answer below was computed for
+    slider = NO_SQ
+    slider_step = 0
+    for i in range(count):
+        move = out[i]
+        frm = move & SQ_MASK
+        to = (move >> SQ_BITS) & SQ_MASK
+        if board[to] != EMPTY or ((move >> PROMO_SHIFT) & PROMO_MASK) != 0:
+            continue  # a capture or a promotion: gen_captures owns both
+        flag = (move >> FLAG_SHIFT) & FLAG_MASK
+        if flag in (FLAG_EN_PASSANT, FLAG_CASTLE):
+            # En passant lands on an empty square but is a capture; castling moves two pieces, so
+            # the from-to reasoning below would not see the rook that delivers the check.
+            continue
+
+        if frm != slider_from:
+            # Whether *leaving* a square uncovers a slider depends only on the square left, and
+            # `gen_pseudo` emits one piece's moves together, so this costs once per piece.
+            slider_from = frm
+            slider = _discovered_slider(board, side, frm, ksq)
+            slider_step = _DIR_TABLE[frm - ksq + 128]
+
+        gives = _direct_check(board, board[frm] & PIECE_TYPE_MASK, side, frm, to, ksq)
+        if gives == 0 and slider != NO_SQ:
+            gives = _discovery_survives(to, ksq, slider, slider_step)
+        if gives == 0 or _check_is_safe(pos, move) == 0:
+            continue
+        out[n] = move  # n <= i always, so the compaction cannot overwrite an unread move
+        n += 1
+    return n
+
+
 # ----------------------------------------------------------------------------- move ordering
 
 
@@ -824,6 +1039,41 @@ def quiescence(
                 return score
             if score > alpha:
                 alpha = score
+
+    # Quiet checks. A capture-only quiescence calls a position quiet whenever the move that
+    # decides it happens to take nothing, and evaluates it statically; for the first
+    # QS_CHECK_PLIES plies the quiet checking moves are searched too. They come after the
+    # captures and only if no capture held beta, and they reuse this ply's buffer, which the
+    # capture loop above has finished with. Not in the evasion branch: there every legal move is
+    # searched already, checks among them.
+    if not evasions and qs_ply < QS_CHECK_PLIES:
+        count = gen_checks(pos, st.moves[ply])
+        _score_moves(pos, st, ply, count, NO_MOVE)
+        for i in range(count):
+            _pick_best(st, ply, i, count)
+            move = st.moves[ply, i]
+            if make_move(pos, move) == 0:
+                unmake_move(pos)
+                continue
+            legal_seen += 1
+            nodes = ints[I_NODES] + 1
+            ints[I_NODES] = nodes
+            if nodes % NODE_CHECK_INTERVAL == 0:
+                _check_limits(st)
+            # `gen_checks` promises this is 1, and the board is asked anyway: one attack scan
+            # against a whole child search is nothing, and it means a bug in the generator can
+            # never reach the child as a false "in check" and come back as a false mate score.
+            child_in_check = in_check(pos)
+            score = -quiescence(pos, st, ev, -beta, -alpha, ply + 1, child_in_check, qs_ply + 1)
+            unmake_move(pos)
+            if ints[I_ABORT] != 0:
+                return 0
+            if score > best_score:
+                best_score = score
+                if score >= beta:
+                    return score
+                if score > alpha:
+                    alpha = score
 
     if evasions:
         # No legal evasion is checkmate; there is no stand-pat score to fall back on.
@@ -1522,6 +1772,13 @@ JITTED: Final = (
     "_unmake_null",
     "_has_non_pawn_material",
     "gen_captures",
+    "_diagonal",
+    "_first_occupied",
+    "_direct_check",
+    "_discovered_slider",
+    "_discovery_survives",
+    "_check_is_safe",
+    "gen_checks",
     "_victim",
     "_score_moves",
     "_pick_best",
@@ -1587,6 +1844,7 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
         _has_legal(pos, st, 1, 1)
         _game_over_score(pos, st, 1, 0)
         _static_score(pos, st, ev, 1, 0)
+        gen_checks(pos, st.moves[1])
 
     def compile_quiescence() -> None:
         quiescence(pos, st, ev, -_INFINITY, _INFINITY, 1, 0, 0)
