@@ -53,6 +53,12 @@ torch.set_num_threads(1)  # one core, as on the platform
 FEATURE_LIMIT = 32767.0 / FEATURE_SCALE  # about 4.0
 OUTPUT_LIMIT = 32767.0 / QB  # about 512
 
+# Centipawns per logit for the win-probability transform. This is the Texel sigmoid at K = 1:
+# 1/(1 + 10^(-cp/400)) is sigmoid(cp / 173.7), so a 174 cp advantage is about a 73% score. The
+# constant is a convention rather than a fit; fitting it to our own games is a separate question
+# and would need games, not positions.
+CP_PER_LOGIT = 173.7
+
 
 def is_holdout(fen: str, percent: int) -> bool:
     """Whether a position belongs to the held-out set, decided by the position itself.
@@ -180,6 +186,13 @@ def main() -> int:
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument(
+        "--loss",
+        choices=("cp", "wdl"),
+        default="cp",
+        help="'cp' is mean squared error on centipawns; 'wdl' is the same error measured after "
+        "the win-probability sigmoid, which stops the gradient being spent on decided positions",
+    )
+    parser.add_argument(
         "--holdout-percent",
         type=int,
         default=5,
@@ -225,6 +238,28 @@ def main() -> int:
     train_own, train_other, train_y = tensors(train_idx)
     test_own, test_other, test_y = tensors(test_idx)
 
+    def objective(predicted: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """The training loss.
+
+        Why `wdl` exists. The labels are centipawns clipped to +-1500, and squared error on them
+        spends most of its gradient where the error is largest -- which is positions already
+        decided, where being 300 cp wrong changes nothing about the move. Measuring the same error
+        after the win-probability sigmoid weights a position by how much its evaluation could still
+        matter, which is what a Texel fit has always done and what NNUE training does.
+
+        The network still OUTPUTS centipawns: only the loss is transformed. So the quantisation
+        scales are untouched -- I had thought this change would disturb them and it does not. What
+        it can disturb is the output RANGE, because the sigmoid saturates and stops constraining
+        predictions far from zero, so a wdl-trained net is free to emit very large centipawn values.
+        `quantise` already bounds the output weights; the run reports the range so a net that has
+        drifted somewhere the engine's mate thresholds care about is visible rather than silent.
+        """
+        if args.loss == "cp":
+            return nn.functional.mse_loss(predicted, target)
+        return nn.functional.mse_loss(
+            torch.sigmoid(predicted / CP_PER_LOGIT), torch.sigmoid(target / CP_PER_LOGIT)
+        )
+
     model = Model(args.width)
     model.clip_()
     optimiser = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -240,14 +275,14 @@ def main() -> int:
             batch = shuffle[start : start + args.batch]
             optimiser.zero_grad()
             predicted = model(train_own[batch], train_other[batch])
-            loss = nn.functional.mse_loss(predicted, train_y[batch])
+            loss = objective(predicted, train_y[batch])
             loss.backward()  # type: ignore[no-untyped-call]  # torch ships no stub for this
             optimiser.step()
             model.clip_()
             total += float(loss.item()) * len(batch)
         model.eval()
         with torch.no_grad():
-            held = float(nn.functional.mse_loss(model(test_own, test_other), test_y).item())
+            held = float(objective(model(test_own, test_other), test_y).item())
         # Keep the epoch that was best on held-out data, not the last one. Held-out loss here
         # bottoms out and then climbs while training loss keeps falling, which is the net
         # memorising 22 000 positions rather than learning chess.
@@ -265,6 +300,12 @@ def main() -> int:
     print("the net memorising the training positions, and the reason more data is the next step.")
     model.load_state_dict(best_state)
 
+    with torch.no_grad():
+        span = model(test_own, test_other)
+    print(
+        f"\npredicted centipawns on held-out data: min {span.min():.0f}, max {span.max():.0f}, "
+        f"mean |x| {span.abs().mean():.0f}"
+    )
     print("\nquantising:")
     net = quantise(model, args.width)
     args.out.parent.mkdir(parents=True, exist_ok=True)
