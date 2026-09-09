@@ -56,6 +56,13 @@ Real, but not the four-fold difference, and not worth doing on its own.
 
 ## 3. The cost is 90% tree, and the tree number is measured in the wrong currency
 
+> **Superseded twice — read to the end before quoting anything from this section.** The figures
+> below (-10 to -23, "clears that price comfortably") were wrong in two separate ways, and both
+> corrections are in the sections that follow. The Elo conversion conflated per-doubling with
+> per-ply, and the 1.556 was not quotable in the first place. **The conclusion of this document is
+> that mobility's cost is unresolved between roughly 8 and 55 Elo.** This section is kept as it
+> stood because the corrections only make sense against it, not because any number in it survives.
+
 The 1.7x splits as **8.7% node rate and 1.556x nodes-to-depth**. The evaluation loop is the small
 half. Everything above is optimising the small half.
 
@@ -74,8 +81,8 @@ So the honest reading of my own earlier arithmetic, which d9 is now carrying:
 > is a net loss.
 
 Published mobility gains in engines that lacked it are **+27.6 (Blunder), +41 ± 14 (tcheran),
-+62 (MadChess)**. If mobility delivers anything within reach of those numbers here, it clears a
--10 to -23 price comfortably. **"Which makes the term a net loss" is not established by anything
++62 (MadChess)**. [**Wrong as written** — see the two corrections below. The conversion was out by
+two to four, and the cost figure it was applied to was one draw from a spread of 0.96 to 2.19.] **"Which makes the term a net loss" is not established by anything
 we have measured**, and I should have said so when I supplied the handicap figure rather than now.
 
 ### Where the tree growth actually comes from
