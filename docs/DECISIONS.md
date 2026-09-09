@@ -1887,3 +1887,51 @@ the one measurement that could still change the outcome of the competition.
 **Not claimed:** that v1.2 is measurably stronger than v1.1 at the real time control. It is not.
 What is claimed is that it is very unlikely to be weaker, and that two of its changes are correct
 independent of any Elo measurement.
+
+### Amendment: the cost premise in the entry above was wrong, and it was never measured
+
+The entry above justifies dropping v1.2's real-clock confirmation partly on cost — "it would burn
+the whole overnight slot". **That was an assumption, not a measurement, and it is wrong.** The
+conclusion survives on its other grounds; the reason does not, and a wrong reason left standing is
+how a later decision inherits an error.
+
+**Measured, 24-game probe, `versions/v1.2` vs `versions/v1.1`, 10 s + 0.1 s, 6 workers, contended
+(wall-clock only — deliberately not written to `RESULTS.md`, since the run is contaminated for Elo
+by design):**
+
+    mean 99.9 s per game, mean game length 102 plies
+
+Decomposing against a 102-ply game, which is 51 moves a side:
+
+    play    10 + 51 x 0.1  = 15.1 s a side  ->   30.2 s both
+    fixed   99.9 - 30.2    = 69.7 s          <-  two agents, numba warm-up
+
+**Start-up dominates a fast game roughly 2:1, and start-up does not scale with the clock.** So the
+real time control is not the ~12x its clocks suggest. At 120 s + 0.5 s over the same 102 plies:
+
+    play    120 + 51 x 0.5 = 145.5 s a side ->  291 s both
+    total   291 + ~50 (idle warm-up)        =  ~341 s per game     ~3.6x a fast game
+
+At 12 workers on an idle box, one 8-hour slot is therefore about **4000 fast games (resolving
+±12 Elo) or about 1000 real-clock games (resolving ±22)**. Both were previously believed
+unaffordable.
+
+**The consequence is larger than this entry.** Every screen in `RESULTS.md` was run at 10 s + 0.1 s,
+and the promotion rule asks for the real time control. The reason given for the substitution was
+always cost. **The cost was 3.6x, and nobody had measured it** — the project has been paying a
+methodological discount it did not need, for its whole life, to avoid an expense it never priced.
+
+**Screening moves to the real time control from here.** It satisfies the rule rather than
+substituting for it, it is the condition the competition is actually played under, and per
+`7323174` it is unbiased for changes whose value accumulates with nodes per move, which the fast
+control understates. ±22 over ~1000 games resolves anything we would ship.
+
+**The rejected alternative** is ~4000 fast games at ±12. Rejected because a tighter interval on a
+biased instrument is worse than a wider one on the right instrument, and because a fast-control
+result would still not satisfy the promotion rule — we would have bought precision and still owed
+the confirmation.
+
+**Noted against myself:** this premise was load-bearing for two hours of planning across three
+sessions, and the check that broke it was `chessathon-4c` asking for the wall-clock to be split
+into start-up and play instead of reported as one total. A single total would have given the right
+number for 300 fast games and the wrong answer for every extrapolation from it.
