@@ -333,6 +333,100 @@ def attacked(board: npt.NDArray[np.int32], square: int, by_colour: int) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- attack deltas, from a formula
+
+# For every 0x88 difference `square - from` there is exactly one set of piece types that could
+# ever attack along it, and at most one step direction to walk. Both are derived here from the
+# same direction tables the generator uses, so nothing is transcribed and the origin is provable.
+#
+# `_ATTACK_MASK[delta + 128]` is a bitmask of `1 << piece_type` for the types that reach along
+# that delta; `_ATTACK_STEP[delta + 128]` is the single-square step to walk for the sliders, or 0.
+# Pawns are colour-dependent and are handled by their own two entries below rather than in the
+# mask, because a delta that a white pawn attacks along is not one a black pawn does.
+_ATTACK_MASK = np.zeros(256, dtype=np.int32)
+_ATTACK_STEP = np.zeros(256, dtype=np.int32)
+
+
+def _build_attack_tables() -> None:
+    """Fill `_ATTACK_MASK` and `_ATTACK_STEP` by walking every direction from every square."""
+    for i in range(8):
+        d = int(_KNIGHT_DIRS[i])
+        _ATTACK_MASK[d + 128] |= 1 << KNIGHT
+    for i in range(8):
+        d = int(_KING_DIRS[i])
+        _ATTACK_MASK[d + 128] |= 1 << KING
+        diagonal = d not in (16, -16, 1, -1)
+        slider = BISHOP if diagonal else ROOK
+        # Every multiple of the direction that stays on the board is reachable by the slider and
+        # by the queen, and the step to walk back along it is the direction itself.
+        step = d
+        for k in range(1, 8):
+            delta = d * k
+            if not -127 <= delta <= 127:
+                break
+            _ATTACK_MASK[delta + 128] |= (1 << slider) | (1 << QUEEN)
+            _ATTACK_STEP[delta + 128] = step
+
+
+_build_attack_tables()
+
+# The two deltas a pawn of each colour attacks along, indexed by colour. A white pawn on `frm`
+# attacks `frm + 17` and `frm + 15`, so from the target's point of view the attacker sits at
+# `square - 17` and `square - 15` -- the same pair the outward scan uses, kept here so the
+# piece-list form does not have to branch inside its loop.
+_PAWN_ATTACK_DELTAS = np.array([[17, 15], [-15, -17]], dtype=np.int32)
+
+
+@njit(cache=False)
+def attacked_from_list(pos: Position, square: int, by_colour: int) -> int:
+    """Is `square` (0x88) attacked by any piece of `by_colour`? Returns 1 or 0.
+
+    Exactly equivalent to `attacked`, and checked against it exhaustively in
+    `tests/test_fastboard.py`. The difference is which way the scan runs: `attacked` walks eight
+    rays outward from the square and therefore costs the same whatever the material is, while this
+    walks `by_colour`'s piece list and costs one table lookup per piece plus a blocker walk only
+    for the sliders whose delta could reach at all. In an endgame that is four lookups against
+    eight full rays; in a crowded middlegame the rays are short and the two are closer.
+    """
+    board = pos.board
+    base = by_colour * PIECES_PER_SIDE
+    count = pos.meta[M_COUNT + by_colour]
+    for slot in range(count):
+        frm = pos.plist[base + slot]
+        delta = square - frm
+        if delta == 0:
+            continue
+        index = delta + 128
+        if index < 0 or index > 255:
+            continue
+        kind = board[frm] & PIECE_TYPE_MASK
+        if kind == PAWN:
+            if (
+                delta == _PAWN_ATTACK_DELTAS[by_colour, 0]
+                or delta == _PAWN_ATTACK_DELTAS[by_colour, 1]
+            ):
+                return 1
+            continue
+        if (_ATTACK_MASK[index] & (1 << kind)) == 0:
+            continue
+        # Anything that is not a slider reaches in one step, so the mask check above is the whole
+        # test. Written as `!=` rather than `kind in (KNIGHT, KING)` because a tuple membership
+        # test inside an njit loop is a needless construction on the hot path.
+        if kind != BISHOP and kind != ROOK and kind != QUEEN:
+            return 1
+        # A slider whose delta could reach: walk from the attacker toward the square and stop at
+        # the first occupied square. Reaching `square` itself means nothing blocked the way.
+        step = _ATTACK_STEP[index]
+        at = frm + step
+        while at != square:
+            if board[at] != EMPTY:
+                break
+            at += step
+        if at == square:
+            return 1
+    return 0
+
+
 @njit(cache=False)
 def in_check(pos: Position) -> int:
     """Is the side to move in check? Returns 1 or 0."""
@@ -1092,6 +1186,7 @@ WARM_UP_SECONDS: float = 0.0
 
 JITTED: Final = (
     "attacked",
+    "attacked_from_list",
     "in_check",
     "_remove_piece",
     "_restore_piece",
@@ -1137,6 +1232,7 @@ def warm_up(deadline: float | None = None) -> float:
 
     def generate() -> None:
         attacked(pos.board, E1, BLACK)
+        attacked_from_list(pos, E1, BLACK)
         in_check(pos)
         gen_pseudo(pos, buffer)
         gen_legal(pos, buffer)

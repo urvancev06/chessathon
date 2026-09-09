@@ -664,3 +664,52 @@ def test_the_key_ignores_an_en_passant_square_nobody_can_take() -> None:
     assert fb.running_key(quiet) == int(
         fb.running_key(fb.from_fen("8/8/8/8/P6p/8/8/K6k b - - 0 1"))
     )
+
+
+# --------------------------------------------------------------- attacked(): the two scan orders
+
+
+def _attacked_pair_agrees(pos: fb.Position, where: str) -> None:
+    """Both scans, every square on the board, both colours. Any disagreement is a bug in one."""
+    for rank in range(8):
+        for file in range(8):
+            square = rank * 16 + file
+            for colour in (fb.WHITE, fb.BLACK):
+                outward = int(fb.attacked(pos.board, square, colour))
+                by_list = int(fb.attacked_from_list(pos, square, colour))
+                assert outward == by_list, (
+                    f"attacked disagreement at 0x{square:02x} for colour {colour}: "
+                    f"outward={outward} piece-list={by_list} in {where}"
+                )
+
+
+def test_attacked_from_list_matches_the_outward_scan_on_the_standard_positions() -> None:
+    """`attacked_from_list` is a different scan order, not a different answer.
+
+    It walks the attacker's piece list and consults a delta table; `attacked` walks eight rays
+    outward from the square. They must agree on every square of every position or the piece-list
+    form is not the exact change it claims to be, and the whole case for shipping it without a
+    screen -- that an exact change cannot be worse -- collapses.
+    """
+    for fen in STANDARD_POSITIONS + _castling_combinations():
+        _attacked_pair_agrees(fb.from_board(chess.Board(fen)), fen)
+
+
+def test_attacked_from_list_matches_the_outward_scan_through_random_playouts() -> None:
+    """The standard positions are hand-picked; these are not.
+
+    Play random legal moves and compare after every one, so the pair is checked against positions
+    nobody chose -- including the pinned, en-passant and promotion shapes that a curated list
+    reaches only by luck.
+    """
+    rng = random.Random(20260910)
+    games = 40 if FULL_GATES else 12
+    for game in range(games):
+        board = chess.Board()
+        for _ in range(60):
+            moves = list(board.legal_moves)
+            if not moves:
+                break
+            board.push(rng.choice(moves))
+            _attacked_pair_agrees(fb.from_board(board), board.fen())
+        assert game >= 0  # the loop body is the assertion; this keeps the intent explicit
