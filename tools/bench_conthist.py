@@ -185,7 +185,13 @@ def report(path: Path) -> int:
     labels = sorted({run["label"] for run in runs})
     if len(labels) != 2:
         raise SystemExit(f"expected exactly two labels in {path}, found {labels}")
-    feature, baseline = sorted(labels, key=lambda name: name != "conthist")
+    # The FIRST run recorded is the feature arm, which is the order the usage above prescribes.
+    # This used to sort the labels with the feature identified by the literal name "conthist", so
+    # any other pair of labels fell through to alphabetical order and could put the baseline in
+    # the feature slot -- reporting the reciprocal, in which a 3% cost reads as a 3% gain. The
+    # ratio's direction is the whole output; it must not depend on what the arms were called.
+    feature = str(runs[0]["label"])
+    baseline = next(name for name in labels if name != feature)
 
     by_label = {name: [run for run in runs if run["label"] == name] for name in labels}
     if len({len(v) for v in by_label.values()}) != 1:
