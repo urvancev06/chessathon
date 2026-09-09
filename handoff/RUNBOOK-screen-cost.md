@@ -23,6 +23,30 @@ total by about a quarter. I planned an ETA from the cold-start number and told t
 session 06:20 when the answer was 04:20 -- in the safe direction, but wrong, and wrong for a
 reason that will repeat every time somebody measures a fresh run too early.
 
+## Any ratio across positions is a median of per-position ratios
+
+**A pooled sum is a defect unless a comment argues otherwise.** Not a style preference — this was
+found the hard way on 2026-09-09 in two independent benchmark tools written by different people,
+and in both cases the *same file* computed one quantity as a paired median and another as a pooled
+sum:
+
+- `tools/bench_mobility.py` paired the node rate per position and pooled the tree ratio. The tree
+  ratio then came out **0.96, 1.13, 1.58 and 2.19** across position samples, and two sessions
+  spent an hour arguing whether that spread was noise or mechanism. It was neither. A ratio of two
+  pooled sums is carried by whichever position has the largest tree.
+- `tools/bench_conthist.py` pooled the tree ratio *and* took its "median" node rate over three
+  **rounds** of a rate already pooled across positions. Node counts are deterministic, so those
+  rounds differed only in timing: the median measured whether the clock was steady. It agreed with
+  the pooled figure to 0.14% and was reported as precision.
+
+Nobody chose to pool. The paired form appeared where somebody had thought about it and the
+language default appeared where they had not — which is why this is a rule and not an anecdote.
+
+**So: pair per position, take the median, print the pair count and the min/max beside it, and
+print the pooled figure too so a disagreement between them is visible.** If median and pooled
+differ by more than a couple of percent, one position is carrying the answer and neither number
+should be quoted.
+
 ## The term everybody forgets
 
 The arithmetic that looks right is `games x seconds-per-game / workers`. It is wrong by about

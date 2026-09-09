@@ -30,7 +30,15 @@ yet, and at roughly 70% of quiescence nodes they never will, because the node cu
 
 Reversing the order to enable reuse would cost more than mobility does.
 
-## 2. Why we pay ~4x what MadChess pays: representation, not sloppiness
+## 2. We pay what a mailbox engine pays. There is no multiplier.
+
+**The 4x was never real and I should not have repeated the framing.** It compared us to a
+*bitboard* engine and called the difference our incompetence. Later research established that
+MadChess's claim is explicitly a bitboard property, that it does **not** reuse sets its generator
+built — it says it works "without generating any moves or scanning piece arrays" — and that
+Fruit 2.1, a mailbox engine whose flagship term was mobility, walks the rays exactly as we do.
+There is no multiplier to close. The section below stands as the reason *why*, with the comparison
+corrected.
 
 The quoted idiom — *"popcounts attack sets the generator already builds, essentially for free"* —
 is a **bitboard** idiom. In a bitboard engine a slider's attack set is one magic-table lookup and
