@@ -1835,6 +1835,10 @@ three static-margin pruners overlap heavily, so they do not add. The screen deci
 
 ## 2026-09-09 — The eight structural weights, fitted and mostly not applied
 
+> **Superseded in part by the two entries below.** The per-weight numbers here are confounded by a
+> material misfit and none of them is a basis for changing a weight. Read to the end of this file
+> before using any figure in this entry.
+
 The eight weights had never been tuned: textbook values chosen on day one. `tools/fit_structure.py`
 fits them to `data/tuning/labels.csv` (25 994 Stockfish depth-10 labels, already in the repository),
 one at a time and jointly, and scores every candidate on positions the fit never saw.
@@ -1974,3 +1978,31 @@ as a change.
 What this leaves: the tuning that would actually be well posed is one that frees material and the
 structural terms together, and that is a much larger fit than eight scalars, with the capacity
 problem that comes with it. `tools/fit_structure.py --with-material` reproduces every number here.
+
+## 2026-09-09 — Stop tuning the eight; `king_shield` is the only survivor
+
+The conclusion of the two entries above, recorded as a decision so the next person does not spend a
+day rediscovering it.
+
+**The eight-scalar fit is ill posed as stated, and we stop.** `rook_open_file` took four different
+values — 55.9 in the original audit, then 85, 63 and 51 here — differing only in what else the fit
+was allowed to move: whether a mobility column existed, and whether material could be rescaled. A
+weight with four answers has not been measured; the question has been asked four different ways. The
+general form, which is the transferable part: **a linear fit reports the misfit of everything it
+holds fixed, through whichever free column correlates with it.** There is always another level down.
+Holding material at untuned textbook values put that misfit into `mobility_eg` (correlated +0.85 in
+the endgame) and into every structural weight correlated with piece count.
+
+Rejected: fitting material and the structural terms together. It is the well-posed version and it is
+a much larger fit, which reopens exactly the capacity question that the 768-parameter Texel run
+answered badly (−100 Elo, `RESULTS.md`). Deciding how much fitting to trust after that result is not
+something to settle on the day before a freeze.
+
+**The one exception is `king_shield`.** It is the only weight whose fitted value survived every
+reframing: 49.2 with king danger on, 56.6 with it off, 48.0 with a mobility column, 45.8 with
+material free — 45 to 57 across four specifications against a shipped value of 10. Every other
+weight moved by more than its own range when the specification changed. That stability is what makes
+it the only one worth a screen, and a screen is what would decide it; held-out MSE would not.
+
+Not screened here, and not changed. Two days before the lock the question is whether a single
+positional weight is worth a 300-game screen against the alternatives competing for the same box.
