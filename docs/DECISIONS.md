@@ -1786,3 +1786,49 @@ there.
 **Rejected: two int32 halves in `meta`.** It avoids the int64 undo stack and keeps "every array is
 int32" intact, but every read and write of the key becomes a shift-and-mask pair, on a value the
 search reads at every node, to save a dtype.
+
+## 2026-09-09 — Three pruning techniques, chosen by published Elo rather than by plausibility
+
+A four-lane research pass read the literature for techniques with **measured** Elo, then checked
+each against this code, then had a separate pass try to refute it. The ranking criterion was not
+"is this a good idea" but **"is the published effect large enough for a 300-game screen resolving
+±39 Elo to detect"** — because an improvement we cannot measure is a coin flip we cannot justify.
+
+Adopted: reverse futility pruning (+57.1 ± 16.9 over 1209 games), futility margins extended from
+two plies to five (+37.4 ± 13.4 over 1780 games), late move pruning (+21.9 ± 11.4 over 2000
+games). All three from Blunder 8.0.0, whose evaluation at the time of measurement was material +
+tuned piece-square tables + tapering — **strictly weaker than ours**, which is the closest
+published base we could find to our own.
+
+**Rejected, each with its number, so none is rebuilt on enthusiasm:** razoring (+7.9 ± 7.4 over
+4550 games), ProbCut (+6.36 ± 4.59 over 10928 games), singular extensions (Weiss's author reports
+his first attempt failing, "possibly due to poor eval"), the improving heuristic, bucketed
+transposition tables, opening books, and any change to the time manager. All sit below what 300
+games can resolve.
+
+**Contempt is rejected on two independent grounds**, which is the one worth recording. Published
+at +7.1 ± 3.9, with the gain scaling with the strength gap in the wrong direction for us. And
+separately, measured here: across 63 threefold draws in the field corpus, the side that was
+materially **ahead** played the repeating move in only 22% of them. Contempt only helps where we
+choose the repetition; where the opponent forces it, it buys nothing.
+
+**Why reverse futility is expected to transfer when most pruning does not.** Its trigger is
+material-sized — 255 cp at depth 3 — so it fires on material imbalance, which this evaluation
+computes exactly, rather than on positional judgement, which is where the missing mobility term
+hurts. The contrast is the improving heuristic, which is a *difference* of two static evaluations
+two plies apart: with piece-square tables quantised to five distinct middlegame queen values and
+an identically-zero endgame rook table, that difference is zero across most quiet move pairs, so
+the flag degenerates toward constant and its published gain cannot transfer.
+
+**Two defects found in the implementation after it was written, both by something other than the
+author.** The research specified a guard against running at principal-variation nodes that was not
+implemented: returning a static bound where the caller wants a real score corrupts what reaches
+the root, and **nothing would have caught it** — no test fails, and the cost appears later as a
+screen that comes back flat for no visible reason. And
+`test_aspiration_windows_keep_the_score_exact_without_the_window_heuristics` failed by 8 cp,
+correctly: both new techniques read the window, and neither had been added to the list of
+window-dependent heuristics that test switches off. It detected that a window-dependent heuristic
+had been introduced without being declared, which is not something the author notices.
+
+**Not claimed:** any Elo for this engine. The published numbers come from a different engine, and
+three static-margin pruners overlap heavily, so they do not add. The screen decides.
