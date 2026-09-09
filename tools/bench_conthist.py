@@ -148,20 +148,25 @@ def measure(
     for fen in fens:
         search_once(engine, fen, depth)
 
-    per_round: list[dict[str, float]] = []
+    # Per POSITION, per round -- not accumulated. An earlier version summed across positions and
+    # reported ratios of the two sums, which is the wrong estimator: a pooled ratio is carried by
+    # whichever position happens to have the largest tree, and `tools/bench_mobility.py` produced
+    # 0.96, 1.13, 1.58 and 2.19 for the same quantity that way. Keeping the samples lets `report`
+    # pair them position by position and take a median, which is what the nps figure needed too.
+    per_round: list[list[dict[str, float]]] = []
     for index in range(rounds):
-        nodes = 0
-        seconds = 0.0
+        samples: list[dict[str, float]] = []
         for fen in fens:
             got, took = search_once(engine, fen, depth)
-            nodes += got
-            seconds += took
+            samples.append({"fen": fen, "nodes": got, "seconds": took})  # type: ignore[dict-item]
             if verbose:
                 print(f"[{label}]   {fen.split(' ')[0][:24]:<24} {got:>9,}n {took:7.3f}s")
-        per_round.append({"nodes": nodes, "seconds": seconds, "nps": nodes / seconds})
+        per_round.append(samples)
+        nodes = sum(int(s["nodes"]) for s in samples)
+        seconds = sum(float(s["seconds"]) for s in samples)
         print(
             f"[{label}] round {index + 1}: {nodes:>11,} nodes {seconds:7.2f} s "
-            f"{nodes / seconds:>10,.0f} nodes/s"
+            f"{nodes / seconds:>10,.0f} nodes/s pooled"
         )
 
     return {
@@ -171,9 +176,6 @@ def measure(
         "positions": len(fens),
         "load_at_start": load,
         "rounds": per_round,
-        # Deterministic per build, so this is the same number every run and is a search-quality
-        # diagnostic rather than a timing one.
-        "nodes_to_depth": per_round[0]["nodes"],
     }
 
 
@@ -232,15 +234,29 @@ def report(path: Path) -> int:
     print("  there, the baseline is not the branch's merge base and the number means something")
     print("  other than what you are about to call it.")
     print()
-    ratios: list[float] = []
+    # Paired PER POSITION, and both quantities the same way. The earlier version paired the nps
+    # per round -- a median over three timing repeats of a rate already pooled across positions,
+    # which measured only whether the clock was steady -- and reported the tree ratio as a ratio
+    # of two pooled sums, which is carried by whichever position has the largest tree. Both looked
+    # precise for the same wrong reason: they were medians of the wrong variance.
+    nps_ratios: list[float] = []
+    node_ratios: list[float] = []
     totals = {name: [0, 0.0] for name in labels}
     for index, (one, two) in enumerate(zip(by_label[feature], by_label[baseline], strict=True)):
         for run, name in ((one, feature), (two, baseline)):
-            for entry in run["rounds"]:
-                totals[name][0] += int(entry["nodes"])
-                totals[name][1] += float(entry["seconds"])
-        for a, b in zip(one["rounds"], two["rounds"], strict=True):
-            ratios.append(float(a["nps"]) / float(b["nps"]))
+            for round_samples in run["rounds"]:
+                for entry in round_samples:
+                    totals[name][0] += int(entry["nodes"])
+                    totals[name][1] += float(entry["seconds"])
+        for a_round, b_round in zip(one["rounds"], two["rounds"], strict=True):
+            for a, b in zip(a_round, b_round, strict=True):
+                if a["fen"] != b["fen"]:
+                    raise SystemExit("position lists differ between the arms; cannot pair")
+                nps_ratios.append(
+                    (int(a["nodes"]) / float(a["seconds"]))
+                    / (int(b["nodes"]) / float(b["seconds"]))
+                )
+                node_ratios.append(int(a["nodes"]) / int(b["nodes"]))
         print(f"  pair {index + 1}: load {one['load_at_start']:.2f} / {two['load_at_start']:.2f}")
 
     for name in (baseline, feature):
@@ -249,32 +265,43 @@ def report(path: Path) -> int:
             f"\n{name:>10}: {nodes:>12,} nodes {seconds:8.2f} s {nodes / seconds:>10,.0f} nodes/s"
         )
 
-    median = statistics.median(ratios)
-    pooled = (totals[feature][0] / totals[feature][1]) / (totals[baseline][0] / totals[baseline][1])
-    print(f"\nnps ratio ({feature} / {baseline})")
-    print(
-        f"  median {median:.4f}   pooled {pooled:.4f}   min {min(ratios):.4f} max {max(ratios):.4f}"
+    def summarise(what: str, ratios: list[float], pooled: float) -> float:
+        median = statistics.median(ratios)
+        print(f"\n{what} ({feature} / {baseline}), paired per position")
+        print(
+            f"  median {median:.4f}   pooled {pooled:.4f}   "
+            f"min {min(ratios):.4f} max {max(ratios):.4f}   over {len(ratios)} pairs"
+        )
+        if abs(median - pooled) > 0.02:
+            print("  WARNING: median and pooled disagree by more than 2%, so one position is")
+            print("           carrying the pooled figure. Quote the median; the pooled number")
+            print("           is the estimator that gave bench_mobility 0.96 through 2.19.")
+        return median
+
+    nps_median = summarise(
+        "node rate",
+        nps_ratios,
+        (totals[feature][0] / totals[feature][1]) / (totals[baseline][0] / totals[baseline][1]),
     )
-    print(f"  over {len(ratios)} rounds")
-    if abs(median - pooled) > 0.02:
-        print("  WARNING: median and pooled disagree by more than 2%. One round met a busy moment;")
-        print("           trust neither number and re-run on an idle box.")
-    # Spelled out rather than signed. A signed percentage against the word "cost" is ambiguous --
-    # a reader has to work out whether +32% means it cost 32% or gained it, and this is the one
-    # number from the whole run that will get quoted on its own.
-    change = (median - 1) * 100
+    # Spelled out rather than signed: a signed percentage against the word "cost" makes the reader
+    # work out whether +32% means it cost that or gained it, and this gets quoted on its own.
+    change = (nps_median - 1) * 100
     if change < 0:
         print(f"  {feature} is {-change:.1f}% SLOWER per node than {baseline}")
     else:
         print(f"  {feature} is {change:.1f}% FASTER per node than {baseline}")
 
-    depths = {name: by_label[name][0]["nodes_to_depth"] for name in labels}
-    print(f"\nnodes to depth {runs[0]['depth']} (deterministic, a diagnostic and not a speed cost)")
-    for name in (baseline, feature):
-        print(f"  {name:>10}: {depths[name]:>12,}")
-    print(f"  ratio ({feature} / {baseline}): {depths[feature] / depths[baseline]:.4f}")
-    print("  a different ordering searches a different tree. This is not an Elo claim; only a")
-    print("  game screen decides strength.")
+    node_median = summarise(
+        f"nodes to depth {runs[0]['depth']}",
+        node_ratios,
+        totals[feature][0] / totals[baseline][0],
+    )
+    print("  Deterministic per position, so the spread here is between POSITIONS, not runs.")
+    print("  A different ordering searches a different tree. Not an Elo claim; a screen decides.")
+    print(
+        f"\ncombined: time to depth {runs[0]['depth']} = {node_median / nps_median:.4f} of baseline"
+    )
+    print("  (nodes-to-depth median divided by node-rate median, both paired per position)")
     return 0
 
 
