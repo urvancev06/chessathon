@@ -75,6 +75,12 @@ STRUCTURE_WEIGHTS: dict[str, int] = {
 # Switch for the king-danger term, separate from STRUCTURE_TERMS so the two can be measured apart.
 KING_DANGER_TERM = True
 
+# Switch the whole hand-crafted evaluation for the trained network in ``weights/net.npz``.
+# A replacement, not a term: when it is on, none of the weights above are read. It exists as a
+# switch so a screen can play one against the other rather than the network replacing them on
+# faith. False until a screen says otherwise.
+USE_NETWORK = False
+
 # How much attacking force bears on the squares around a king, in "attack units". Each enemy
 # knight, bishop, rook or queen whose attacks reach the king's zone contributes its unit weight
 # once, however many zone squares it hits; the penalty is then quadratic in the total, because

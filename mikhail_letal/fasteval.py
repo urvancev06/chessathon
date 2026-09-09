@@ -38,7 +38,7 @@ import numpy as np
 import numpy.typing as npt
 from numba import njit
 
-from mikhail_letal import warmup
+from mikhail_letal import nnue, warmup
 from mikhail_letal.evaluation import (
     DRAW_SCORE,
     KING_ATTACK_UNITS,
@@ -49,6 +49,7 @@ from mikhail_letal.evaluation import (
     PHASE_TOTAL,
     STRUCTURE_TERMS,
     STRUCTURE_WEIGHTS,
+    USE_NETWORK,
     load_tables,
 )
 from mikhail_letal.fastboard import (
@@ -109,7 +110,8 @@ E_MOPUP_CLOSE: Final = 1
 E_MOPUP_MIN_MATERIAL: Final = 2
 E_STRUCTURE_ON: Final = 3  # mirrors evaluation.STRUCTURE_TERMS, so both switch together
 E_KING_DANGER_ON: Final = 4  # mirrors evaluation.KING_DANGER_TERM, so both switch together
-E_COUNT: Final = 5
+E_NNUE_ON: Final = 5  # mirrors evaluation.USE_NETWORK, so both switch together
+E_COUNT: Final = 6
 
 # Layout of the per-file pawn summary in `scratch`, as [group + colour * 8 + file].
 S_COUNT: Final = 0  # pawns of that colour on that file
@@ -135,6 +137,50 @@ class EvalTables(NamedTuple):
     misc: npt.NDArray[np.int32]  # the scalars, indexed by E_*
     centre: npt.NDArray[np.int32]  # distance to the nearest centre square, by 0x88 square
     scratch: npt.NDArray[np.int32]  # S_LEN entries of per-file pawn summary
+    net: NetTables  # the trained network; read only when misc[E_NNUE_ON] is set
+
+
+class NetTables(NamedTuple):
+    """The quantised network, as arrays numba can index without boxing.
+
+    It is a field of `EvalTables` rather than a second argument to `evaluate`, so that switching
+    the evaluation changes nothing in `fastsearch`: every call site still passes one table object
+    and the switch is read inside.
+    """
+
+    feature_weights: npt.NDArray[np.int16]  # (nnue.FEATURES, width)
+    feature_bias: npt.NDArray[np.int32]  # (width,)
+    output_weights: npt.NDArray[np.int16]  # (2 * width,)
+    scalars: npt.NDArray[np.int32]  # [output bias, width]
+
+
+N_OUT_BIAS: Final = 0
+N_WIDTH: Final = 1
+
+NET_PATH: Final = Path(__file__).resolve().parent.parent / "weights" / "net.npz"
+
+
+def load_net_tables(path: Path | None = None) -> NetTables:
+    """Read `weights/net.npz`, or a one-wide zero network when there is none.
+
+    A checkout without a trained network still compiles the network code at import, so that a
+    checkout which later gains one does not pay for that compilation on the game clock.
+    """
+    source = NET_PATH if path is None else path
+    if not source.exists():
+        return NetTables(
+            feature_weights=np.zeros((nnue.FEATURES, 1), dtype=np.int16),
+            feature_bias=np.zeros(1, dtype=np.int32),
+            output_weights=np.zeros(2, dtype=np.int16),
+            scalars=np.array([0, 1], dtype=np.int32),
+        )
+    net = nnue.Network.load(source)
+    return NetTables(
+        feature_weights=np.ascontiguousarray(net.feature_weights),
+        feature_bias=np.ascontiguousarray(net.feature_bias),
+        output_weights=np.ascontiguousarray(net.output_weights),
+        scalars=np.array([net.output_bias, net.width], dtype=np.int32),
+    )
 
 
 def load_eval_tables(path: Path | None = None) -> EvalTables:
@@ -170,6 +216,7 @@ def load_eval_tables(path: Path | None = None) -> EvalTables:
     misc[E_MOPUP_MIN_MATERIAL] = tables.piece_values_mg[chess.ROOK]
     misc[E_STRUCTURE_ON] = 1 if STRUCTURE_TERMS else 0
     misc[E_KING_DANGER_ON] = 1 if KING_DANGER_TERM else 0
+    misc[E_NNUE_ON] = 1 if USE_NETWORK else 0
 
     centre = np.zeros(128, dtype=np.int32)
     for square in range(128):
@@ -189,6 +236,7 @@ def load_eval_tables(path: Path | None = None) -> EvalTables:
         misc=misc,
         centre=centre,
         scratch=np.zeros(S_LEN, dtype=np.int32),
+        net=load_net_tables(),
     )
 
 
@@ -205,7 +253,16 @@ def evaluate(pos: Position, ev: EvalTables) -> int:
     Line for line the same function as ``evaluation.evaluate``: the insufficient-material draw,
     the tapered material-and-square tables, the structural terms, the phase blend truncated
     toward zero, and the mop-up bonus for a pawnless ending against a bare king.
+
+    When the network is switched on it replaces all of that, except the insufficient-material
+    draw: that is a rule rather than a judgement, and a network trained on evaluations would
+    otherwise score a dead draw as an advantage.
     """
+    if ev.misc[E_NNUE_ON] != 0:
+        if _insufficient(pos):
+            return DRAW_SCORE
+        return nnue_evaluate(pos, ev.net)
+
     board = pos.board
     meta = pos.meta
     plist = pos.plist
@@ -557,6 +614,95 @@ def _king_danger(pos: Position) -> int:
 
 
 @njit(cache=False)
+def _insufficient(pos: Position) -> bool:
+    """python-chess's insufficient-material draw, from the piece list alone.
+
+    The hand-crafted `evaluate` gets these counts for free while summing its tables. The network
+    path has no such pass, so this counts the six numbers the test needs and stops at the first
+    pawn, rook or queen, which always settles it.
+    """
+    board = pos.board
+    knights = np.zeros(2, dtype=np.int32)
+    bishops = np.zeros(2, dtype=np.int32)
+    light = 0
+    dark = 0
+    for colour in range(2):
+        base = colour * PIECES_PER_SIDE
+        for slot in range(pos.meta[M_COUNT + colour]):
+            square = pos.plist[base + slot]
+            kind = board[square] & PIECE_TYPE_MASK
+            if kind in (PAWN, ROOK, QUEEN):
+                return False
+            if kind == KNIGHT:
+                knights[colour] += 1
+            elif kind == BISHOP:
+                bishops[colour] += 1
+                if (((square & 7) + (square >> 4)) & 1) == 1:
+                    light += 1
+                else:
+                    dark += 1
+    total = knights[0] + knights[1]
+    if not _has_insufficient_material(
+        knights[WHITE], bishops[WHITE], knights[BLACK], bishops[BLACK], total, light, dark
+    ):
+        return False
+    return _has_insufficient_material(
+        knights[BLACK], bishops[BLACK], knights[WHITE], bishops[WHITE], total, light, dark
+    )
+
+
+@njit(cache=False)
+def nnue_evaluate(pos: Position, net: NetTables) -> int:
+    """The network's score in centipawns, from the side to move's point of view.
+
+    The port of `nnue.forward`, on an accumulator summed from the piece list rather than carried
+    incrementally. An incremental accumulator would have to re-derive what each move changed --
+    castling moves two pieces, en passant takes a pawn that is not on the target square, promotion
+    changes the piece type -- and that is a second place that must agree with `make_move` forever.
+    Refreshing costs about 450 ns against a 1270 ns node and is correct by construction. If the
+    network earns its place in a screen, carrying the accumulator becomes the obvious optimisation
+    and can be checked against this function at every node.
+    """
+    width = net.scalars[N_WIDTH]
+    board = pos.board
+    acc = np.empty((2, width), dtype=np.int32)
+    for j in range(width):
+        acc[0, j] = net.feature_bias[j]
+        acc[1, j] = net.feature_bias[j]
+
+    for colour in range(2):
+        base = colour * PIECES_PER_SIDE
+        for slot in range(pos.meta[M_COUNT + colour]):
+            square = pos.plist[base + slot]
+            kind = board[square] & PIECE_TYPE_MASK
+            # 0x88 to 0..63, inline: `sq64` is plain Python and cannot be called from here.
+            square64 = (square >> 4) * 8 + (square & 7)
+            for perspective in range(2):
+                # Whether the piece is friendly, and its square from that perspective: Black sees
+                # the board mirrored, so each pattern is learned once rather than twice.
+                friendly = 0 if colour == perspective else 1
+                relative = square64 if perspective == WHITE else (square64 ^ 56)
+                index = (friendly * 6 + (kind - 1)) * 64 + relative
+                for j in range(width):
+                    acc[perspective, j] += net.feature_weights[index, j]
+
+    own = 0 if pos.meta[M_SIDE] == WHITE else 1
+    total = net.scalars[N_OUT_BIAS]
+    for half in range(2):
+        row = own if half == 0 else 1 - own
+        offset = half * width
+        for j in range(width):
+            value = acc[row, j] >> nnue.ACC_SHIFT
+            if value < 0:
+                value = 0
+            elif value > nnue.CLIP_MAX:
+                value = nnue.CLIP_MAX
+            total += value * net.output_weights[offset + j]
+    score: int = total >> nnue.OUT_SHIFT
+    return score
+
+
+@njit(cache=False)
 def _mopup(pos: Position, ev: EvalTables) -> int:
     """Bonus (from White's view) for the side hunting a bare king in a pawnless ending, else 0.
 
@@ -620,7 +766,15 @@ def evaluate_board(board: chess.Board) -> int:
 WARM_UP_SECONDS: float = 0.0
 """How long `warm_up()` spent compiling, filled in by the call below."""
 
-JITTED: Final = ("evaluate", "_has_insufficient_material", "_structure", "_king_danger", "_mopup")
+JITTED: Final = (
+    "evaluate",
+    "nnue_evaluate",
+    "_insufficient",
+    "_has_insufficient_material",
+    "_structure",
+    "_king_danger",
+    "_mopup",
+)
 """Every jitted function here; see `fastboard.JITTED`."""
 
 _WARM_UP_FENS: Final = (
@@ -656,9 +810,14 @@ def warm_up(deadline: float | None = None) -> float:
 
     def evaluate_all() -> None:
         for fen in _WARM_UP_FENS:
-            evaluate(from_board(chess.Board(fen)), TABLES)
+            position = from_board(chess.Board(fen))
+            evaluate(position, TABLES)
+            # Compiled whether or not the switch is on, so that turning it on never costs a
+            # compilation on the game clock.
+            _insufficient(position)
+            nnue_evaluate(position, TABLES.net)
 
-    limit.run("fasteval.evaluate", 1.6, evaluate_all)  # 1.6 s on the development machine
+    limit.run("fasteval.evaluate", 2.0, evaluate_all)  # 1.6 s on the development machine
 
     global WARM_UP_SECONDS
     WARM_UP_SECONDS = time.perf_counter() - started
