@@ -1920,3 +1920,57 @@ then fit the eight against whichever evaluation won, then screen those.
 No Elo figure appears here. Held-out MSE against an engine's labels is precisely the metric that
 ranked the Texel disaster highest, and it is reported as what it is: evidence that a weight is worth
 screening, not evidence that it is worth shipping.
+
+## 2026-09-09 — The mobility "sign flip" was my fit's confound, not the branch's error
+
+Retracted: the previous entry reported `mobility_eg` fitting to −3.3 against the −ct-mobility−
+branch's 10.19 and called it a sign flip worth settling before that term is screened. **The branch
+is right and the fit was confounded.** The correction, and why it matters beyond mobility:
+
+`base` carries material at the untuned textbook piece values. A fit cannot correct a term it holds
+fixed, so any error in those values comes out through whichever *fitted* column correlates with
+material — and in the endgame `mobility_eg` correlates with material difference at **+0.85**
+(mobility difference against material difference is +0.69 overall and +0.89 in positions of phase
+≤ 8). So `mobility_eg` was not measuring mobility in the endgame. It was carrying a material
+misfit, with the sign that correction needed.
+
+Add two columns that let the fit rescale shipped material by phase and the sign returns:
+
+| free columns | mobility_mg | mobility_eg |
+| --- | --- | --- |
+| mobility only, material fixed | 14.3 ± 0.5 | **−3.0 ± 0.4** |
+| mobility and material both free | 9.0 ± 0.4 | **+10.1 ± 0.6** |
+
+Against the branch's mg 6.11 / eg 10.19 the endgame weight now agrees to within the fit's own
+spread. **`ct-mobility` should go to its screen with the weights it has.**
+
+**The general lesson is larger than mobility and it invalidates the previous entry's per-weight
+numbers as a basis for changing anything.** Every weight correlated with material moves when
+material is allowed to move:
+
+| weight | material fixed | material free |
+| --- | --- | --- |
+| passed_pawn_mg | 10.6 ± 2.8 | −2.0 ± 2.7 |
+| passed_pawn_eg | 13.7 ± 1.4 | 29.9 ± 1.2 |
+| bishop_pair | 60.0 ± 3.9 | 45.6 ± 5.2 |
+| rook_open_file | 63.0 ± 4.0 | 51.4 ± 3.3 |
+| king_shield | 49.2 ± 3.8 | 45.8 ± 3.2 |
+
+with `mg_material_scale` +45.6 ± 3.5 and `eg_material_scale` −41.8 ± 2.0 — the fit wants middlegame
+material worth about 46% more and endgame material about 42% less than the shipped tables. The
+extended design is well conditioned (condition number 18.7 against 17.6 without), so this is not a
+numerical artifact; it is a real statement about the tables, on this label set.
+
+That is the same failure the previous entry described for mobility, one level up, and the previous
+entry did not escape it. `rook_open_file` was 85 with no mobility column, 63 with one, and 51 with
+material free as well. **None of the eight has a value here that survives changing what else the fit
+is allowed to move**, so none of them should be changed on this evidence.
+
+Rejected: rescaling material by phase. It is a large change to the shipped tables, argued from
+held-out MSE against an engine's labels — which is exactly the shape of the 768-parameter fit that
+lost 100 Elo (`RESULTS.md`). It is recorded as a measurement and a possible screen candidate, not
+as a change.
+
+What this leaves: the tuning that would actually be well posed is one that frees material and the
+structural terms together, and that is a much larger fit than eight scalars, with the capacity
+problem that comes with it. `tools/fit_structure.py --with-material` reproduces every number here.

@@ -59,6 +59,16 @@ Matrix = npt.NDArray[np.float64]
 
 NAMES: Final = tuple(tune_texel.STRUCTURE_NAMES)
 MOBILITY_NAMES: Final = ("mobility_mg", "mobility_eg")
+MATERIAL_NAMES: Final = ("mg_material_scale", "eg_material_scale")
+"""Two columns that let the fit rescale the shipped material values by phase.
+
+They exist to answer a question about the *other* columns rather than to propose changing the
+piece values. `base` carries material at the untuned textbook tables, so if those tables are wrong
+the error has to come out somewhere, and it comes out through whichever fitted column correlates
+with material. In the endgame `mobility_eg` correlates with it at +0.85, which is why holding
+material fixed drives that weight negative. A coefficient of c here means endgame (or middlegame)
+material is being scaled by 1 + c/100.
+"""
 
 
 def mobile_squares(board: chess.Board, colour: chess.Color) -> int:
@@ -73,7 +83,17 @@ def mobile_squares(board: chess.Board, colour: chess.Color) -> int:
     )
 
 
-def counts(board: chess.Board, with_mobility: bool) -> Vector:
+def material_difference(board: chess.Board) -> int:
+    """White material less Black's, in centipawns, at the shipped middlegame piece values."""
+    values = evaluation.TABLES.piece_values_mg
+    return sum(
+        values[piece_type]
+        * (len(board.pieces(piece_type, chess.WHITE)) - len(board.pieces(piece_type, chess.BLACK)))
+        for piece_type in (chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN)
+    )
+
+
+def counts(board: chess.Board, with_mobility: bool, with_material: bool = False) -> Vector:
     """How often each weight is used in `board`, from White's view, phase-scaled as `evaluate`
     blends its tables. The eight are `tune_texel.features`' structure block, restated here over
     eight columns instead of 776 so that this file can be read on its own."""
@@ -99,6 +119,10 @@ def counts(board: chess.Board, with_mobility: bool) -> Vector:
     if with_mobility:
         mobile = difference(mobile_squares)
         values += [mobile * mg_share, mobile * eg_share]
+    if with_material:
+        # Divided by 100 so a coefficient reads as a percentage of the shipped material value.
+        material = material_difference(board) / 100.0
+        values += [material * mg_share, material * eg_share]
     return np.array(values, dtype=np.float64)
 
 
@@ -108,7 +132,9 @@ def white_score(board: chess.Board) -> int:
     return score if board.turn == chess.WHITE else -score
 
 
-def build(fens: list[str], labels: list[int], with_mobility: bool) -> tuple[Matrix, Vector, Vector]:
+def build(
+    fens: list[str], labels: list[int], with_mobility: bool, with_material: bool = False
+) -> tuple[Matrix, Vector, Vector]:
     """(design, base, y), where `base` is everything the evaluation computes that is not one of
     the fitted weights, in blended centipawns and **not** rounded.
 
@@ -141,7 +167,7 @@ def build(fens: list[str], labels: list[int], with_mobility: bool) -> tuple[Matr
             mg += evaluation.king_danger(board, white_pawns, black_pawns)
         base = (mg * phase + eg * (PHASE_TOTAL - phase)) / PHASE_TOTAL
 
-        row = counts(board, with_mobility)
+        row = counts(board, with_mobility, with_material)
         # The check that makes every number below mean anything: at the shipped weights the model
         # must reproduce what the engine actually computes, to within the one truncation.
         rebuilt = base + float(row[: len(NAMES)] @ shipped)
@@ -184,11 +210,30 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=20260909)
     parser.add_argument("--with-mobility", action="store_true")
     parser.add_argument("--king-danger", choices=("on", "off"), default="on")
+    parser.add_argument(
+        "--with-material",
+        action="store_true",
+        help="add two columns that rescale shipped material by phase; see MATERIAL_NAMES",
+    )
+    parser.add_argument(
+        "--free",
+        default=None,
+        help=(
+            "comma-separated weights to fit JOINTLY while every other weight is held at its "
+            "shipped value. Distinct from both other modes: the one-at-a-time column frees a "
+            "single weight, and the joint fit frees all of them. Two correlated weights fitted "
+            "together are not the same as each fitted alone."
+        ),
+    )
     parser.add_argument("--json", type=Path, default=None)
     args = parser.parse_args()
 
     evaluation.KING_DANGER_TERM = args.king_danger == "on"
-    names = NAMES + (MOBILITY_NAMES if args.with_mobility else ())
+    names = (
+        NAMES
+        + (MOBILITY_NAMES if args.with_mobility else ())
+        + (MATERIAL_NAMES if args.with_material else ())
+    )
 
     fens, labels, labeller = tune_texel.read_labels()
     print(f"labels: {labeller}")
@@ -200,7 +245,7 @@ def main() -> int:
 
     # Built once over every labelled position, then splits are drawn from it. One split is one
     # noisy number; the spread over many is what says whether a weight has really moved.
-    design, base, y = build(fens, labels, args.with_mobility)
+    design, base, y = build(fens, labels, args.with_mobility, args.with_material)
     print(
         f"design {design.shape[0]} positions x {design.shape[1]} columns "
         f"(pawnless positions dropped)\n"
@@ -213,6 +258,14 @@ def main() -> int:
     pool = list(range(len(y)))
     if args.train + args.test > len(pool):
         raise SystemExit(f"asked for {args.train + args.test} positions, have {len(pool)}")
+
+    free_names = [n.strip() for n in args.free.split(",")] if args.free else []
+    unknown = [n for n in free_names if n not in names]
+    if unknown:
+        raise SystemExit(f"not columns in this run: {unknown}; have {list(names)}")
+    free_idx = [names.index(n) for n in free_names]
+    subset_fit: dict[str, list[float]] = {n: [] for n in free_names}
+    subset_delta: list[float] = []
 
     singles: dict[str, list[float]] = {n: [] for n in names}
     single_delta: dict[str, list[float]] = {n: [] for n in names}
@@ -232,6 +285,18 @@ def main() -> int:
             candidate[i] = best_single(trd, trb, try_, shipped, i)
             singles[name].append(candidate[i])
             single_delta[name].append(mse(ted, teb, tey, candidate) - baseline)
+        if free_idx:
+            # Everything not being freed contributes at its shipped value, so subtract that
+            # contribution and fit the freed columns to what is left.
+            held = shipped.copy()
+            held[free_idx] = 0.0
+            fitted, *_ = np.linalg.lstsq(trd[:, free_idx], try_ - trb - trd @ held, rcond=None)
+            candidate = shipped.copy()
+            candidate[free_idx] = fitted
+            for name, value in zip(free_names, fitted, strict=True):
+                subset_fit[name].append(float(value))
+            subset_delta.append(mse(ted, teb, tey, candidate) - baseline)
+
         joint, *_ = np.linalg.lstsq(trd, try_ - trb, rcond=None)
         for i, name in enumerate(names):
             joints[name].append(float(joint[i]))
@@ -247,6 +312,12 @@ def main() -> int:
             f"{summarise(joints[name]):>17}"
         )
     print(f"\n  joint held-out dMSE: {summarise(joint_delta)}")
+
+    if free_idx:
+        print(f"\n  {', '.join(free_names)} fitted together, every other weight held shipped:")
+        for name in free_names:
+            print(f"    {name:<19}{summarise(subset_fit[name])}")
+        print(f"    {'held-out dMSE':<19}{summarise(subset_delta)}")
 
     print("\n  a weight is worth moving only if its dMSE is negative by more than its own")
     print("  spread; anything else is a number that changed because the split changed.")
@@ -284,6 +355,15 @@ def main() -> int:
                         }
                         for n in names
                     },
+                    "free": free_names,
+                    "free_fit": {
+                        n: {
+                            "mean": float(np.mean(subset_fit[n])),
+                            "sd": float(np.std(subset_fit[n], ddof=1)),
+                        }
+                        for n in free_names
+                    },
+                    "free_delta_mse_mean": float(np.mean(subset_delta)) if subset_delta else None,
                     "joint_delta_mse_mean": float(np.mean(joint_delta)),
                     "joint_delta_mse_sd": float(np.std(joint_delta, ddof=1)),
                     "movers": movers,
