@@ -1,48 +1,147 @@
 \documentclass[11pt,a4paper]{article}
-\usepackage[margin=2.4cm]{geometry}
+\usepackage[margin=2.5cm]{geometry}
 \usepackage{booktabs}
-\usepackage{amsmath}
 \usepackage{longtable}
 \usepackage{xcolor}
 \usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
 \usepackage{titlesec}
-\titleformat{\section}{\large\bfseries}{\thesection}{0.7em}{}
-\setlength{\parskip}{0.5em}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\titleformat{\section}{\Large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing{\section}{0pt}{1.4em}{0.6em}
+\setlength{\parskip}{0.55em}
 \setlength{\parindent}{0pt}
+\newcommand{\good}[1]{\textcolor{teal!70!black}{\textbf{#1}}}
+\newcommand{\bad}[1]{\textcolor{red!65!black}{\textbf{#1}}}
+\newtcolorbox{keybox}{colback=gray!7,colframe=gray!45,boxrule=0.5pt,left=8pt,right=8pt,top=6pt,bottom=6pt}
 
-\newcommand{\good}[1]{\textcolor{teal}{#1}}
-\newcommand{\bad}[1]{\textcolor{red!70!black}{#1}}
-
-\title{\textbf{Mikhail LeTal: maximising our chances}\\[0.3em]
-\large Where we stand, why the network failed, and what the last 36 hours are for}
+\title{\textbf{Mikhail LeTal --- where we are and how we win}\\[0.4em]
+\large A plain account of what we have built, what happened tonight,\\and what the last 36 hours are for}
 \author{Alexander Urvancev \and Yan Beletskiy}
-\date{9 September 2026, 21:00 CEST \\ \small Upload closes 11 September, 11:00 London}
+\date{Wednesday 9 September 2026, 21:00 CEST}
 
 \begin{document}
 \maketitle
+\thispagestyle{empty}
 
-\section*{Summary}
+\begin{keybox}
+\textbf{The one-paragraph version.} Our engine is uploaded, safe, and the strongest version we
+have ever shipped. We lose games for one reason: our engine misjudges positions, so it walks
+into losses believing it is winning. Tonight we tested our biggest idea for fixing that --- a
+neural network evaluation --- and it lost decisively. We now have one machine, about 36 hours,
+and room for exactly one more properly-measured experiment. Winning the whole event is not
+realistic. A strong finish in Friday's tournament is, and this document says how.
+\end{keybox}
 
-We are behind, the reason is measurable, and the biggest single lever we had has just failed
-a fair test. This document records what is actually established, explains why the neural
-evaluation lost 67 Elo when every static indicator said it should win, and ranks everything
-still available in the time remaining.
+\tableofcontents
+\newpage
 
-The central finding is not about the network. It is this: \textbf{our losses are evaluation
-failures, not search failures.} Every improvement we have shipped so far makes the engine
-search better. None of them touches the thing that actually loses us games.
+\section{Where we stand right now}
 
-\section{Where we stand, measured}
+\subsection{What is live}
 
-\subsection{Move quality against the field}
+\textbf{Version 1.2 is uploaded and playing rated games.} It passed the safety gate this
+evening: 500 games against test opponents, 500 wins, no crashes, no illegal moves, no losses on
+time. That gate does not measure strength --- the opponents are trivial --- it measures whether
+the engine can lose a game to something other than chess. It cannot.
 
-Average centipawn loss (ACPL) is the mean value thrown away per move, judged by Stockfish~19
-at depth~12. It is rating-free: it does not care who we were paired against.
+\subsection{The three things happening tonight}
+
+\begin{enumerate}[leftmargin=1.4em]
+\item \textbf{A 1000-game test is running} on our move-ordering improvement. It finishes around
+      06:20 Thursday. This is the last measurement that can change what we ship.
+\item \textbf{The neural network is dead.} Tested tonight over 300 games, it lost 67 Elo. Details
+      in Section 3.
+\item \textbf{More training data is downloading} from the competition ladder --- 9{,}200 games,
+      approved by you, running at one request per second.
+\end{enumerate}
+
+\subsection{The deadline, and what actually decides the winner}
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Friday 11 September, 11:00 London & Uploads close. Whatever is uploaded is locked. \\
+Friday afternoon & 13-round Swiss tournament over the locked builds. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The rules are explicit about what counts:
+
+\begin{quote}
+``\textbf{The ladder only seeds the final Swiss}''\\
+``\textbf{Only the locked-build final Swiss counts, by points.}''\\
+``Tie-breaks: points, Buchholz, head-to-head, \textbf{earlier final submission}.''
+\end{quote}
+
+\textbf{This matters more than it looks.} Our position on the hourly ladder is 104th of 131 ---
+but that number decides almost nothing. It affects the first-round pairing on Friday and nothing
+else. We joined late, started at a low rating, and have therefore only ever been paired against
+weak opponents (our 18 opponents average well below the field median; we have never played a
+top-50 team). \textbf{Thirteen games on Friday decide everything.}
+
+And note the last tie-break: \textbf{submitting earlier breaks ties}. That is a free half-point
+in a close finish, and it costs us nothing.
+
+\section{What we have built, and what each piece is worth}
+
+Everything below was measured by playing hundreds of games against the previous version. Nothing
+here is an estimate.
+
+\subsection{The engine}
+
+A chess engine written in Python, made fast with a compiler called numba. It searches roughly
+800{,}000 positions per second and looks 10--14 moves ahead in a real game. \textbf{That part is
+not our weakness.} For comparison, the version we started with searched 22{,}000 positions per
+second.
+
+\subsection{Version 1.2, the build now playing}
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+What changed & Measured value \\
+\midrule
+A smarter search that avoids re-examining moves it already knows are bad & $+35$ Elo \\
+Skipping positions already too good to need searching & $+15$ Elo \\
+Three genuine bug fixes & --- \\
+\midrule
+\textbf{Total} & \good{$+50$ Elo} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{The honest caveat:} the range of uncertainty on that $+50$ runs from about $-2$ to
+$+102$. So the best estimate is $+50$, and the data cannot completely rule out that it is worth
+nothing. It ships anyway, for reasons that are not the Elo number: one of the changes is
+mathematically free (identical search, less work per position, so it cannot be worse), and one
+of the bug fixes stops the engine scoring an already-won position as a draw --- which is a lost
+game, not a lost rating point.
+
+\subsection{How good is that, really?}
+
+Elo comparisons across different opponents are unreliable. So we measured something better:
+\textbf{average centipawn loss}, which asks a much simpler question.
+
+\begin{keybox}
+\textbf{What ``centipawn loss'' means.} A centipawn is 1/100th of a pawn --- the standard unit
+engines use to score a position. For each move you played, we ask Stockfish (a far stronger
+engine) how good the position was before your move and after it. \textbf{The drop is what your
+move threw away.} Average that over every move.
+
+A real example, from our round-85 loss: before our 13th move the position was scored $-24$
+(roughly level). We played a move. After it, $-460$. That single move cost \textbf{436
+centipawns} --- four and a half pawns --- in one decision.
+
+This measure ignores ratings and pairings entirely. It compares move quality directly.
+\end{keybox}
 
 \begin{center}
 \begin{tabular}{lrr}
 \toprule
-Team & ACPL & Blunders $>$200\,cp \\
+Team & Avg.\ centipawn loss & Moves losing $>$2 pawns \\
 \midrule
 Lubina            & \good{4.8}  & \good{0.0\%} \\
 Emile Andrieu     & 9.3         & 0.4\% \\
@@ -50,333 +149,345 @@ Sobriety          & 16.7        & 0.2\% \\
 THE ROOOOOKKK!!!! & 17.6        & 0.9\% \\
 AI Fellows        & 18.8        & 0.7\% \\
 \midrule
-\textbf{Mikhail LeTal} (all builds) & \bad{26.7} & \bad{2.4\%} \\
-\textbf{Mikhail LeTal} (v1.1/v1.2)  & \bad{28.0} & \bad{1.8\%} \\
+\textbf{Us, all builds}      & \bad{26.7} & \bad{2.4\%} \\
+\textbf{Us, v1.1/v1.2 only}  & \bad{28.0} & \bad{1.8\%} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Six games per team, so these are directional rather than precise. Two things stand out. Our
-blunder rate has \textbf{almost halved} across builds (3.1\%~$\rightarrow$~1.8\%), so the work
-is landing. And we still blunder \textbf{twice as often as the worst of the top five}, which is
-the entire gap. We do not lose because our moves are slightly worse on average. We lose because
-roughly twice a game we hand over material or a lost position.
+\textbf{Two readings, and both matter.}
 
-\subsection{Ladder standing is not the scoreboard}
+\good{The good news:} our blunder rate has nearly halved as we have improved the engine ---
+3.1\% in the old builds, 1.8\% now. The work is landing.
 
-Fitting every team onto one consistent scale from 3{,}405 games puts us at $-16$, rank 104 of
-131 teams with $\geq$10 games, against a leader at $+586$. \textbf{This number does not matter
-much.} Our 18 opponents average $-81$ where the field median is $+125$: we joined at round~67,
-started low, and have been paired downward ever since. We have never played a top-50 team.
+\bad{The bad news:} we still throw away a serious amount of material \textbf{twice as often as
+the worst team in the top five}. That single number is the entire gap between us and them. We do
+not lose because our moves are slightly worse on average. We lose because roughly twice a game
+we hand over a piece or a lost position.
 
-More importantly, the rules are explicit:
+\section{The core problem: the engine does not know when it is losing}
 
-\begin{quote}
-``Ranking $\mid$ a standard rating fitted to your current build's results.
-\textbf{The ladder only seeds the final Swiss}''\\
-``Qualification $\mid$ \textbf{only the locked-build final Swiss counts, by points.}''\\
-``Tie-breaks $\mid$ points, Buchholz, head-to-head, \textbf{earlier final submission}.''
-\end{quote}
+This is the most important section in the document. Everything else follows from it.
 
-Thirteen rounds on Friday afternoon decide everything. Our ladder rank affects the first
-pairing and nothing else.
+\subsection{What we found in two real games}
 
-\subsection{Two games traced move by move}
+\textbf{Round 85 (lost by checkmate).} We traced every position against Stockfish. From move 14
+to move 36 --- \textbf{23 consecutive moves} --- our engine believed it was winning by one to two
+pawns. It was actually losing by two to six. The sign was wrong on 21 of those 23 moves.
 
-\textbf{Round 85} (lost, checkmate). From move 14 to move 36 our evaluation read $+100$ to
-$+200$ while Stockfish had the position between $-139$ and $-674$. \textbf{The sign was wrong
-on 21 of 23 consecutive moves.} It was not a blunder and not time trouble: move 13 was searched
-to depth~11 over 812{,}795 nodes and entered a $-460$ position. Eleven plies did not reveal a
-five-pawn error.
+It was not a blunder in the usual sense, and it was not time trouble. Move 13 was searched
+\textbf{11 moves deep, over 812{,}000 positions}, and returned ``+45, I am fine.'' The position
+it entered was scored $-460$. Eleven moves of lookahead did not reveal a five-pawn error.
 
-\textbf{Round 87} (drawn by repetition, first likely v1.2 game). Our evaluation was wrong by
-100--400\,cp \emph{in both directions in the same game} --- pessimistic by 100--370 through
-moves 13--29, then optimistic by 130--340 from move 30. \textbf{This is the more important
-finding}, because a consistent bias could be tuned away and noise cannot.
+\textbf{Round 87 (drawn, the first game v1.2 played).} Same disease, but this time the
+evaluation was wrong \emph{in both directions in the same game}: too pessimistic by 100--370
+centipawns for twenty moves, then too optimistic by 130--340 for the next ten.
 
-One success: from $-722$ and seeing forced mate against it, the engine steered into a threefold
-repetition and saved half a point. Repetition detection works.
+\textbf{That second game is the more important one}, because a consistent bias could be corrected
+with a constant. Noise cannot.
 
-\subsection{What is in v1.2, and what it is worth}
+\subsection{Why more computing power cannot fix this}
+
+\begin{keybox}
+\textbf{The search is only as good as the judgement at the end of it.}
+
+The engine looks ahead, reaches positions it cannot look past, and asks its evaluation:
+``is this good for me?'' Every decision it makes traces back to that answer.
+
+Our evaluation counts material and where the pieces sit. That is essentially all. It has
+\textbf{no concept of activity at all} --- no measure of how many squares your pieces control.
+So when it reaches a position where we are a pawn up, but the opponent has two bishops raking
+open diagonals, a knight heading to a dominant square, and open lines at our king, it reports
+\textbf{``+200, winning.''}
+
+Searching deeper does not fix that. It just explores more thoroughly \emph{toward the wrong
+goal.} You find the very best route to a position you have misjudged.
+\end{keybox}
+
+This is also why a faster development machine cannot help our playing strength: the competition
+runs every engine on the same fixed hardware --- one CPU core, 2\,GB of memory. A better machine
+helps us \emph{test} faster, which is worth something, but it adds no strength on Friday.
+
+\section{What happened tonight: the network}
+
+\subsection{The idea, and the result}
+
+Instead of a hand-written evaluation, train a small neural network on a million positions and let
+it learn to judge them. This was our biggest bet --- the only change with enough potential to
+close the gap to the leaders.
 
 \begin{center}
 \begin{tabular}{lr}
 \toprule
-Change & Measured \\
+Network vs.\ v1.2, 300 games at the full 2-minute time control & \\
 \midrule
-Principal variation search + incremental Zobrist & $+35$ ($-2$ to $+73$) \\
-Reverse futility + deeper futility margins & $+15$ ($-21$ to $+51$) \\
-Three defect fixes & --- \\
-\midrule
-\textbf{Composed} & \textbf{$+50$ ($-2$ to $+102$)} \\
+Result & $+111$ wins, $21$ draws, $168$ losses \\
+Strength & \bad{$-67$ Elo} (range $-106$ to $-29$) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The composed interval touches zero. v1.2 ships on other grounds: incremental Zobrist is exact
-(same tree, less work, cannot be worse), and one of the fixes stops an already-won position
-being scored as a draw.
+It is clearly, unambiguously worse. It does not ship.
 
-\section{Why the network failed}
+\subsection{It is not the speed cost}
 
-\subsection{The result}
+The obvious escape is ``the network is slower, so buy the speed back.'' The arithmetic says no.
+The network costs 14.6\% of our search speed, which is about a tenth of a move of lookahead,
+worth 5--9 Elo. The loss is 67. \textbf{So around 60 Elo of it is the network genuinely choosing
+worse moves.}
 
-\begin{center}
-\begin{tabular}{lr}
-\toprule
-768$\rightarrow$128 network vs.\ v1.2, 300 games at 120s$+$0.5s & \\
-\midrule
-Score & $+111 = 21 - 168$, 40.5\% \\
-Elo & \bad{$-67$} \ (95\%: $-106$ to $-29$) \\
-\bottomrule
-\end{tabular}
-\end{center}
+\subsection{The strangest part: every measurement said it would win}
 
-\textbf{It is not the speed cost.} The network costs 14.6\% of node rate, which is 0.105 of a
-ply at 4.5 nodes per depth, worth 5--9 Elo. The loss is 67. So \textbf{58--62 Elo of it is the
-network choosing worse moves.} Recovering the speed would not have rescued it.
-
-\textbf{And every static indicator said it would win.} On held-out positions it was 2.6$\times$
-more accurate than the hand-crafted evaluation (16{,}503 vs.\ 43{,}039 squared error; RMSE
-128\,cp vs.\ 207). On the 26 positions of the round-85 loss it identified who was winning 20
-times against the hand-crafted evaluation's 5.
-
-This is the \textbf{third time} on this project that accuracy against engine labels has pointed
-the wrong way. The first was a 768-parameter Texel fit that ranked best on the same metric and
-played 100 Elo worse.
-
-\subsection{You are right that it should be better. Here is what is wrong with ours.}
-
-A properly built NNUE is worth several hundred Elo in real engines. Ours lost 67. The gap is
-not evidence that the approach fails; it is evidence that we built it wrong in six specific,
-nameable ways. Ranked by how much I think each cost us:
-
-\paragraph{1. The architecture cannot represent king safety --- and that is our actual weakness.}
-Our input is 768 features: 12 piece types $\times$ 64 squares. \textbf{There is no king context
-anywhere in it.} Real NNUE uses HalfKP/HalfKA, where the feature is the triple (our king's
-square, piece, square) --- 40{,}960 inputs. That is what lets a network learn ``a knight on f5
-is worth a great deal \emph{because} the enemy king is on g8.''
-
-Our network is structurally incapable of learning that. And king safety is precisely the
-blindness round 85 exposed: we misjudged a position because we could not see open lines at our
-own king. \textbf{We built a replacement that shares the original's blind spot.} No amount of
-training fixes this one.
-
-\paragraph{2. We asked it to predict something it cannot compute.}
-We labelled positions with Stockfish at \emph{depth 12}. A depth-12 score encodes tactics twelve
-plies deep. Our network is a static function: it sees a position and outputs a number, with no
-search. For any position whose true value depends on a tactic, \textbf{the target is
-unlearnable}, and 98{,}700 parameters will fit that unlearnable component as noise. That is
-overfitting by construction, and the measured train/held-out gap of 2.8$\times$ is its
-signature.
-
-Standard practice labels with a \emph{shallow} search (depth 6--9) or blends the eventual game
-result, precisely so the target is something a static function can represent.
-
-\paragraph{3. Three to four orders of magnitude too little data.}
-We trained on 186{,}190 quiet positions. Serious NNUE training uses \textbf{100 million to
-1 billion}. Worse, ours came from 3{,}356 games at $\sim$51 positions per game, so consecutive
-samples are heavily correlated and the effective independent sample is far smaller than 186k.
-Against 98{,}700 parameters that is roughly two examples per parameter.
-
-\paragraph{4. The wrong loss function.}
-We minimised squared error on raw centipawns clipped to $\pm$1500. Being 200\,cp wrong in a
-level position is catastrophic; being 200\,cp wrong at $+1400$ is irrelevant --- you are winning
-either way. Raw-centipawn MSE spends most of its gradient on positions that are already decided.
-Standard practice trains in win-probability space through a sigmoid.
-
-\paragraph{5. The training distribution does not match the search's leaves.}
-We trained on positions from other engines' ladder games --- middlegame-heavy, drawn from actual
-play. The network is asked about positions at \emph{the leaves of our own search}: often
-unbalanced, deep in a tree, reached by move sequences no human or engine would choose. Standard
-practice generates training data by self-play from the engine itself for exactly this reason.
-
-\paragraph{6. It was trained to answer the wrong question.}
-The deepest one. We trained a function to \emph{predict a search's verdict about a position}.
-What the engine needs is a function that \emph{orders moves correctly at the leaves of its own
-search}. Those are different objectives, and nothing in the pipeline optimised the second. A
-network can be excellent at the first and useless at the second --- which is exactly the result
-we got, and exactly what the three failures of held-out MSE have been telling us.
-
-\subsection{What a correct second attempt looks like}
-
-Every item above except (1) is fixable with the time and machine we have. The critical
-realisation is about cost:
-
-\begin{quote}
-\textbf{Self-play data generation is nearly free, because the labels come from the generating
-search itself.} We do not need Stockfish, which caps at 253 positions/second. At 5{,}000 nodes
-per move our engine spends $\sim$6\,ms per move; a 200-ply game costs $\sim$1.2\,s of one core.
-On 14 cores that is roughly \textbf{2 million positions per hour}.
-\end{quote}
-
-So four hours of machine time yields $\sim$8 million positions --- \textbf{43$\times$ our current
-dataset} --- with labels attached at no extra cost. That single change addresses causes 2, 3
-and 5 simultaneously.
-
-A realistic second attempt:
-
-\begin{enumerate}
-\item \textbf{Self-play generation}, 4 hours, our own engine at a fixed small node budget,
-      labels from the generating search blended with the game result.
-\item \textbf{King-bucketed inputs}: not full HalfKP (40{,}960 inputs, 10.5\,MB of weights) but
-      4--8 buckets by king position, giving 3{,}072--6{,}144 inputs and $\sim$1.5\,MB. This
-      recovers most of cause (1) at a fraction of the cost, and stays far inside the 50\,MB cap.
-\item \textbf{Sigmoid/WDL loss} instead of raw-centipawn MSE.
-\item \textbf{Shallow labels}, so the target is learnable.
-\end{enumerate}
-
-Estimated cost: 4h generation $+$ 0.5h training $+$ 2.4h screening $\approx$ \textbf{7 hours of
-the machine}. That is over half of Thursday.
-
-
-\subsection{The finding that outranks all of this: no static metric predicts strength}
-
-After the screen we built a fifth check designed specifically to escape the circularity ---
-evaluations scored against \emph{the actual result of the game}, on 12{,}000 held-out quiet
-positions from 9{,}200 ladder games, no engine anywhere in the target.
-
-\begin{center}
-\begin{tabular}{lrrr}
-\toprule
-Sign accuracy & hand-crafted & network & hand $+$ mobility \\
-\midrule
-moves 9--25  & 57.0\% & \good{61.9\%} & 59.9\% \\
-moves 26--45 & 75.7\% & \good{78.8\%} & 76.7\% \\
-moves 46$+$  & 91.3\% & \good{91.9\%} & 91.6\% \\
-\midrule
-all          & 76.3\% & \good{79.0\%} & 77.5\% \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-\textbf{The network won this too.} Four independent metrics have now ranked first the build that
-lost 67 Elo: held-out error against depth-12 labels, a sign test against depth-18, error on quiet
-positions, and outcome correlation against real results. \textbf{Four for four.}
-
-\textbf{The only instrument that has ever been right about playing strength on this project is
-playing games.} That governs everything below. A second network attempt cannot be checked as it
-is built: it costs $\sim$7 hours to make and a 2.4-hour screen to evaluate, with no cheap proxy
-and no way to iterate. That materially lowers its expected value, and this document overstated it
-before this result arrived.
-
-\subsection{The one mechanism that fits every observation}
-
-Exactly one hypothesis explains ``better at judging positions, worse at playing'':
-\textbf{the network is asked about positions it was never trained on.}
-
-Training data is real-game positions. A search asks about \emph{leaf nodes} --- unbalanced,
-deep in a tree, reached by move sequences no engine would choose. A hand-crafted evaluation
-degrades gracefully out there because material still counts. \textbf{A network's error off its
-training distribution is unbounded.}
-
-If true, this changes the design of any second attempt: training data must be sampled from
-\emph{inside search trees}, not from games. That is a different job from the self-play plan in
-Section 2.3, and it is being tested now.
-
-\section{Everything we can do, ranked}
-
-\subsection{Free points --- do all of these}
-
-These cost almost no machine time and are not conditional on any measurement.
-
-\begin{enumerate}
-\item \textbf{Submit the final build early on Friday, not at 11:00.} ``Earlier final
-      submission'' is an explicit tie-break. In a 13-round Swiss, ties on points are common.
-      This is free.
-\item \textbf{Never lose a game to a crash, illegal move or flag.} Every such loss is a whole
-      point given away for nothing. Our 500-game fuzz gate exists for this; run it on whatever
-      we finally ship.
-\item \textbf{Upload early and often.} Ten uploads a day, the latest valid one plays, a failed
-      validation costs nothing. Every rated round between now and the lock is a free sample of
-      our own reliability.
-\item \textbf{Fix the time allocation.} Round 87 spent \textbf{1.0\,s on the losing move with
-      88\,s on the clock}, and 9.4\,s on a move in an already-lost endgame. It finished with
-      32.9\,s unused. Spending time inversely to where it matters is a defect, it is cheap to
-      investigate, and it costs no Elo to fix.
-\end{enumerate}
-
-\subsection{Measured or measurable engine changes}
-
-\begin{center}
-\begin{longtable}{p{5.4cm}rp{5.6cm}}
-\toprule
-Change & Status & Note \\
-\midrule
-\endhead
-Ordering bundle (SEE $+$ continuation history)
-  & \good{screening} & Searches 47\% of the nodes to a given depth, 22.5\% slower per node,
-    so \textbf{1.65$\times$ effective speed}. 1000 games running, ETA 04:45. Expected $+15$ to
-    $+25$. \\
-Mobility term
-  & ready & Costs $\sim$1.7$\times$ time-to-depth, which is large. Directly addresses the
-    activity blindness of rounds 85 and 87. One known test failure. Thursday. \\
-Network, second attempt
-  & \bad{doubtful} & Section 2.3--2.5. Highest ceiling, $\sim$7h of machine, has failed once,
-    and \textbf{cannot be validated except by spending a 2.4h screen}. No cheap proxy exists. \\
-Aspiration window tuning
-  & open & \texttt{ASPIRATION\_WINDOW}${=}40$ is textbook-magnitude and \textbf{has never been
-    measured}. Nobody knows if the feature pays. \\
-Real-clock confirmation of v1.2
-  & skipped & Deliberately: it would not change what we upload. \\
-\bottomrule
-\end{longtable}
-\end{center}
-
-\subsection{What we should not do}
-
-\begin{itemize}
-\item \textbf{A faster development machine will not make the engine stronger.} The competition
-      runs on one core of an AMD EPYC 9V74 with 2\,GB, identical for everyone. A VPS helps us
-      \emph{measure} in parallel --- worth having, since we now have more candidates than slots
-      --- but it cannot add a single Elo on Friday.
-\item \textbf{Do not trust held-out accuracy against engine labels again.} It has pointed the
-      wrong way three times on this project. Only games count.
-\item \textbf{Do not bundle an evaluation change with a search change.} A flat result then loses
-      both candidates at once with no way to attribute, on the last day.
-\end{itemize}
-
-\section{The schedule}
+Before the games, we checked the network four separate ways. \textbf{It won all four.}
 
 \begin{center}
 \begin{tabular}{lll}
 \toprule
-When & What & Cost \\
+Check & What it measured & Winner \\
 \midrule
-Wed 21:00--Thu 04:45 & Ordering bundle, 1000 games, real clock & whole machine \\
-Thu 05:00--09:00     & \emph{Either} self-play generation \emph{or} mobility screen & \\
-Thu 09:00--12:00     & Train + screen whichever was chosen & 2.4\,h \\
-Thu afternoon        & Second candidate, if the machine allows & 2.4\,h \\
-Thu evening          & \textbf{Freeze}, fuzz gate (500 games), upload & 1\,h \\
-Fri morning          & Re-upload only if something is clearly broken & \\
+Held-out accuracy & Predicting Stockfish's score & network \\
+Round-85 positions & Knowing who was winning, on a real loss & network (20/26 vs 5/26) \\
+Quiet positions only & Accuracy where it should be strongest & network \\
+\textbf{Game outcomes} & \textbf{Does the side it calls better actually win?} & \textbf{network} \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-Thursday has room for roughly two substantive things. The network's second attempt costs about
-as much as both other candidates combined, which is the real decision to make at 04:45 when the
-ordering result lands.
+That last one was built specifically to be trustworthy --- no engine anywhere in the target, just
+``did this side go on to win the game,'' measured over 12{,}000 positions from 9{,}200 real games.
+The network scored 79.0\% against our hand-written evaluation's 76.3\%.
 
-\section{Honest assessment}
+\textbf{And it lost 67 Elo.} Four independent measurements, all confidently wrong.
 
-\textbf{Winning outright is not realistic.} The top of the field is measurably better at chess
-than we are --- 0.0--0.9\% blunder rate against our 1.8\% --- and that gap is an evaluation
-rebuild, not a weekend of tuning.
+\section{Why the network failed --- you were right that it should be better}
 
-\textbf{A strong Swiss finish is realistic and is the right target.} Thirteen rounds decided on
-points, over locked builds, with our ladder seeding almost irrelevant. Consistency matters more
-than peak strength there, and consistency is exactly what a lower blunder rate buys. Our blunder
-rate has already halved once.
+A properly built neural evaluation is worth several hundred Elo in serious engines. Ours lost 67.
+That is not evidence the approach fails. It is evidence we built it wrong, in six specific and
+nameable ways.
 
-\textbf{What would have to be true for a top-five finish:} the ordering bundle lands near
-$+25$; mobility or a corrected network cuts the blunder rate meaningfully below 1.5\%; we give
-away nothing to crashes, flags or time; and the Swiss pairings are kind in the early rounds. The
-first is likely, the second is uncertain, the third is entirely in our control, and the fourth
-is not.
+\paragraph{1. Our network structurally cannot see king safety.}
+Its input is 768 numbers: 12 piece types $\times$ 64 squares. \textbf{There is no king context
+anywhere in it.} Serious networks use inputs of the form (\emph{our king's square}, piece,
+square) --- around 41{,}000 inputs. That is what lets a network learn ``a knight on f5 is worth a
+great deal \emph{because} the enemy king is on g8.''
 
-\textbf{The single most valuable thing we own is not a technique.} It is that every number in
-this document has a matched baseline, a stated interval, and a caveat attached where one is
-owed. Three times a persuasive metric told us we were winning and the games said otherwise, and
-each time it was caught because someone wrote down beforehand what would count as evidence.
+Ours cannot learn that at all. And king safety is precisely the blindness that lost us round 85.
+\textbf{We built a replacement that shares the original's blind spot.} No amount of training
+fixes this one.
+
+\paragraph{2. We asked it to predict something it cannot compute.}
+We labelled every training position with Stockfish searching \emph{12 moves deep}. That score
+contains tactics twelve moves away. Our network looks at a position and answers instantly, with
+no search at all. For any position whose value depends on a tactic, \textbf{the correct answer is
+unlearnable} --- and 98{,}700 parameters will happily memorise that unlearnable part as noise.
+That is overfitting by construction.
+
+\paragraph{3. Three to four orders of magnitude too little data.}
+We trained on 186{,}000 positions. Serious training uses 100 million to a billion. Worse, ours
+came from 3{,}356 games at about 51 positions each, so consecutive examples are highly similar
+and the true independent sample is far smaller than it looks.
+
+\paragraph{4. The wrong learning target.}
+We minimised error on raw centipawn scores. Being 200 centipawns wrong in a level position is
+catastrophic; being 200 wrong when you are already winning by 1400 is irrelevant. So most of the
+learning was spent on positions that were already decided. Standard practice trains on
+\emph{win probability} instead.
+
+\paragraph{5. Trained on the wrong positions.}
+We used positions from other engines' games. But the network is asked about positions
+\emph{deep inside our own search} --- see Section 6, which turned out to be the most important
+finding of the night.
+
+\paragraph{6. Trained to answer the wrong question.}
+The deepest one. We trained a function to \emph{predict what a search would conclude}. What the
+engine needs is a function that \emph{correctly ranks the moves available right now}. Those are
+different jobs, and nothing in our pipeline optimised the second. A network can be excellent at
+the first and useless at the second --- which is exactly what happened, and exactly what four
+misleading measurements were telling us.
+
+\section{The most important thing we learned tonight}
+
+\subsection{Both evaluations are terrible where it actually counts}
+
+We captured 1{,}500 positions from \emph{inside a real search} --- the exact positions the engine
+asks its evaluation about --- and compared them to positions from actual games.
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+Median error vs.\ Stockfish & Positions from games & \textbf{Positions inside the search} \\
+\midrule
+Our hand-written evaluation & 104 & \bad{342} \\
+The network                 & 76  & \bad{304} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{keybox}
+\textbf{Both evaluations are three to four times worse at exactly the positions where the engine
+makes its decisions.}
+
+And every measurement anyone ran today --- all four network checks, both game traces --- was done
+on positions from games. Which are the positions a chess evaluation is \emph{least} often asked
+about. We have been grading the engine on the wrong exam.
+\end{keybox}
+
+\subsection{And a second, related finding about the engine we are shipping}
+
+The same data showed that at those search positions, Stockfish's typical score is around
+\textbf{600 centipawns} where our evaluation reports \textbf{116}. Real positions deep in the
+search are far more decisive than we think they are.
+
+That matters because our search uses fixed thresholds --- ``if the position is at least 85
+centipawns better than needed, stop searching this branch'' --- and \textbf{those thresholds were
+chosen from textbooks, never fitted to our evaluation's actual scale.} It is a single constant,
+with a plausible mechanism and no measurement in either direction. It is now a candidate for
+Thursday.
+
+\subsection{The lesson worth keeping}
+
+Five separate defects today all had the same shape: a check that could not fail. A test set
+defined using the training data. A ``wait until the machine is free'' loop whose own command
+matched its own search pattern. A data filter that called the very function being tested. A guard
+written to catch the incident that had already happened. A benchmark that verified how fast an
+answer arrived but never that it was the same answer.
+
+The question that catches all five, now written into our decision log:
+
+\begin{center}
+\emph{What is this check defined in terms of, and is that the thing I am testing?}
+\end{center}
+
+\section{The plan for the remaining hours}
+
+\subsection{The hard constraint nobody can get around}
+
+A properly-powered test --- 1000 games at the real time control --- takes \textbf{9.6 hours} on
+our one machine. Thursday has roughly 06:20 to 22:00, minus time to freeze, safety-test and
+upload.
+
+\begin{keybox}
+\textbf{Thursday holds exactly one properly-measured experiment.} Not two. Anything we squeeze in
+at 300 games produces a result too vague to act on --- which is worse than no result, because a
+vague number in a results table reads like evidence.
+\end{keybox}
+
+\subsection{The candidates for that one slot}
+
+\begin{center}
+\begin{longtable}{p{3.6cm}p{10.4cm}}
+\toprule
+\textbf{Mobility} & Adds a measure of piece activity to the evaluation --- the thing it is
+completely missing, and the direct cause of the round-85 and round-87 misjudgements. Costs about
+1.7$\times$ the time to reach a given depth, which is a lot. One unresolved test failure. \\
+\addlinespace
+\textbf{Threshold scaling} & The one-constant change from Section 6.2. Cheap to make, plausible
+mechanism, entirely unmeasured. Not free: it also shifts reported scores, which touches how the
+engine handles forced mates and manages its clock. \\
+\addlinespace
+\textbf{Neither} & Ship what we have, and spend Thursday on the freeze, the safety gate, an early
+upload for the tie-break, and the report. \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+\subsection{The decision: hold the slot}
+
+\textbf{Threshold scaling is out, and the reason is worth understanding} --- it was my own
+preference and the argument against it is decisive.
+
+The two numbers point in opposite directions. ``Stockfish says 599 where we say 116'' describes
+how much our evaluation \emph{moves}. ``Median error 304--342'' describes how \emph{wrong} it is.
+Fitting a margin to the first says make it \textbf{smaller}; fitting it to the second says make it
+\textbf{larger}. \textbf{The evidence does not tell us which way to turn the constant.} A
+9.6-hour test on a coin flip dressed as a mechanism is the worst possible use of the only slot we
+have.
+
+There is a striking observation buried in that, though, worth recording for after the event:
+\textbf{our pruning margins are 150--750 centipawns, and our own measured error at those
+positions is 304--342.} Several of our margins sit below our own noise floor --- we are making
+decisions on differences smaller than our uncertainty. And every pruning technique that consults
+the static evaluation has measured badly on this engine. That is a coherent story, and it can be
+tested cheaply without a screen: at the nodes where pruning fires, how often was the discarded
+move actually the best one? Minutes, not hours, and it can run alongside anything.
+
+\textbf{So: hold the slot rather than allocate it now.} Thursday's certain work --- freeze, safety
+gate, early upload, report --- is worth more than an uncertain screen. If tonight's result lands
+well and the freeze goes smoothly, mobility takes the slot. If not, we ship what we have.
+
+\textbf{And mobility is not the safe bet the round-85 story makes it feel like.} It costs about
+1.7$\times$ the time to reach a given depth, which is a $-10$ to $-23$ Elo handicap the new
+evaluation term must overcome \emph{before} it is worth anything. The blindness it targets is real
+and large; whether one term clears that bar is genuinely unknown.
+
+A second network attempt is \textbf{not} on this list. It would cost about 7 hours to build plus
+9.6 to test, which does not fit --- and after four measurements pointed the wrong way, there is
+no cheap way to check our work as we go. The ceiling is high; the odds of hitting it blind, in
+one attempt, are not good.
+
+\subsection{Timetable}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Tonight & 1000-game ordering test & finishes $\sim$06:20 \\
+Thursday morning & Decide the one slot; start it & $\sim$9.6\,h \\
+Thursday evening & Freeze, 500-game safety gate, \textbf{upload} & $\sim$1\,h \\
+Friday morning & Re-upload only if something is clearly broken & \\
+Friday 11:00 & Locked & \\
+Friday afternoon & 13-round Swiss & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{How to maximise our chances}
+
+\subsection{Free points --- do all of these}
+
+These cost essentially no machine time and depend on no measurement.
+
+\begin{enumerate}[leftmargin=1.4em]
+\item \textbf{Upload the final build early on Friday, not at 11:00.} ``Earlier final submission''
+      is an explicit tie-break, and ties on points are common in a 13-round Swiss.
+\item \textbf{Never lose a game to a crash, an illegal move, or the clock.} Each one is a whole
+      point given away for nothing. Our 500-game safety gate exists exactly for this and must be
+      run on whatever we finally ship.
+\item \textbf{Keep uploading between now and the lock.} Ten uploads a day are allowed, the latest
+      valid one plays, and a failed validation costs nothing. Every rated game is a free test of
+      our own reliability.
+\item \textbf{Fix the time allocation.} In round 87 the engine spent \textbf{1.0 second on the
+      losing move while holding 88 seconds}, and 9.4 seconds on a move in an already-lost
+      endgame. It finished with 32.9 seconds unused. Spending time in inverse proportion to how
+      much it matters is a defect, it is cheap to investigate, and fixing it costs no strength.
+\end{enumerate}
+
+\subsection{The honest assessment}
+
+\textbf{Winning the whole event is not realistic.} The top of the field is measurably better at
+chess than we are --- a blunder rate of 0.0--0.9\% against our 1.8\% --- and closing that is an
+evaluation rebuild, not a day of tuning. We spent our shot at one tonight.
+
+\textbf{A strong Swiss finish is realistic, and is the right target.} Thirteen rounds decided on
+points, over locked builds, with our ladder seeding nearly irrelevant. Consistency matters more
+there than peak strength --- and consistency is exactly what a lower blunder rate buys. Ours has
+already halved once.
+
+\textbf{What would have to be true for a top-five finish:}
+
+\begin{enumerate}[leftmargin=1.4em]
+\item the move-ordering test lands positive tonight (likely --- expected $+15$ to $+25$);
+\item Thursday's one experiment cuts the blunder rate meaningfully (uncertain);
+\item we give away nothing to crashes, flags or lost time (entirely in our control);
+\item the Friday pairings are not brutal in the early rounds (not in our control).
+\end{enumerate}
+
+\subsection{And the thing that is genuinely ours}
+
+Every number in this document has a matched comparison, a stated range of uncertainty, and a
+caveat attached wherever one is owed. Four times today a persuasive measurement said we were
+winning and the games said otherwise --- and each time it was caught, because someone had written
+down in advance what would count as evidence.
+
+That is what we can defend in front of a judge, and it is worth more than any single technique.
 
 \end{document}
