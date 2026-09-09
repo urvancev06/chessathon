@@ -254,3 +254,4 @@ verdict was reconstructable only because of that.
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | fuzz-random-v1.1 | versions/v1.1 | baselines/random | 3+0.05 s | 300 | +300 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 300 | 12 | 0.48 0.38 0.23 / 11.25 11.83 8.02 | data/openings.txt |
 | fuzz-greedy-v1.1 | versions/v1.1 | baselines/greedy | 10+0.1 s | 200 | +200 =0 -0 | 100.0% | ±0.0% | - | 0.0% | checkmate 200 | 12 | 11.25 11.83 8.02 / 12.77 13.24 10.75 | data/openings.txt |
+| v1.2-pvs-zobrist-vs-v1.1-screen | . | versions/v1.1 | 10+0.1 s | 300 | +148 =34 -118 | 55.0% | ±5.3% | +35 (-2 to +73) | 11.3% | checkmate 254, threefold_repetition 20, flag 12, insufficient_material 12, fifty_moves 1, stalemate 1 | 12 | 3.11 8.65 9.39 / 8.64 11.71 12.54 | data/openings.txt |

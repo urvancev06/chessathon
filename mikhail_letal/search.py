@@ -701,7 +701,11 @@ class Engine:
             entry_depth, entry_score, entry_flag, tt_code = entry
             if tt_code != _NO_MOVE_CODE:
                 tt_move = _code_to_move(tt_code)
-            if entry_depth >= depth:
+            # A repetition hint carries a move and nothing else -- `_store` writes it at
+            # _HINT_DEPTH with DRAW_SCORE and EXACT so the move survives for ordering. Without the
+            # first test a node entered at depth <= _HINT_DEPTH would take that DRAW_SCORE as an
+            # exact result and score a won position 0. Mirrors the guard in fastsearch.py.
+            if entry_depth > _HINT_DEPTH and entry_depth >= depth:
                 if entry_score >= MATE_THRESHOLD:
                     entry_score -= ply
                 elif entry_score <= -MATE_THRESHOLD:

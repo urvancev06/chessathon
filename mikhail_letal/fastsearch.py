@@ -318,9 +318,11 @@ def _tt_store(st: SearchState, key: int, depth: int, score: int, flag: int, move
         return
     index = key & st.ints[I_TT_MASK]
     stored = st.tt_key[index]
+    # Refuse to displace a deeper entry from this generation. `stored == key` is the SAME position,
+    # and it was previously exempted -- which let a shallow re-search overwrite a deep result for
+    # the position it was about, the one case where the deep entry is certainly still relevant.
     if (
         stored != 0
-        and stored != key
         and st.tt_data[index, 4] == st.ints[I_GENERATION]
         and depth < st.tt_data[index, 0]
     ):
@@ -926,7 +928,13 @@ def negamax(
         entry_score: int = st.tt_data[index, 1]
         entry_flag = st.tt_data[index, 2]
         tt_move = st.tt_data[index, 3]
-        if entry_depth >= depth:
+        # A repetition hint carries a move and nothing else: `_store` writes it at _HINT_DEPTH with
+        # DRAW_SCORE and EXACT purely so the move survives for ordering, and its own docstring says
+        # the score "is not stored at all". But the cutoff below only tests `entry_depth >= depth`,
+        # so a node entered at depth <= _HINT_DEPTH would take DRAW_SCORE as an exact result -- a
+        # won position silently scored 0. Unreachable today, because no reduction takes depth below
+        # zero; live the moment one does, which is exactly what the pruning work now queued adds.
+        if entry_depth > _HINT_DEPTH and entry_depth >= depth:
             if entry_score >= MATE_THRESHOLD:
                 entry_score -= ply
             elif entry_score <= -MATE_THRESHOLD:
