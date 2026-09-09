@@ -259,7 +259,14 @@ def report(path: Path) -> int:
     if abs(median - pooled) > 0.02:
         print("  WARNING: median and pooled disagree by more than 2%. One round met a busy moment;")
         print("           trust neither number and re-run on an idle box.")
-    print(f"  cost of the feature: {(1 - median) * 100:+.1f}% of the node rate")
+    # Spelled out rather than signed. A signed percentage against the word "cost" is ambiguous --
+    # a reader has to work out whether +32% means it cost 32% or gained it, and this is the one
+    # number from the whole run that will get quoted on its own.
+    change = (median - 1) * 100
+    if change < 0:
+        print(f"  {feature} is {-change:.1f}% SLOWER per node than {baseline}")
+    else:
+        print(f"  {feature} is {change:.1f}% FASTER per node than {baseline}")
 
     depths = {name: by_label[name][0]["nodes_to_depth"] for name in labels}
     print(f"\nnodes to depth {runs[0]['depth']} (deterministic, a diagnostic and not a speed cost)")
