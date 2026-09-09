@@ -1993,6 +1993,16 @@ holds fixed, through whichever free column correlates with it.** There is always
 Holding material at untuned textbook values put that misfit into `mobility_eg` (correlated +0.85 in
 the endgame) and into every structural weight correlated with piece count.
 
+**The tell, and the way it was missed.** The signal is a number that moves when you change what you
+are holding still rather than what you are measuring. That tell was available a full step before it
+was understood: adding a mobility column moved `rook_open_file` from 85 to 63, and it was reported
+as a finding *about mobility* — how much of the rook weight was mobility wearing a rook's coat. It
+was equally a statement about the method, and the second reading is the one that generalises. The
+mistake to avoid is not failing to control for a confound; you cannot enumerate them in advance. It
+is **seeing a value move and reading it as information about the thing you added, rather than about
+how much the answer depends on the specification.** The first reading produces a finding. The second
+produces a warning, and the warning was the true one.
+
 Rejected: fitting material and the structural terms together. It is the well-posed version and it is
 a much larger fit, which reopens exactly the capacity question that the 768-parameter Texel run
 answered badly (−100 Elo, `RESULTS.md`). Deciding how much fitting to trust after that result is not
