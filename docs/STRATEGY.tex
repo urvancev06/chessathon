@@ -229,6 +229,51 @@ A realistic second attempt:
 Estimated cost: 4h generation $+$ 0.5h training $+$ 2.4h screening $\approx$ \textbf{7 hours of
 the machine}. That is over half of Thursday.
 
+
+\subsection{The finding that outranks all of this: no static metric predicts strength}
+
+After the screen we built a fifth check designed specifically to escape the circularity ---
+evaluations scored against \emph{the actual result of the game}, on 12{,}000 held-out quiet
+positions from 9{,}200 ladder games, no engine anywhere in the target.
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+Sign accuracy & hand-crafted & network & hand $+$ mobility \\
+\midrule
+moves 9--25  & 57.0\% & \good{61.9\%} & 59.9\% \\
+moves 26--45 & 75.7\% & \good{78.8\%} & 76.7\% \\
+moves 46$+$  & 91.3\% & \good{91.9\%} & 91.6\% \\
+\midrule
+all          & 76.3\% & \good{79.0\%} & 77.5\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{The network won this too.} Four independent metrics have now ranked first the build that
+lost 67 Elo: held-out error against depth-12 labels, a sign test against depth-18, error on quiet
+positions, and outcome correlation against real results. \textbf{Four for four.}
+
+\textbf{The only instrument that has ever been right about playing strength on this project is
+playing games.} That governs everything below. A second network attempt cannot be checked as it
+is built: it costs $\sim$7 hours to make and a 2.4-hour screen to evaluate, with no cheap proxy
+and no way to iterate. That materially lowers its expected value, and this document overstated it
+before this result arrived.
+
+\subsection{The one mechanism that fits every observation}
+
+Exactly one hypothesis explains ``better at judging positions, worse at playing'':
+\textbf{the network is asked about positions it was never trained on.}
+
+Training data is real-game positions. A search asks about \emph{leaf nodes} --- unbalanced,
+deep in a tree, reached by move sequences no engine would choose. A hand-crafted evaluation
+degrades gracefully out there because material still counts. \textbf{A network's error off its
+training distribution is unbounded.}
+
+If true, this changes the design of any second attempt: training data must be sampled from
+\emph{inside search trees}, not from games. That is a different job from the self-play plan in
+Section 2.3, and it is being tested now.
+
 \section{Everything we can do, ranked}
 
 \subsection{Free points --- do all of these}
@@ -267,8 +312,8 @@ Mobility term
   & ready & Costs $\sim$1.7$\times$ time-to-depth, which is large. Directly addresses the
     activity blindness of rounds 85 and 87. One known test failure. Thursday. \\
 Network, second attempt
-  & proposed & Section 2.3. Highest upside of anything remaining, $\sim$7h of machine,
-    and it has failed once. \\
+  & \bad{doubtful} & Section 2.3--2.5. Highest ceiling, $\sim$7h of machine, has failed once,
+    and \textbf{cannot be validated except by spending a 2.4h screen}. No cheap proxy exists. \\
 Aspiration window tuning
   & open & \texttt{ASPIRATION\_WINDOW}${=}40$ is textbook-magnitude and \textbf{has never been
     measured}. Nobody knows if the feature pays. \\
