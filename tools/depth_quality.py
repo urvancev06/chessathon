@@ -84,6 +84,12 @@ def engine_fingerprint() -> dict[str, str]:
 # Sharp positions, for `--sharp`. 86's point: if reordering degrades what the search knows, it
 # will show up where the reductions and the futility cuts are doing the most work, not in a quiet
 # opening. These are the tactical positions the test suite already uses for exactly that reason.
+#
+# And 86's caveat on its own suggestion, which belongs next to the sample rather than in the
+# conversation that produced it: **this is a small, hand-picked, deliberately adversarial set.**
+# A bad signed mean here is a reason to look, not a result. If `--sharp` comes back positive and
+# the curated openings come back flat, that is a lead to chase on a larger sample -- it is not a
+# finding, and it must not be written up as one.
 SHARP = (
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",  # Kiwipete
     "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4",  # open game

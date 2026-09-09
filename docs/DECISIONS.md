@@ -1926,3 +1926,36 @@ so that it, too, is on the record before the number rather than after it.
 
 Origin: `chessathon-d9` raised the time-control scaling; the sparsity measurement is from this
 branch's own smoke test.
+
+## 2026-09-09 — The question that would have caught all four hollow checks
+
+Four checks failed the same way today, across three sessions, and each one *returned a confident
+answer* rather than an error. They are worth recording together because the pattern is not
+obvious from any one of them:
+
+- a held-out split whose membership was defined by the training list it was meant to be held out
+  from;
+- a guard monitor whose filter matched the signature of the incident that had already happened,
+  so it missed the second one;
+- a quiet-position filter that called `evaluate()` while `evaluate()` was the thing under test;
+- a build comparison in `tools/depth_quality.py` that compared one engine **with itself**, with a
+  printed note admitting the row meant nothing.
+
+The fourth is the instructive one. The defect had been *correctly identified* and then a
+disclosure was allowed to stand in for the fix. **A disclaimer is read after you already have the
+number, and by then the number has done its work.**
+
+**The question that separates all four from a working check** (86's formulation): *what is this
+predicate defined in terms of, and is that the thing I am testing?* A held-out split defined by
+the training list is defined in terms of the thing under test. A filter that calls `evaluate()`
+is defined in terms of the thing under test. A comparison of a build with itself is defined in
+terms of nothing at all.
+
+The companion habit, which is what actually caught three of the four: **say in advance which
+result would flatter you, and go looking for the defect when you get it.** Your own review does
+not filter for the errors that agree with you; a pre-registered trigger does. Three of the four
+defects in `tools/lmp_probe.py` and `depth_quality.py` biased towards closing a question in the
+direction the author already leaned, which is not a coincidence and should not be treated as one.
+
+Recorded by chessathon-4c from the day's incidents; the predicate question is 86's, the
+pre-registration habit was d9's ask and became all three sessions' practice.
