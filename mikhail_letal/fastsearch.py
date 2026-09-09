@@ -134,6 +134,7 @@ from mikhail_letal.search import (
     ASPIRATION_WIDEN,
     ASPIRATION_WINDOW,
     ASPIRATION_WINDOWS,
+    CONTINUATION_HISTORY,
     DELTA_MARGIN,
     DELTA_PRUNING,
     DRAW_TIEBREAK_MARGIN,
@@ -189,6 +190,19 @@ NODE_CHECK_INTERVAL: Final = 512
 TT_BITS: Final = 21
 EVAL_BITS: Final = 18
 
+# Continuation-history geometry (see `search.CONTINUATION_HISTORY` for what the table is and
+# `search._CONT_ROW` for the index it shares). This engine addresses its own 0x88 squares, so the
+# square dimension is 128 rather than 64 and the whole table is
+# 2 * 7 * 128 * 7 * 128 = 1 605 632 int32 entries, 6.4 MB. That is a twelfth of the transposition
+# table beside it and nothing against the platform's 2 GB, and the layout is what makes it cheap
+# to read: every move of a node shares one previous move, so all of them index the same
+# contiguous 896-entry row, which is 3.5 KB and sits in L1 for the whole node.
+_CONT_PIECE_KINDS: Final = 7  # piece types are 1..6; index 0 is never used
+_CONT_SQUARES: Final = 128  # 0x88, the same square encoding as `history`
+_CONT_ROW: Final = _CONT_PIECE_KINDS * _CONT_SQUARES  # entries under one previous move
+_CONT_ENTRIES: Final = 2 * _CONT_PIECE_KINDS * _CONT_SQUARES * _CONT_ROW
+_CONT_NONE: Final = -1  # "no previous move": the root, and the node directly under a null move
+
 # The node rate a fresh engine assumes before any search has been timed. The warm-up replaces it
 # with a measurement, and every real search refines it, but it has to start somewhere and it must
 # never be zero or unset: `FastEngine.search` derives the node cap that backs up the clock from
@@ -227,6 +241,8 @@ class SearchState(NamedTuple):
     tt_data: npt.NDArray[np.int32]  # (slots, 5): depth, score, flag, move, generation
     killers: npt.NDArray[np.int32]  # (MAX_PLY + 2, 2): two quiet cutoff moves per ply
     history: npt.NDArray[np.int32]  # (2, 128 * 128): cutoff credit by colour and from-to
+    cont: npt.NDArray[np.int32]  # (_CONT_ENTRIES,): the same credit, per previous move
+    cont_base: npt.NDArray[np.int64]  # (MAX_PLY + 1,): each ply's row in `cont`, or _CONT_NONE
     moves: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): one move buffer per ply
     order: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): the ordering score of each
     root_scores: npt.NDArray[np.int32]  # the search score of each root move, for the draw tie-break
@@ -256,6 +272,10 @@ def new_state(tt_bits: int = TT_BITS, eval_bits: int = EVAL_BITS) -> SearchState
         tt_data=np.zeros((tt_size, 5), dtype=np.int32),
         killers=np.full((MAX_PLY + 2, 2), NO_MOVE, dtype=np.int32),
         history=np.zeros((2, 128 * 128), dtype=np.int32),
+        cont=np.zeros(_CONT_ENTRIES, dtype=np.int32),
+        # int64 so the index arithmetic in `negamax` never has to think about int32 width; the
+        # array is MAX_PLY + 1 entries, so it costs nothing.
+        cont_base=np.full(MAX_PLY + 1, _CONT_NONE, dtype=np.int64),
         moves=np.zeros((MAX_PLY + 2, MAX_MOVES), dtype=np.int32),
         order=np.zeros((MAX_PLY + 2, MAX_MOVES), dtype=np.int32),
         root_scores=np.zeros(MAX_MOVES, dtype=np.int32),
@@ -554,6 +574,28 @@ def _victim(pos: Position, move: int) -> int:
 
 
 @njit(cache=False)
+def _cont_base(pos: Position, move: int) -> int:
+    """Where the continuation history of every reply to `move` begins, or `_CONT_NONE`.
+
+    Called with `pos` still in the position `move` is played from, so `M_SIDE` is the side
+    playing it and the from-square still holds the piece that moves. The replies filed under this
+    base belong to the *other* side, and that is the side the index carries. Once per move made,
+    never once per reply: `search._cont_base` is the same arithmetic on 0..63 squares.
+
+    A promotion is filed under the pawn that left rather than the piece that arrives, which is
+    the convention the plain history's from-square already carries.
+    """
+    if not CONTINUATION_HISTORY:
+        return _CONT_NONE
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    kind = pos.board[frm] & PIECE_TYPE_MASK
+    replier = 1 - pos.meta[M_SIDE]
+    base: int = ((replier * _CONT_PIECE_KINDS + kind) * _CONT_SQUARES + to) * _CONT_ROW
+    return base
+
+
+@njit(cache=False)
 def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: int) -> None:
     """Fill `st.order[ply][:count]` with the ordering score of each move in `st.moves[ply]`.
 
@@ -571,6 +613,9 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
     killer_first = st.killers[ply, 0]
     killer_second = st.killers[ply, 1]
     history = st.history[side]
+    # The previous move is the same for every move of this node, so its row is fixed once here.
+    cont = st.cont
+    cont_base = st.cont_base[ply]
 
     for i in range(count):
         move = moves[i]
@@ -590,7 +635,17 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
         elif move == killer_second:
             order[i] = _ORDER_KILLER_SECOND
         else:
-            order[i] = history[frm * 128 + to]
+            # Plain history plus continuation history, clamped: each table saturates at
+            # _HISTORY_MAX on its own, so the unclamped sum would reach nearly twice
+            # _ORDER_KILLER_SECOND and a quiet move would outrank first a killer and then a
+            # capture. `search._quiet_order` is the same three lines.
+            score = history[frm * 128 + to]
+            if cont_base != _CONT_NONE:
+                kind = board[frm] & PIECE_TYPE_MASK
+                score += cont[cont_base + kind * _CONT_SQUARES + to]
+                if score > _HISTORY_MAX:
+                    score = _HISTORY_MAX
+            order[i] = score
 
 
 @njit(cache=False)
@@ -622,10 +677,20 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
         st.killers[ply, 1] = st.killers[ply, 0]
         st.killers[ply, 0] = move
     side = pos.meta[M_SIDE]
-    index = (move & SQ_MASK) * 128 + ((move >> SQ_BITS) & SQ_MASK)
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    index = frm * 128 + to
     # depth * depth: cutoffs near the root are rarer and worth more than cutoffs near leaves.
     value = st.history[side, index] + depth * depth
     st.history[side, index] = value if value < _HISTORY_MAX else _HISTORY_MAX
+    # The same credit again, in the context of the move this one replied to. The caller has
+    # already unmade the move, so the from-square holds the piece that played it and `M_SIDE` is
+    # that piece's colour.
+    base = st.cont_base[ply]
+    if base != _CONT_NONE:
+        cont_index = base + (pos.board[frm] & PIECE_TYPE_MASK) * _CONT_SQUARES + to
+        value = st.cont[cont_index] + depth * depth
+        st.cont[cont_index] = value if value < _HISTORY_MAX else _HISTORY_MAX
 
 
 # ----------------------------------------------------------------------------- terminal scores
@@ -814,6 +879,7 @@ def quiescence(
                 gain += promotion_gain
             if gain < delta_floor:
                 continue
+        st.cont_base[ply + 1] = _cont_base(pos, move)
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1017,6 +1083,10 @@ def negamax(
     ):
         reduction = NULL_MOVE_BASE_REDUCTION + depth // NULL_MOVE_DEPTH_DIVISOR
         ints[I_NULL_MOVES] += 1
+        # Passing is not a move and refutes nothing, so the node below it has no previous move to
+        # be a reply to. Without this it would inherit the base a sibling left in this slot and
+        # credit its cutoffs to a move that was never played on this line.
+        st.cont_base[child_ply] = _CONT_NONE
         saved_ep, saved_half, saved_key = _make_null(pos)
         null_score = -negamax(pos, st, ev, depth - 1 - reduction, -beta, -beta + 1, child_ply, 0)
         _unmake_null(pos, saved_ep, saved_half, saved_key)
@@ -1101,6 +1171,7 @@ def negamax(
             # has nearly always been searched already.
             pruned_any = 1
             continue
+        st.cont_base[child_ply] = _cont_base(pos, move)
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1285,6 +1356,7 @@ class FastEngine:
         st.eval_value[:] = 0
         st.killers[:] = NO_MOVE
         st.history[:] = 0
+        st.cont[:] = 0
         st.ints[I_GENERATION] = 0
 
     # ------------------------------------------------------------------ public entry point
@@ -1338,9 +1410,14 @@ class FastEngine:
             return SearchResult(None, score, 0, 0, 0, time.perf_counter() - start, False)
 
         st.path[0] = pos.undo[pos.meta[M_PLY], U_KEY]
+        # The root has no previous move: the position arrives as a FEN and the opponent's last
+        # move is not part of it, so root moves are ordered on the plain history alone.
+        st.cont_base[0] = _CONT_NONE
         # Halve every history score so what was learned last move fades rather than saturates.
         # In place on the array itself: `st` is a NamedTuple, so its fields cannot be rebound.
+        # Both tables are non-negative, so the shift cannot sign-extend.
         np.right_shift(st.history, 1, out=st.history)
+        np.right_shift(st.cont, 1, out=st.cont)
 
         best_move = NO_MOVE
         best_score = DRAW_SCORE
@@ -1488,6 +1565,9 @@ class FastEngine:
         ints[I_PATH_DRAW] = 0
         for i in range(count):
             move = int(st.moves[0, i])
+            # The array element, not `move`: the compiled tree calls `_cont_base` with an int32
+            # and a Python int here would compile a second specialisation on the game clock.
+            st.cont_base[1] = int(_cont_base(pos, st.moves[0, i]))
             make_move(pos, move)  # produced by gen_legal, so it cannot be illegal
             score = -int(negamax(pos, st, ev, depth - 1, -beta, -alpha, 1, 1))
             unmake_move(pos)
@@ -1607,6 +1687,7 @@ JITTED: Final = (
     "_has_non_pawn_material",
     "gen_captures",
     "_victim",
+    "_cont_base",
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
@@ -1663,6 +1744,7 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
         count = int(gen_pseudo(pos, st.moves[1]))
         gen_captures(pos, st.moves[1])
         _victim(pos, st.moves[1, 0])
+        _cont_base(pos, st.moves[1, 0])
         _score_moves(pos, st, 1, count, NO_MOVE)
         _pick_best(st, 1, 0, count)
         _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)

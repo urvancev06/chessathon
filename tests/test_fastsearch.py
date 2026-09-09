@@ -22,13 +22,29 @@ import random
 import time
 
 import chess
+import numpy as np
 import pytest
 
 from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, MATE_THRESHOLD
-from mikhail_letal.fastboard import position_key
+from mikhail_letal.fastboard import (
+    KNIGHT,
+    NO_MOVE,
+    SQ_BITS,
+    SQ_MASK,
+    WHITE,
+    from_fen,
+    gen_pseudo,
+    move_from_chess,
+    position_key,
+    sq88,
+)
 from mikhail_letal.fasteval import TABLES as EVAL_TABLES
 from mikhail_letal.fasteval import evaluate as compiled_evaluate
 from mikhail_letal.fastsearch import (
+    _CONT_NONE,
+    _CONT_PIECE_KINDS,
+    _CONT_ROW,
+    _CONT_SQUARES,
     DEFAULT_NODE_RATE,
     F_HARD,
     I_EVAL_MASK,
@@ -38,15 +54,18 @@ from mikhail_letal.fastsearch import (
     JITTED,
     FastEngine,
     _cached_eval,
+    _cont_base,
     _has_legal,
     _has_unpinned_move,
     _make_null,
+    _reward_quiet_cutoff,
+    _score_moves,
     _unmake_null,
     negamax,
     new_state,
     warm_up,
 )
-from mikhail_letal.search import Engine, SearchResult
+from mikhail_letal.search import _HISTORY_MAX, _ORDER_KILLER_SECOND, Engine, SearchResult
 from mikhail_letal.warmup import arm, budget
 from tests.test_fastboard import playout_boards, sample_starts
 
@@ -688,3 +707,141 @@ def test_the_null_move_keeps_the_position_key_exact() -> None:
         assert running_key(pos) == before, board.fen()
         checked += 1
     assert checked == len(fens) + 600
+
+
+# ------------------------------------------------- (k) one-ply continuation history, compiled
+#
+# `search.CONTINUATION_HISTORY` explains what the table is. Here the questions are the compiled
+# ones: does the packed index arithmetic address the cell it claims to, does the extra channel
+# reach the ordering, and do the two saturating tables still add to something below the killer
+# band. The null-move invariant behind the feature is proved in `tests/test_search.py`, where the
+# move stack can be inspected at every node; this engine carries the identical reset.
+#
+# Every call into `_cont_base` here passes an array element rather than a Python int, because a
+# Python int would compile a second specialisation and `test_nothing_compiles_during_a_game` is
+# about exactly that.
+
+# After 1. e4, Black to move: the position `_cont_base` is asked about.
+BEFORE_E5 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+# ... and after 1. e4 e5, White to move: the position whose replies the base files.
+AFTER_E5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2"
+
+
+def _packed(fen: str, uci: str) -> int:
+    """``uci`` as this engine packs it, in the position ``fen``."""
+    return int(move_from_chess(from_fen(fen), chess.Move.from_uci(uci)))
+
+
+def _base_after(fen: str, uci: str) -> int:
+    """``_cont_base`` for ``uci`` played in ``fen``, called the way the search calls it.
+
+    The move goes through an int32 array element on purpose: the compiled tree calls
+    ``_cont_base`` with an int32, and handing it a Python int here would compile a second
+    specialisation, which is the thing ``test_nothing_compiles_during_a_game`` exists to catch.
+    """
+    pos = from_fen(fen)
+    packed = np.array([move_from_chess(pos, chess.Move.from_uci(uci))], dtype=np.int32)
+    return int(_cont_base(pos, packed[0]))
+
+
+def _order_of(state: object, count: int, move: int) -> int:
+    """The ordering score `_score_moves` gave ``move``."""
+    st = state
+    for index in range(count):
+        if int(st.moves[0, index]) == move:  # type: ignore[attr-defined]
+            return int(st.order[0, index])  # type: ignore[attr-defined]
+    raise AssertionError(f"move {move} was not generated")
+
+
+def test_the_continuation_base_decodes_to_the_move_it_was_built_from() -> None:
+    """The packed index is five coordinates in one integer; this unpacks them again.
+
+    A base that addressed the wrong row would still look like a working feature -- cutoffs would
+    be filed and read consistently, just under the wrong previous move -- so the arithmetic is
+    checked directly rather than only through its effect.
+    """
+    base = _base_after(BEFORE_E5, "e7e5")
+    row, offset = divmod(base, _CONT_ROW)
+    assert offset == 0, "a base addresses the start of a row"
+    assert row % _CONT_SQUARES == sq88(chess.E5)
+    assert (row // _CONT_SQUARES) % _CONT_PIECE_KINDS == chess.PAWN
+    # The replies filed here are White's: Black played the move. The side index is this engine's
+    # (`fastboard.WHITE == 0`), not python-chess's -- `search.py` files the same row under
+    # `int(chess.WHITE) == 1`, exactly as the two `history` tables already differ.
+    assert row // _CONT_SQUARES // _CONT_PIECE_KINDS == WHITE
+
+    # A different previous move is a different row, so the two cannot share credit.
+    assert _base_after(BEFORE_E5, "d7d5") != base
+    assert _base_after(BEFORE_E5, "g8f6") != base
+
+
+def test_the_context_channel_reorders_quiet_moves() -> None:
+    """A quiet move the plain history ranks second scores higher once the context favours it."""
+    pos = from_fen(AFTER_E5)
+    st = new_state()
+    count = int(gen_pseudo(pos, st.moves[0]))
+    favoured = _packed(AFTER_E5, "g1f3")
+    rival = _packed(AFTER_E5, "b1c3")
+
+    history = st.history[WHITE]
+    history[(rival & SQ_MASK) * 128 + ((rival >> SQ_BITS) & SQ_MASK)] = 500
+    history[(favoured & SQ_MASK) * 128 + ((favoured >> SQ_BITS) & SQ_MASK)] = 100
+
+    st.cont_base[0] = _CONT_NONE
+    _score_moves(pos, st, 0, count, NO_MOVE)
+    assert _order_of(st, count, rival) > _order_of(st, count, favoured)
+
+    base = _base_after(BEFORE_E5, "e7e5")
+    st.cont_base[0] = base
+    st.cont[base + KNIGHT * _CONT_SQUARES + sq88(chess.F3)] = 500
+    _score_moves(pos, st, 0, count, NO_MOVE)
+    assert _order_of(st, count, favoured) > _order_of(st, count, rival)
+
+
+def test_a_cutoff_is_filed_under_the_move_it_replied_to() -> None:
+    """`_reward_quiet_cutoff` writes the cell `_score_moves` reads, and only that cell."""
+    pos = from_fen(AFTER_E5)
+    st = new_state()
+    base = _base_after(BEFORE_E5, "e7e5")
+    st.cont_base[3] = base
+    _reward_quiet_cutoff(pos, st, _packed(AFTER_E5, "g1f3"), 4, 3)
+
+    cell = base + KNIGHT * _CONT_SQUARES + sq88(chess.F3)
+    assert int(st.cont[cell]) == 16
+    assert int(st.cont.sum()) == 16, "the credit landed in exactly one cell"
+
+    # With no previous move there is nothing to file against, and nothing is written.
+    st.cont[:] = 0
+    st.cont_base[3] = _CONT_NONE
+    _reward_quiet_cutoff(pos, st, _packed(AFTER_E5, "g1f3"), 4, 3)
+    assert int(st.cont.sum()) == 0
+
+
+def test_two_saturated_history_tables_still_score_below_a_killer() -> None:
+    """The band invariant: an unclamped sum of two capped tables reaches nearly twice the killer
+    band, and a quiet move would outrank first a killer and then a capture."""
+    pos = from_fen(AFTER_E5)
+    st = new_state()
+    count = int(gen_pseudo(pos, st.moves[0]))
+    quiet = _packed(AFTER_E5, "g1f3")
+
+    history = st.history[WHITE]
+    history[(quiet & SQ_MASK) * 128 + ((quiet >> SQ_BITS) & SQ_MASK)] = _HISTORY_MAX
+    base = _base_after(BEFORE_E5, "e7e5")
+    st.cont_base[0] = base
+    st.cont[base + KNIGHT * _CONT_SQUARES + sq88(chess.F3)] = _HISTORY_MAX
+
+    _score_moves(pos, st, 0, count, NO_MOVE)
+    score = _order_of(st, count, quiet)
+    assert score == _HISTORY_MAX
+    assert score < _ORDER_KILLER_SECOND
+
+
+def test_a_real_search_fills_the_table_and_new_game_empties_it() -> None:
+    engine = FastEngine()
+    result = run_search(BUSY_MIDDLEGAME, max_depth=7, engine=engine)
+    assert result.move is not None
+    assert int(engine.state.cont.sum()) > 0, "a depth-7 search recorded no continuation cutoff"
+    assert engine.state.cont_base[0] == _CONT_NONE, "the root has no previous move"
+    engine.new_game()
+    assert int(engine.state.cont.sum()) == 0

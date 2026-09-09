@@ -621,3 +621,166 @@ def test_delta_pruning_saves_quiescence_nodes_and_keeps_the_hanging_queen() -> N
     )
     result = run_search(HANGING_QUEEN, max_depth=3)
     assert result.move is not None and result.move.uci() == "f3h4"
+
+
+# ------------------------------------------------------- (i) one-ply continuation history
+#
+# The plain history heuristic credits a quiet move by its from- and to-square alone, so it has no
+# opinion about *when* the move is good. The continuation table adds one previous move of context
+# (`search.CONTINUATION_HISTORY`). These tests ask three separate things of it: that a cutoff is
+# filed under the move it replied to and not somewhere shared, that the extra channel actually
+# changes the order (the whole point of the feature), and that the score it adds cannot break the
+# ordering bands the rest of the search relies on.
+
+
+def _cont_cell(base: int, piece_type: int, to_square: int) -> int:
+    """The continuation entry for ``piece_type`` landing on ``to_square`` under ``base``."""
+    return base + piece_type * search_module._CONT_SQUARES + to_square
+
+
+def test_a_cutoff_is_filed_under_the_move_it_replied_to() -> None:
+    """The same quiet move, credited after two different previous moves, lands in two cells.
+
+    The plain table cannot tell the two apart -- it is indexed by from-to only and is credited
+    twice for the same entry -- which is exactly the information the second table adds.
+    """
+    engine = Engine()
+    board = chess.Board()  # White to move; Nf3 is quiet here
+    quiet = chess.Move.from_uci("g1f3")
+
+    after_e5 = search_module._cont_base(chess.BLACK, chess.PAWN, chess.E5)
+    engine._cont_base[3] = after_e5
+    engine._reward_quiet_cutoff(board, quiet, 4, 3)
+    first = dict(engine._cont_history)
+
+    engine._cont_history.clear()
+    after_nc6 = search_module._cont_base(chess.BLACK, chess.KNIGHT, chess.C6)
+    engine._cont_base[3] = after_nc6
+    engine._reward_quiet_cutoff(board, quiet, 4, 3)
+    second = dict(engine._cont_history)
+
+    assert first == {_cont_cell(after_e5, chess.KNIGHT, chess.F3): 16}
+    assert second == {_cont_cell(after_nc6, chess.KNIGHT, chess.F3): 16}
+    # ... while the plain table saw one move credited twice, with no context at all.
+    assert engine._history_heuristic[chess.WHITE][chess.G1 << 6 | chess.F3] == 32
+
+
+def test_the_context_channel_reorders_quiet_moves() -> None:
+    """A quiet move that the plain history ranks second sorts first once the context favours it.
+
+    Without this the table could be filled correctly and read by nobody, which is the failure a
+    test that only inspects the table would miss.
+    """
+    engine = Engine()
+    board = chess.Board()
+    favoured = chess.Move.from_uci("g1f3")
+    rival = chess.Move.from_uci("b1c3")
+    history = engine._history_heuristic[chess.WHITE]
+    history[rival.from_square << 6 | rival.to_square] = 500
+    history[favoured.from_square << 6 | favoured.to_square] = 100
+
+    engine._cont_base[0] = search_module._CONT_NONE
+    plain = engine._order_moves(board, list(board.legal_moves), search_module._NO_MOVE_CODE, 0)
+    assert plain.index(rival) < plain.index(favoured), "plain history should prefer the rival"
+
+    base = search_module._cont_base(chess.BLACK, chess.PAWN, chess.E5)
+    engine._cont_base[0] = base
+    engine._cont_history[_cont_cell(base, chess.KNIGHT, chess.F3)] = 500
+    ordered = engine._order_moves(board, list(board.legal_moves), search_module._NO_MOVE_CODE, 0)
+    assert ordered.index(favoured) < ordered.index(rival)
+
+
+def test_two_saturated_history_tables_still_sort_below_a_killer() -> None:
+    """The band invariant. Each table saturates at `_HISTORY_MAX`, one below the killer band, so
+    an unclamped sum would reach nearly twice it and a quiet move would outrank first a killer and
+    then a capture -- silently, because nothing else in the search checks the bands."""
+    engine = Engine()
+    board = chess.Board()
+    quiet = chess.Move.from_uci("g1f3")
+    killer = chess.Move.from_uci("b1c3")
+    engine._killers[0][0] = search_module._move_code(killer)
+
+    history = engine._history_heuristic[chess.WHITE]
+    history[quiet.from_square << 6 | quiet.to_square] = search_module._HISTORY_MAX
+    base = search_module._cont_base(chess.BLACK, chess.PAWN, chess.E5)
+    engine._cont_base[0] = base
+    engine._cont_history[_cont_cell(base, chess.KNIGHT, chess.F3)] = search_module._HISTORY_MAX
+
+    # Both tables are at their cap, so this is the largest score a quiet move can ever carry.
+    score = search_module._quiet_order(
+        history, engine._cont_history, base, chess.KNIGHT, quiet.from_square, quiet.to_square
+    )
+    assert score == search_module._HISTORY_MAX
+    assert score < search_module._ORDER_KILLER_SECOND
+
+    ordered = engine._order_moves(board, list(board.legal_moves), search_module._NO_MOVE_CODE, 0)
+    assert ordered.index(killer) < ordered.index(quiet)
+
+
+def test_every_node_knows_the_move_that_led_to_it_and_a_null_move_leads_to_none() -> None:
+    """The invariant the whole feature rests on, checked at every node of a real search.
+
+    `_cont_base[ply]` must describe the move actually played into that ply: its to-square and the
+    side now to move. After a null move there is no such move, and the slot must say so -- without
+    that reset the node under the pass would inherit the base a sibling left behind and credit its
+    cutoffs to a move that was never played on this line. The counters at the end are what stops
+    this passing vacuously on a position that never reaches either case.
+    """
+    engine = Engine()
+    original = Engine._negamax
+    seen_real = 0
+    seen_null = 0
+
+    def spy(
+        self: Engine,
+        search_board: SearchBoard,
+        depth: int,
+        alpha: int,
+        beta: int,
+        ply: int,
+        null_allowed: bool = True,
+    ) -> int:
+        nonlocal seen_real, seen_null
+        stack = search_board.board.move_stack
+        if ply >= 1 and stack:
+            base = self._cont_base[ply]
+            if stack[-1] == chess.Move.null():
+                assert base == search_module._CONT_NONE, (
+                    "the node under a pass has no previous move"
+                )
+                seen_null += 1
+            else:
+                assert base != search_module._CONT_NONE
+                row = base // search_module._CONT_ROW
+                assert row % search_module._CONT_SQUARES == stack[-1].to_square
+                assert row // (
+                    search_module._CONT_SQUARES * search_module._CONT_PIECE_KINDS
+                ) == int(search_board.board.turn)
+                seen_real += 1
+        return original(self, search_board, depth, alpha, beta, ply, null_allowed)
+
+    Engine._negamax = spy  # type: ignore[method-assign]
+    try:
+        result = run_search(BUSY_MIDDLEGAME, max_depth=6, node_limit=40_000, engine=engine)
+    finally:
+        Engine._negamax = original  # type: ignore[method-assign]
+
+    assert result.move is not None
+    assert engine._null_moves > 0, "the position never played a null move; the test proved nothing"
+    assert seen_null > 0, "no node was reached under a pass"
+    assert seen_real > 1000, "too few ordinary nodes to call this a check of the invariant"
+
+
+def test_new_game_and_ageing_clear_the_continuation_table() -> None:
+    """The table is per-game and fades between moves, exactly like the plain history beside it."""
+    engine = Engine()
+    run_search(BUSY_MIDDLEGAME, max_depth=5, engine=engine)
+    assert engine._cont_history, "a depth-5 search recorded no continuation cutoff at all"
+
+    engine._cont_history = {7: 8, 9: 1}
+    engine._age_history()
+    # Halved, and an entry that would reach zero is dropped rather than kept for the game.
+    assert engine._cont_history == {7: 4}
+
+    engine.new_game()
+    assert engine._cont_history == {}
