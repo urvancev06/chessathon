@@ -189,7 +189,13 @@ REVERSE_FUTILITY_MARGIN = 85  # per remaining ply
 # 'captures by static exchange evaluation' ahead of anything this reaches -- SEE is on a branch,
 # and main orders captures by MVV-LVA. The comment described the build intended rather than the
 # one screened, which is plausibly why the batch measured negative. Found by chessathon-4c.
-LATE_MOVE_PRUNING = True  # switch for bisection; the shipped value is True
+# MEASURED OFF, 9 September. With it on, reverse futility + deeper margins + late move pruning
+# screened at -21 Elo against the identical build without any of them (300 games, +120 =42 -138).
+# With it off, the same two survivors screened at +15 (300 games, +132 =49 -119). Same baseline,
+# same sample size, one feature removed: a swing of 36 Elo. The code stays because the version
+# measured had no principal-variation guard -- added in 439ff3f, after that screen -- so what was
+# measured may be the defect rather than the technique. It returns only if a measurement says so.
+LATE_MOVE_PRUNING = False
 LATE_MOVE_PRUNING_MAX_DEPTH = 4  # deeper than this, a late quiet move is reduced but still searched
 LATE_MOVE_PRUNING_COUNTS = (0, 5, 9, 15, 23)  # quiet moves searched before pruning, by depth
 
