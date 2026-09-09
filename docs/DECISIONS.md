@@ -1892,3 +1892,37 @@ checks both at every node of a real search, and counts the nodes it saw in each 
 pass vacuously on a position that never reaches one of them.
 
 No Elo claim here: the screen decides.
+
+## 2026-09-09 — Pre-registered: a history-dependent gain should grow with the time control
+
+Written **before** the ordering bundle is screened, and it is only worth anything for that reason.
+Reached for afterwards to explain a disappointing row it would be an excuse; stated in advance it
+is a prediction that can be wrong.
+
+**The claim.** Continuation history's value is accumulated evidence: a quiet move is credited only
+when it actually causes a cutoff, and the table has to fill before the ordering can exploit it. So
+the gain should **scale with nodes searched per move**, and every screen we run is at 10 s + 0.1 s
+where a move gets on the order of a fifteenth of the nodes it gets at the real 120 s + 0.5 s
+control. If that reasoning holds, the fast screen does not merely add noise to this change, it is
+**biased against it** — which is a different and stronger statement than "300 games cannot resolve
++25", and it cuts the other way when a row comes back flat.
+
+**Why it is not just reasoning.** The table is extremely sparse in practice. Measured while
+building this branch: after a single depth-9 search from a fresh table in a middlegame position,
+**973 of 1 605 632 cells were non-zero**. A game accumulates across moves (halved between them, see
+`_age_history`), so the steady state is higher than that — but a control that gives each move a
+fifteenth of the nodes fills a table that starts this thin, that much less.
+
+**The prediction, so it can fail.** If this bundle is ever run at the real time control against the
+same baseline, it should show a **larger** effect than the fast screen did. If a real-clock run
+shows the same or a smaller effect, this reasoning is wrong and the entry should say so rather than
+be quietly dropped.
+
+**What it does not license.** It is not a reason to promote on a flat fast screen. A flat screen
+plus this argument is still a flat screen; the argument says where to spend a real-clock slot if
+one exists, not what to conclude without one. The same caution applies to the sibling claim that
+static exchange evaluation's ordering benefit needs depth to pay — untested, and recorded here only
+so that it, too, is on the record before the number rather than after it.
+
+Origin: `chessathon-d9` raised the time-control scaling; the sparsity measurement is from this
+branch's own smoke test.
