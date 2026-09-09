@@ -1935,3 +1935,45 @@ the confirmation.
 sessions, and the check that broke it was `chessathon-4c` asking for the wall-clock to be split
 into start-up and play instead of reported as one total. A single total would have given the right
 number for 300 fast games and the wrong answer for every extrapolation from it.
+
+## Mobility and the ordering bundle are screened separately, and what a bundle would have meant
+
+Recorded before the slots are allocated, because the alternative is deciding it at two in the
+morning by whoever is still awake.
+
+**The question.** Four candidates — the network, `ct-ordering` (SEE + continuation history),
+`ct-mobility`, and a real-clock confirmation of v1.2 — against roughly three usable box slots
+before the Thursday freeze. Bundling mobility with the ordering work would buy a slot back.
+
+**Rejected. Four reasons, from `chessathon-4c`, and the third decides it.**
+
+1. **The premise is the one that failed this morning.** "Both individually plausible, neither
+   plausibly negative" is exactly what was believed about reverse futility, the deeper futility
+   margins and late move pruning. Bundled, they measured **−21**. On this project's own evidence
+   that premise has a poor record.
+2. **It fails our own coherence test.** SEE and continuation history were bundled because both do
+   the same job — move ordering — and compose mechanically. Mobility is an *evaluation* term and
+   the bundle is *search*. That is the v1.1 timing-plus-king-safety mistake in new clothes.
+3. **The outcomes are asymmetric.** Positive: ship it, don't know which half, no harm done. Flat
+   or negative: **both candidates are lost at once and neither can be attributed**, on the last
+   day. A bundle appears to save a slot; a flat bundle costs more slots to disentangle than it
+   saved. The moment we can least afford an uninterpretable row is the moment before the freeze.
+4. **They are not independent and they pull on the same rope.** Round 85 found that a search
+   improvement multiplies the quality of the evaluation it searches with. If that holds, changing
+   the evaluation changes what the ordering bundle is worth, so a combined screen measures a third
+   thing rather than A + B. Mobility also carries a measured 9–11% node cost running directly
+   against the bundle's 22.5%-slower-for-2.1x-fewer-nodes trade.
+
+**The contingency, written now rather than then.** If it comes to genuinely one slot or nothing, a
+bundle beats no measurement — and in that case **a flat result retires neither candidate.** It is
+recorded as uninterpretable, both branches stay alive, and the shipped build is whichever of them
+has independent evidence. That sentence exists so that a flat bundle cannot later be read as
+"mobility and ordering were tried and did not work".
+
+**What round 85 does and does not argue.** It is evidence *for* mobility's value. It is **not**
+evidence against the ordering work: a 1.65x effective speedup pays across the general population
+of positions whether or not it would have saved that particular game. They compete for slots, not
+for the same Elo. The steelman survives, though — a speedup multiplies evaluation quality, so with
+a systematically wrong evaluation the *marginal* value of speed is genuinely lower. That lowers
+the bundle's expected value without zeroing it, and raises mobility's. The correction is `4c`'s,
+and it favours `4c`'s own branch, which is why it is recorded with its provenance attached.
