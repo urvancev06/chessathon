@@ -42,11 +42,17 @@ EXPECTED = {
     "mikhail_letal/fasteval.py",
     "mikhail_letal/fastsearch.py",
     "mikhail_letal/gamestate.py",
+    # The trained evaluation. `nnue.py` ships because `fasteval` imports it whether or not
+    # `USE_NETWORK` is on, and `net.npz` because the engine cannot evaluate without it when it is.
+    # 188 KiB against a 50 MB cap. Nothing of anyone else's network is in either: the weights are
+    # ours, trained on positions Stockfish labelled, which the rules allow.
+    "mikhail_letal/nnue.py",
     "mikhail_letal/search.py",
     "mikhail_letal/searchboard.py",
     "mikhail_letal/timing.py",
     "mikhail_letal/warmup.py",
     "weights/PROVENANCE.json",
+    "weights/net.npz",
     "weights/pst.json",
 }
 

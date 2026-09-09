@@ -21,6 +21,7 @@ training; only a screen decides whether the net plays better chess.
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 import time
 from pathlib import Path
@@ -50,6 +51,26 @@ torch.set_num_threads(1)  # one core, as on the platform
 # multiplied by FEATURE_SCALE and an output weight by QB, and both land in an int16 array.
 FEATURE_LIMIT = 32767.0 / FEATURE_SCALE  # about 4.0
 OUTPUT_LIMIT = 32767.0 / QB  # about 512
+
+
+def read_all(paths: list[Path] | None) -> tuple[list[str], list[int], str]:
+    """Positions and labels from one or more CSVs, deduplicated by FEN.
+
+    Deduplication matters when two sets overlap: a position labelled twice would otherwise get two
+    votes, and the two sets here were labelled at different depths, so the duplicate would also be
+    inconsistent. The first file listed wins, so put the deeper labels first.
+    """
+    if not paths:
+        return tune_texel.read_labels()
+    seen: dict[str, int] = {}
+    descriptions = []
+    for path in paths:
+        with path.open(encoding="utf-8", newline="") as handle:
+            descriptions.append(handle.readline().lstrip("# ").strip())
+            for row in csv.DictReader(handle):
+                seen.setdefault(row["fen"], int(row["cp"]))
+    fens = list(seen)
+    return fens, [seen[f] for f in fens], " + ".join(descriptions)
 
 
 def encode(fens: list[str]) -> tuple[npt.NDArray[np.int32], npt.NDArray[np.int32]]:
@@ -142,12 +163,19 @@ def main() -> int:
     parser.add_argument("--test", type=int, default=4000)
     parser.add_argument("--seed", type=int, default=20260909)
     parser.add_argument("--out", type=Path, default=ROOT / "weights" / "net.npz")
+    parser.add_argument(
+        "--labels",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="label CSVs to train on; the Texel set is used when none are given",
+    )
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
-    fens, labels, labeller = tune_texel.read_labels()
+    fens, labels, labeller = read_all(args.labels)
     print(f"labels: {labeller}")
-    print(f"{len(fens)} positions, width {args.width}\n")
+    print(f"{len(fens):,} positions, width {args.width}\n")
 
     white, black = encode(fens)
     y = np.array(labels, dtype=np.float32)

@@ -26,6 +26,20 @@ PST_PATH = ROOT / "weights" / "pst.json"
 RAW_TABLES = json.loads(PST_PATH.read_text())
 
 
+@pytest.fixture(autouse=True)
+def _hand_crafted_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test in this module is about the hand-crafted evaluation's own terms:
+    material, the piece-square tables, the structural terms, the mop-up.
+
+    With ``USE_NETWORK`` on, ``evaluate`` returns the network's score instead, and these
+    tests would silently measure the wrong thing -- passing or failing for reasons with
+    nothing to do with what they are named after. Switching off what a module is not
+    testing is the same idiom as the ``mobility_off`` fixture, and it keeps the module
+    honest in a net-on build.
+    """
+    monkeypatch.setattr(ev, "USE_NETWORK", False)
+
+
 def random_positions(count: int, seed: int) -> list[chess.Board]:
     """Boards from seeded random playouts (tests may use random; the shipped engine may not)."""
     rng = random.Random(seed)

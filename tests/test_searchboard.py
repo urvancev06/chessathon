@@ -13,6 +13,7 @@ import random
 import chess
 import pytest
 
+from mikhail_letal import evaluation as ev
 from mikhail_letal.evaluation import evaluate, material_pst
 from mikhail_letal.search import Engine
 from mikhail_letal.searchboard import SearchBoard
@@ -24,6 +25,20 @@ PROMOTION_RACE = "n1n1k2r/PPPp1ppp/8/8/8/8/4KPPP/1N4N1 w k - 0 1"
 CASTLING_BOTH = "r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1"
 EN_PASSANT = "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2"
 BUSY_MIDDLEGAME = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1"
+
+
+@pytest.fixture(autouse=True)
+def _hand_crafted_evaluation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every test in this module is about the incremental material and piece-square
+    totals, which exist only in the hand-crafted evaluation.
+
+    With ``USE_NETWORK`` on, ``evaluate`` returns the network's score instead, and these
+    tests would silently measure the wrong thing -- passing or failing for reasons with
+    nothing to do with what they are named after. Switching off what a module is not
+    testing is the same idiom as the ``mobility_off`` fixture, and it keeps the module
+    honest in a net-on build.
+    """
+    monkeypatch.setattr(ev, "USE_NETWORK", False)
 
 
 def openings() -> list[str]:

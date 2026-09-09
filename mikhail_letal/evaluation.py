@@ -76,6 +76,10 @@ STRUCTURE_WEIGHTS: dict[str, int] = {
 KING_DANGER_TERM = True
 
 # Switch the whole hand-crafted evaluation for the trained network in ``weights/net.npz``.
+# ``fasteval`` mirrors this through ``misc[E_NNUE_ON]``, and ``evaluate`` below dispatches on it
+# so that this module stays the specification the compiled port is compared against: with the
+# switch on, ``tests/test_fasteval.py`` compares two networks rather than a network against a
+# hand-crafted evaluation, which is the only way that gate keeps meaning anything.
 # A replacement, not a term: when it is on, none of the weights above are read. It exists as a
 # switch so a screen can play one against the other rather than the network replacing them on
 # faith. False until a screen says otherwise.
@@ -257,6 +261,27 @@ _MOPUP_CLOSE = TABLES.mopup_close
 # "At least a rook's worth" of non-pawn material triggers the mop-up: a rook or queen, or two
 # minors (2 * 320 = 640 >= 500). One minor alone cannot mate and gets nothing.
 _MOPUP_MIN_MATERIAL = TABLES.piece_values_mg[chess.ROOK]
+
+
+_NETWORK: Any = None
+_NETWORK_TRIED = False
+
+
+def _network() -> Any:
+    """The trained network, loaded once, or ``None`` when there is no weights file.
+
+    Imported lazily and cached because ``nnue`` imports nothing from here: keeping the dependency
+    one-way means the specification can be read without the network and the network without the
+    specification.
+    """
+    global _NETWORK, _NETWORK_TRIED
+    if not _NETWORK_TRIED:
+        _NETWORK_TRIED = True
+        from mikhail_letal import nnue
+
+        path = Path(__file__).resolve().parent.parent / "weights" / "net.npz"
+        _NETWORK = nnue.Network.load(path) if path.exists() else None
+    return _NETWORK
 
 
 def is_mate_score(score: int) -> bool:
@@ -595,6 +620,18 @@ def evaluate(board: chess.Board) -> int:
     Sums the combined material-plus-square tables for both phases over every piece, adds the
     structural terms when they are switched on, then blends the two phases by the game phase.
     A pure function of the position, and the reference the incremental sums are tested against.
+
+    With ``USE_NETWORK`` on, the trained network replaces all of that -- except the
+    insufficient-material draw, which is a rule rather than a judgement and which a network
+    trained on evaluations would otherwise score as an advantage.
     """
+    if USE_NETWORK:
+        network = _network()
+        if network is not None:
+            if not (board.pawns | board.rooks | board.queens) and board.is_insufficient_material():
+                return DRAW_SCORE
+            from mikhail_letal import nnue
+
+            return nnue.evaluate(network, board)
     mg, eg, phase = material_pst(board)
     return evaluate_running(board, mg, eg, phase)
