@@ -691,6 +691,15 @@ def new_state(tt_bits: int = 21, eval_bits: int = 18) -> SearchState
 def negamax(pos, st, ev, depth, alpha, beta, ply, null_allowed) -> int
 def quiescence(pos, st, ev, alpha, beta, ply, in_chk, qs_ply) -> int
 def gen_captures(pos, out) -> int          # captures, en passant and queen promotions
+def gen_checks(pos, out) -> int            # the quiet moves that give check, filtered in place
+                                           # out of gen_pseudo; disjoint from gen_captures.
+                                           # Castling and under-promotions deliberately omitted
+def _check_is_safe(pos, move) -> int       # the whole check filter, one call site, so it can be
+                                           # swapped for a static exchange evaluation in one line
+def _direct_check(board, kind, side, frm, to, ksq) -> int   # geometry, no make_move
+def _discovered_slider(board, side, frm, ksq) -> int        # square of the uncovered slider
+def _discovery_survives(to, ksq, slider, step) -> int       # or did the mover block its own line
+def _first_occupied(board, origin, step, vacated, filled) -> int  # ray walk over a hypothetical
 def _score_moves(pos, st, ply, count, tt_move) -> None;  def _pick_best(st, ply, index, count)
 def _break_draw_tie(pos, st, ev, count, best) -> int
 # ... plus the table, clock, null-move and terminal-score helpers; all listed in JITTED

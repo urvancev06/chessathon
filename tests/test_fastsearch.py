@@ -22,13 +22,38 @@ import random
 import time
 
 import chess
+import numpy as np
+import numpy.typing as npt
 import pytest
 
 from mikhail_letal.evaluation import DRAW_SCORE, MATE_SCORE, MATE_THRESHOLD
-from mikhail_letal.fastboard import position_key
+from mikhail_letal.fastboard import (
+    EMPTY,
+    FLAG_CASTLE,
+    FLAG_EN_PASSANT,
+    FLAG_MASK,
+    FLAG_SHIFT,
+    M_KING,
+    M_SIDE,
+    MAX_MOVES,
+    NO_SQ,
+    PIECE_TYPE_MASK,
+    PROMO_MASK,
+    PROMO_SHIFT,
+    SQ_BITS,
+    SQ_MASK,
+    Position,
+    from_board,
+    gen_pseudo,
+    move_to_chess,
+    new_position,
+    position_key,
+    set_from_board,
+)
 from mikhail_letal.fasteval import TABLES as EVAL_TABLES
 from mikhail_letal.fasteval import evaluate as compiled_evaluate
 from mikhail_letal.fastsearch import (
+    _DIR_TABLE,
     DEFAULT_NODE_RATE,
     F_HARD,
     I_EVAL_MASK,
@@ -38,15 +63,22 @@ from mikhail_letal.fastsearch import (
     JITTED,
     FastEngine,
     _cached_eval,
+    _check_is_safe,
+    _direct_check,
+    _discovered_slider,
+    _discovery_survives,
     _has_legal,
     _has_unpinned_move,
     _make_null,
     _unmake_null,
+    gen_captures,
+    gen_checks,
     negamax,
     new_state,
+    quiescence,
     warm_up,
 )
-from mikhail_letal.search import Engine, SearchResult
+from mikhail_letal.search import QS_CHECK_PLIES, Engine, SearchResult
 from mikhail_letal.warmup import arm, budget
 from tests.test_fastboard import playout_boards, sample_starts
 
@@ -688,3 +720,171 @@ def test_the_null_move_keeps_the_position_key_exact() -> None:
         assert running_key(pos) == before, board.fen()
         checked += 1
     assert checked == len(fens) + 600
+
+
+# ----------------------------------------------------------------------- quiescence checks
+#
+# `gen_checks` is the one place in the engine that decides, without making the move, whether a
+# move gives check. Everything downstream trusts it: quiescence hands the child an `in_check`
+# flag, and a child wrongly told it is in check searches evasions and can answer with a mate that
+# is not on the board. So it is checked against python-chess move by move, not by spot positions.
+
+
+def _gives_check_by_hand(pos: Position, move: int) -> bool:
+    """The three geometry primitives composed independently of `gen_checks`.
+
+    `gen_checks` hoists the discovered-check test out of its move loop, because whether *leaving*
+    a square uncovers a slider depends only on the square left. This restates the rule without
+    that optimisation, so a bug in the hoisting shows up as a disagreement here rather than being
+    reproduced identically on both sides of the comparison.
+    """
+    board = pos.board
+    side = int(pos.meta[M_SIDE])
+    king = int(pos.meta[M_KING + 1 - side])
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    if _direct_check(board, int(board[frm]) & PIECE_TYPE_MASK, side, frm, to, king):
+        return True
+    slider = int(_discovered_slider(board, side, frm, king))
+    if slider == NO_SQ:
+        return False
+    return bool(_discovery_survives(to, king, slider, int(_DIR_TABLE[frm - king + 128])))
+
+
+def _quiet_candidates(pos: Position, scratch: npt.NDArray[np.int32]) -> list[int]:
+    """The pseudo-legal moves `gen_checks` is allowed to consider: quiet, not a promotion, and
+    neither en passant (which lands on an empty square but is a capture) nor castling (which
+    moves two pieces, so a from-to test would not see the rook that delivers the check)."""
+    out = []
+    for i in range(int(gen_pseudo(pos, scratch))):
+        move = int(scratch[i])
+        if pos.board[(move >> SQ_BITS) & SQ_MASK] != EMPTY:
+            continue
+        if ((move >> PROMO_SHIFT) & PROMO_MASK) != 0:
+            continue
+        if ((move >> FLAG_SHIFT) & FLAG_MASK) in (FLAG_EN_PASSANT, FLAG_CASTLE):
+            continue
+        out.append(move)
+    return out
+
+
+def test_gen_checks_agrees_with_python_chess_on_every_legal_quiet_move() -> None:
+    """The gate for the whole feature: the geometry is exact, in both directions.
+
+    A move emitted that gives no check would tell the child it is in check and could come back as
+    a mate that is not there. A check missed is only lost tactics, but a systematically missed
+    *kind* of check -- a discovery, say -- would make the feature look useless when it is merely
+    broken, so both directions are asserted, and the sample is required to contain both kinds.
+
+    Pseudo-legal king steps next to the enemy king are the one deliberate disagreement with
+    python-chess: they "give check" only because python-chess counts a king as an attacker, they
+    are illegal, and `make_move` rejects them. Asking only about legal moves excludes them, and
+    legal moves are the only kind quiescence ever searches.
+    """
+    pos = new_position()
+    scratch = np.zeros(MAX_MOVES, dtype=np.int32)
+    direct = discovered = 0
+
+    for board in playout_boards(3_000 if FULL_GATES else 500, 20260909, sample_starts()):
+        if board.is_game_over():
+            continue
+        set_from_board(pos, board)
+        legal = {move.uci() for move in board.legal_moves}
+        side = int(pos.meta[M_SIDE])
+        king = int(pos.meta[M_KING + 1 - side])
+        for move in _quiet_candidates(pos, scratch):
+            chess_move = move_to_chess(move)
+            if chess_move.uci() not in legal:
+                continue
+            board.push(chess_move)
+            attacked_king = board.king(board.turn)
+            assert attacked_king is not None, "a playout position lost a king"
+            truth = bool(board.is_attacked_by(not board.turn, attacked_king))
+            board.pop()
+            assert _gives_check_by_hand(pos, move) is truth, (
+                f"{board.fen()} {chess_move.uci()}: engine and python-chess disagree"
+            )
+            if truth:
+                if _direct_check(
+                    pos.board,
+                    int(pos.board[move & SQ_MASK]) & PIECE_TYPE_MASK,
+                    side,
+                    move & SQ_MASK,
+                    (move >> SQ_BITS) & SQ_MASK,
+                    king,
+                ):
+                    direct += 1
+                else:
+                    discovered += 1
+
+    assert direct > 0, "no direct check in the sample: the comparison proved only half the code"
+    assert discovered > 0, "no discovered check in the sample"
+
+
+def test_gen_checks_emits_checks_only_and_drops_only_what_the_filter_drops() -> None:
+    """`gen_checks` is the geometry plus `_check_is_safe`, and nothing else.
+
+    Everything it emits must be a check, or quiescence mis-scores a child. Everything it drops
+    must be explained by the safety filter rather than by a gap in the generator, which is what
+    keeps the filter the single place the policy lives: swapping it for a static exchange
+    evaluation stays a one-function change.
+    """
+    pos = new_position()
+    buffer = np.zeros(MAX_MOVES, dtype=np.int32)
+    scratch = np.zeros(MAX_MOVES, dtype=np.int32)
+
+    for board in playout_boards(500 if FULL_GATES else 200, 4242, sample_starts()):
+        if board.is_game_over():
+            continue
+        set_from_board(pos, board)
+        emitted = {int(buffer[i]) for i in range(int(gen_checks(pos, buffer)))}
+        for move in emitted:
+            assert _gives_check_by_hand(pos, move), (
+                f"{board.fen()}: emitted a move that is no check"
+            )
+        for move in _quiet_candidates(pos, scratch):
+            if not _gives_check_by_hand(pos, move) or move in emitted:
+                continue
+            assert int(_check_is_safe(pos, move)) == 0, (
+                f"{board.fen()}: dropped a check the filter would have kept"
+            )
+
+
+def test_the_two_quiescence_move_lists_never_overlap() -> None:
+    """Quiescence searches captures and then checks, so a move in both lists would be searched
+    twice and would quietly double what the feature costs."""
+    pos = new_position()
+    checks = np.zeros(MAX_MOVES, dtype=np.int32)
+    captures = np.zeros(MAX_MOVES, dtype=np.int32)
+
+    for board in playout_boards(300, 77, sample_starts()):
+        if board.is_game_over():
+            continue
+        set_from_board(pos, board)
+        quiet = {int(checks[i]) for i in range(int(gen_checks(pos, checks)))}
+        set_from_board(pos, board)
+        loud = {int(captures[i]) for i in range(int(gen_captures(pos, captures)))}
+        assert not (quiet & loud), f"{board.fen()}: a move is in both quiescence move lists"
+
+
+def test_quiescence_sees_a_mate_that_begins_with_a_quiet_check() -> None:
+    """What the feature is for, shown against itself rather than against another engine.
+
+    Ra1-a8 is mate and takes nothing, so a capture-only quiescence never generates it and answers
+    with the static evaluation of a position it believes is quiet. The only difference between the
+    two calls is `qs_ply`: at 0 the checks are searched and the mate is found; at QS_CHECK_PLIES
+    they are past the cap and the same position scores as material.
+    """
+    back_rank = chess.Board("6k1/5ppp/8/8/8/8/8/R6K w - - 0 1")
+    assert back_rank.is_valid()
+    engine = FastEngine()
+
+    pos = from_board(back_rank)
+    found = int(quiescence(pos, engine.state, EVAL_TABLES, -MATE_SCORE, MATE_SCORE, 0, 0, 0))
+    assert found == MATE_SCORE - 1, "quiescence did not find the quiet mating check"
+
+    pos = from_board(back_rank)
+    capped = int(
+        quiescence(pos, engine.state, EVAL_TABLES, -MATE_SCORE, MATE_SCORE, 0, 0, QS_CHECK_PLIES)
+    )
+    assert capped < MATE_THRESHOLD, "a check was searched past the QS_CHECK_PLIES cap"
