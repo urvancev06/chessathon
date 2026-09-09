@@ -90,6 +90,7 @@ from mikhail_letal.fastboard import (
     NO_MOVE,
     PROMO_MASK,
     PROMO_SHIFT,
+    Position,
     from_fen,
     gen_pseudo,
     move_from_chess,
@@ -155,7 +156,7 @@ def far() -> float:
     return time.perf_counter() + 3600.0
 
 
-def is_quiet(pos: object, move: int) -> bool:
+def is_quiet(pos: Position, move: int) -> bool:
     return _victim(pos, move) == 0 and ((move >> PROMO_SHIFT) & PROMO_MASK) == 0
 
 
@@ -286,7 +287,9 @@ def summarise(run: dict[str, object]) -> None:
     reachable = [s for s in samples if s["reachable"]]
     skipped = [s for s in reachable if s["would_skip"]]
     print(f"  best move was the table move:          {sum(1 for s in samples if s['is_tt_move'])}")
-    print(f"  best move was a capture or promotion:  {sum(1 for s in samples if not s['is_quiet'])}")
+    print(
+        f"  best move was a capture or promotion:  {sum(1 for s in samples if not s['is_quiet'])}"
+    )
     if reachable:
         print(
             f"  OVERALL: LMP would have skipped the best move at "
@@ -324,8 +327,8 @@ def side_by_side(first: dict[str, object], second: dict[str, object]) -> None:
         totals.append(f"{len(reachable):>5}  {len(skipped):>5}  {share:>8}")
     print(f"{'all':>5}  {totals[0]:^26}  {totals[1]:^26}")
     print(
-        "\n'reach' is the nodes LMP could touch at all: the best move was quiet, was not the table\n"
-        "move and was not a killer. 'skip' is those where its quiet index reached the pruning\n"
+        "\n'reach' is the nodes LMP could touch at all: the best move was quiet, was not the\n"
+        "table move and was not a killer. 'skip' is those whose quiet index reached the pruning\n"
         "count. A row whose 'reach' is far below its neighbours is not a finding, it is a thin\n"
         "sample -- distrust it rather than explain it."
     )
