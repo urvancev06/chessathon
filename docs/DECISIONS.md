@@ -1841,3 +1841,49 @@ had been introduced without being declared, which is not something the author no
 
 **Not claimed:** any Elo for this engine. The published numbers come from a different engine, and
 three static-margin pruners overlap heavily, so they do not add. The screen decides.
+
+## v1.2 ships without the real-clock confirmation the promotion rule asks for
+
+Written down because it is a departure from our own rule, and the way a rule dies is by being
+skipped quietly once.
+
+**The rule.** A version replaces the previous one only when it wins a match whose 95% interval is
+above zero, at the real time control, with the previous version kept in `versions/`.
+
+**What v1.2 actually has.** Two screens at 10 s + 0.1 s, composing along a chain rather than run
+against a common base:
+
+    v1.1  --(+35, -2 to +73)-->  ct-prepruning  --(+15, -21 to +51)-->  v1.2
+
+`ct-prepruning` is built on `635f0e3`, which sits above both the `batch-pvs` and `batch-zobrist`
+merges, so the second screen genuinely measures on top of the first and the two compose. Composing
+the intervals (standard errors 19.1 and 18.4, so 26.5 combined) gives **+50 Elo, 95% interval
+about -2 to +102**.
+
+**So neither component cleared zero and the composition does not either.** The point estimate is
+the best available and the data cannot distinguish it from no improvement at all. It also cannot
+rule out +100. Anyone reading "+50 measured" and taking it as established is reading it wrong, and
+that includes whoever wrote it.
+
+**Why it ships anyway, on grounds that are not the Elo figure.** Incremental Zobrist is an *exact*
+change: identical tree, less work per node, so it cannot be worse than what it replaces. And three
+of the changes are correctness fixes rather than strength attempts — in particular a repetition
+hint stored at `_HINT_DEPTH` could return `DRAW_SCORE` as an `EXACT` score for a won position,
+which throws away a game already won. The downside of shipping v1.2 is bounded near zero; the
+downside of not shipping it includes losing a won game to a defect we have already fixed.
+
+**What the confirmation would have cost.** One overnight box slot, on a single contended machine,
+43 hours before the lock. It would answer a question whose answer does not change the upload.
+The slot goes instead to the network evaluation, which is the only change on the table whose true
+effect is plausibly large enough (±100) for a 300-game screen to resolve at all — a point that
+belongs to `chessathon-4c`: a screen resolving ±39 spent on a change worth +20 to +30 returns a
+straddle, and the straddle then sits in `RESULTS.md` looking like evidence, because the next
+reader meets a table and not an interval.
+
+**The rejected alternative** was to run the real-clock confirmation and skip the network screen.
+Rejected because it optimises for procedural tidiness on a decision already made, at the cost of
+the one measurement that could still change the outcome of the competition.
+
+**Not claimed:** that v1.2 is measurably stronger than v1.1 at the real time control. It is not.
+What is claimed is that it is very unlikely to be weaker, and that two of its changes are correct
+independent of any Elo measurement.
