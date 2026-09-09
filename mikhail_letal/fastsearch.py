@@ -141,6 +141,8 @@ from mikhail_letal.search import (
     FUTILITY_MARGINS,
     FUTILITY_PRUNING,
     GAME_PLY_CAP,
+    IIR_MIN_DEPTH,
+    INTERNAL_ITERATIVE_REDUCTION,
     LATE_MOVE_PRUNING,
     LATE_MOVE_PRUNING_COUNTS,
     LATE_MOVE_PRUNING_MAX_DEPTH,
@@ -1027,6 +1029,18 @@ def negamax(
             ints[I_PATH_DRAW] = 1 if (outer_path_draw != 0 or tainted != 0) else 0
             _store(st, key, depth, beta, LOWER, tt_move, ply, tainted)
             return beta
+
+    # (9b) Internal iterative reduction (see INTERNAL_ITERATIVE_REDUCTION in search.py).
+    # `in_chk == 0` is a deliberate deviation from the published form: the check extension at the
+    # top of this function has already added a ply, and reducing it back here would cancel the
+    # extension silently rather than reduce a badly ordered node.
+    if (
+        INTERNAL_ITERATIVE_REDUCTION
+        and tt_move == NO_MOVE
+        and depth >= IIR_MIN_DEPTH
+        and in_chk == 0
+    ):
+        depth -= 1
 
     # (10) Futility: decided once for the node, applied to its quiet moves in the loop.
     futility_bound = -_INFINITY

@@ -96,6 +96,16 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# Internal iterative reduction: at a node with no table move the ordering has nothing to lead
+# with, so a full-depth search there is worth less per node than usual. Rather than pay full depth
+# for a badly ordered node, take a ply off and let the shallower search leave the table entry that
+# the next visit orders by. Ed Schroeder, Rebel 2020. Measured +9.66 +- 5.53 (tcheran) and, as the
+# older iterative-deepening form, +10.9 +- 11.7 (Blunder).
+INTERNAL_ITERATIVE_REDUCTION = True  # switch for bisection; the shipped value is True
+# Below this remaining depth the lost ply is a larger fraction of the search than the bad ordering
+# costs, and at depth 1-3 the node is nearly a leaf where ordering barely matters.
+IIR_MIN_DEPTH = 4
+
 # Late-move reductions: with good ordering the best move is nearly always among the first few, so
 # the quiet moves that sort late (after the table move, the captures and the killers) are searched
 # one ply shallower. A reduced search that still beats alpha is repeated at full depth, so a
@@ -814,6 +824,18 @@ class Engine:
                 tt_code = _move_code(tt_move) if tt_move is not None else _NO_MOVE_CODE
                 self._store(key, depth, beta, LOWER, tt_code, ply, tainted)
                 return beta
+
+        # (9b) Internal iterative reduction (see INTERNAL_ITERATIVE_REDUCTION).
+        # `not in_check` is a deliberate deviation from the published form: the check extension at
+        # the top of this function has already added a ply, and reducing it back here would cancel
+        # the extension silently rather than reduce a badly ordered node.
+        if (
+            INTERNAL_ITERATIVE_REDUCTION
+            and tt_move is None
+            and depth >= IIR_MIN_DEPTH
+            and not in_check
+        ):
+            depth -= 1
 
         # (10) Futility: decided once for the node, applied to its quiet moves in the loop.
         futility_bound = -_INFINITY
