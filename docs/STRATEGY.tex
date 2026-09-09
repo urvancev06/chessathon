@@ -241,10 +241,26 @@ I invented a fatal flaw that is not one.
 \textbf{2. ``We have an incremental accumulator.''} We do not. The code rebuilds it from scratch
 on every call, deliberately, and says so in its own comment. I stated the opposite repeatedly.
 
-\textbf{3. Mobility as the leading candidate.} \bad{Ruled out.} Worth $+41 \pm 14$ elsewhere, but
-at our measured 1.7$\times$ time-to-depth it costs \textbf{60--65 Elo of lost search --- a net
-loss.} Other engines pay almost nothing because they count attacks their move generator already
-produces; ours needs 4--6 hours of optimisation before the term is even affordable.
+\textbf{3. Mobility as the leading candidate --- and then a correction to the correction.}
+I wrote that mobility was \emph{ruled out} as a net loss. \textbf{That overstated what we
+measured, and the arithmetic was ours.} The 1.7$\times$ figure is nodes-to-depth, which is a fair
+currency only when the evaluation is unchanged: the mobility build's depth 6 is not the
+baseline's depth 6, so the metric prices the cost and credits none of the knowledge. It is a
+\emph{price the term must beat}, not a verdict.
+
+Running it honestly: published gains are $+27.6$, $+41 \pm 14$ and $+62$ in engines that lacked
+the term, and those are net of a near-zero cost because they are bitboard engines counting an
+attack set they already hold. Ours is a mailbox and has no attack sets. So our net is roughly
+$(27.6 \text{ to } 62) - (60 \text{ to } 65) = $ \textbf{$-37$ to $+2$} --- break-even with wide
+uncertainty. \textbf{We do not know the sign.} That is not ``ruled out'' and it is not
+``comfortably worth it''.
+
+Two ten-minute diagnostics decide it, and neither needs games: scale the term down and see
+whether the tree cost falls with it, and turn reverse futility off and see whether the tree cost
+disappears. \textbf{If the second one fires it is bigger than mobility} --- our reverse-futility
+margin is 85 centipawns while our evaluation's median error at those same positions is 342, so
+every future evaluation change would be carrying an artificial tax from a threshold that was
+never coherent with our own noise.
 
 \section{The plan that replaces it}
 
