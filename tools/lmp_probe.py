@@ -60,11 +60,16 @@ Two limitations that remain, and neither is one a game screen escapes either:
 Nodes where the best move is the table move, a capture or a killer are reported separately rather
 than folded into the headline, because LMP cannot touch them.
 
-    BASE=$(git merge-base main HEAD)
+Late move pruning must be switched **off** in whichever build is being probed. ``measure`` refuses
+to run otherwise, and the comment there says why. Both arms are edited the same way, and the
+``engine_source`` hashes record that the edit happened, so the two runs stay comparable.
+
+    # 1. in mikhail_letal/search.py set LATE_MOVE_PRUNING = False, then
     .venv/bin/python tools/lmp_probe.py --label ordering --json lmp.jsonl
-    git checkout "$BASE" -- mikhail_letal/
+    # 2. restore the baseline engine source (the branch's merge base, never "main", which moves),
+    #    set LATE_MOVE_PRUNING = False in it as well, then
     .venv/bin/python tools/lmp_probe.py --label baseline --json lmp.jsonl
-    git checkout HEAD -- mikhail_letal/
+    # 3. restore this branch's engine source, then
     .venv/bin/python tools/lmp_probe.py --report lmp.jsonl
 """
 
@@ -93,7 +98,11 @@ from mikhail_letal.fastboard import (
     set_from_board,
 )
 from mikhail_letal.fastsearch import FastEngine, _pick_best, _score_moves, _tt_probe, _victim
-from mikhail_letal.search import LATE_MOVE_PRUNING_COUNTS, LATE_MOVE_PRUNING_MAX_DEPTH
+from mikhail_letal.search import (
+    LATE_MOVE_PRUNING,
+    LATE_MOVE_PRUNING_COUNTS,
+    LATE_MOVE_PRUNING_MAX_DEPTH,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 OPENINGS = ROOT / "data" / "openings.txt"
@@ -222,6 +231,20 @@ def probe_one(
 
 
 def measure(label: str, count: int, branch: int) -> dict[str, object]:
+    # Late move pruning must be OFF in the build being probed, and this refuses rather than warns
+    # because the contamination runs the wrong way. Step 4 asks the engine for the best move. With
+    # LMP on, that search can itself have skipped the true best move -- so the probe would find
+    # whatever inferior move survived, note that it sorted early, and record "LMP would not have
+    # skipped it". It would systematically *understate* the thing it exists to measure, and the
+    # understatement points at "the ordering is fine, drop the pruning" -- the direction that
+    # closes the question. The threshold below is still the real LATE_MOVE_PRUNING_COUNTS; only
+    # the search that establishes the best move has to be free of the cut being judged.
+    if LATE_MOVE_PRUNING:
+        raise SystemExit(
+            "set search.LATE_MOVE_PRUNING = False in the build being probed and re-run.\n"
+            "With it on, the search that decides the best move has already been able to prune\n"
+            "that move away, and the probe measures a survivor rather than the answer."
+        )
     engine = FastEngine()
     nodes = [
         (parent, uci, child)
