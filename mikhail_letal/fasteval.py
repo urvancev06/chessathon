@@ -40,6 +40,7 @@ from numba import njit
 
 from mikhail_letal import warmup
 from mikhail_letal.evaluation import (
+    MOBILITY_TERM,
     DRAW_SCORE,
     KING_ATTACK_UNITS,
     KING_DANGER_CAP,
@@ -90,7 +91,9 @@ W_BISHOP_PAIR: Final = 4
 W_ROOK_OPEN: Final = 5
 W_ROOK_SEMI: Final = 6
 W_KING_SHIELD: Final = 7
-W_COUNT: Final = 8
+W_MOBILITY_MG: Final = 8
+W_MOBILITY_EG: Final = 9
+W_COUNT: Final = 10
 
 _WEIGHT_KEYS: Final = (
     "passed_pawn_mg",
@@ -101,6 +104,8 @@ _WEIGHT_KEYS: Final = (
     "rook_open_file",
     "rook_semi_open_file",
     "king_shield",
+    "mobility_mg",
+    "mobility_eg",
 )
 
 # Index of each scalar in the `misc` array.
@@ -109,7 +114,8 @@ E_MOPUP_CLOSE: Final = 1
 E_MOPUP_MIN_MATERIAL: Final = 2
 E_STRUCTURE_ON: Final = 3  # mirrors evaluation.STRUCTURE_TERMS, so both switch together
 E_KING_DANGER_ON: Final = 4  # mirrors evaluation.KING_DANGER_TERM, so both switch together
-E_COUNT: Final = 5
+E_MOBILITY_ON: Final = 5  # mirrors evaluation.MOBILITY_TERM, so both switch together
+E_COUNT: Final = 6
 
 # Layout of the per-file pawn summary in `scratch`, as [group + colour * 8 + file].
 S_COUNT: Final = 0  # pawns of that colour on that file
@@ -170,6 +176,7 @@ def load_eval_tables(path: Path | None = None) -> EvalTables:
     misc[E_MOPUP_MIN_MATERIAL] = tables.piece_values_mg[chess.ROOK]
     misc[E_STRUCTURE_ON] = 1 if STRUCTURE_TERMS else 0
     misc[E_KING_DANGER_ON] = 1 if KING_DANGER_TERM else 0
+    misc[E_MOBILITY_ON] = 1 if MOBILITY_TERM else 0
 
     centre = np.zeros(128, dtype=np.int32)
     for square in range(128):
@@ -300,6 +307,13 @@ def evaluate(pos: Position, ev: EvalTables) -> int:
     # Middlegame only, so it joins mg alone and the phase blend below tapers it out.
     if ev.misc[E_KING_DANGER_ON] != 0:
         mg += _king_danger(pos)
+
+    # Mobility is worth more in the endgame than the middlegame, so it enters both phases with
+    # its own weight and the blend below tapers between them.
+    if ev.misc[E_MOBILITY_ON] != 0:
+        mobile = _mobility(pos)
+        mg += ev.weights[W_MOBILITY_MG] * mobile
+        eg += ev.weights[W_MOBILITY_EG] * mobile
 
     # Blend the two phases, truncating toward zero rather than flooring, so that a position and
     # its colour-swapped mirror get exactly opposite scores.
@@ -557,6 +571,59 @@ def _king_danger(pos: Position) -> int:
 
 
 @njit(cache=False)
+def _mobility(pos: Position) -> int:
+    """White's mobile squares minus Black's, over the knights, bishops, rooks and queens.
+
+    A piece's mobility is the number of squares it attacks that its own side does not already
+    occupy -- `popcount(attacks & ~own)` in bitboard terms, which is what makes the two engines
+    comparable square for square. Sliders are blocked: a ray stops at the first occupied square,
+    and that square counts only when the piece standing there can be captured, so a rook behind
+    its own rook contributes nothing along that file.
+
+    Pawns and kings are left out. A pawn's activity is already what the pawn-structure terms
+    measure, and a king's mobility says more about how exposed it is than about how useful it is,
+    which is the king-danger term's job.
+
+    Squares defended by enemy pawns are *not* excluded. That would be "safe mobility", a
+    different term needing its own weights; this is the plain count.
+    """
+    board = pos.board
+    total = 0
+    for colour in range(2):
+        count = 0
+        base = colour * PIECES_PER_SIDE
+        for slot in range(pos.meta[M_COUNT + colour]):
+            square = pos.plist[base + slot]
+            kind = board[square] & PIECE_TYPE_MASK
+            if kind == KNIGHT:
+                for i in range(8):
+                    to = square + _KNIGHT_DIRS[i]
+                    if (to & OFF_BOARD_MASK) != 0:
+                        continue
+                    target = board[to]
+                    if target == EMPTY or (target >> COLOUR_SHIFT) != colour:
+                        count += 1
+            elif kind in (BISHOP, ROOK, QUEEN):
+                for i in range(_SLIDER_N[kind]):
+                    direction = _SLIDER_DIRS[kind, i]
+                    to = square + direction
+                    while (to & OFF_BOARD_MASK) == 0:
+                        target = board[to]
+                        if target == EMPTY:
+                            count += 1
+                        else:
+                            if (target >> COLOUR_SHIFT) != colour:
+                                count += 1
+                            break
+                        to += direction
+        if colour == WHITE:
+            total += count
+        else:
+            total -= count
+    return total
+
+
+@njit(cache=False)
 def _mopup(pos: Position, ev: EvalTables) -> int:
     """Bonus (from White's view) for the side hunting a bare king in a pawnless ending, else 0.
 
@@ -620,7 +687,14 @@ def evaluate_board(board: chess.Board) -> int:
 WARM_UP_SECONDS: float = 0.0
 """How long `warm_up()` spent compiling, filled in by the call below."""
 
-JITTED: Final = ("evaluate", "_has_insufficient_material", "_structure", "_king_danger", "_mopup")
+JITTED: Final = (
+    "evaluate",
+    "_has_insufficient_material",
+    "_structure",
+    "_king_danger",
+    "_mobility",
+    "_mopup",
+)
 """Every jitted function here; see `fastboard.JITTED`."""
 
 _WARM_UP_FENS: Final = (
