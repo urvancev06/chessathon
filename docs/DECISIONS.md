@@ -1841,3 +1841,54 @@ had been introduced without being declared, which is not something the author no
 
 **Not claimed:** any Elo for this engine. The published numbers come from a different engine, and
 three static-margin pruners overlap heavily, so they do not add. The screen decides.
+
+## 2026-09-09 — One-ply continuation history, and deliberately not two
+
+The plain history heuristic credits a quiet move by its from- and to-square alone, so everything
+it knows about `Ng1-f3` is summed over every position in which that move was ever a cutoff. That
+is a lot of evidence about a move and none at all about *when* the move is good, and the answer is
+usually "as a reply to something specific". `CONTINUATION_HISTORY` adds one previous move of
+context: a second table indexed by (side to move, the piece the previous move moved, where it
+moved to, the piece this move moves, where it moves to), carrying the same `depth * depth` credit
+on the same cutoffs, read beside the plain table when quiet moves are ordered.
+
+Why this and not another ordering idea: it is the one candidate with a published SPRT-quality
+number large enough for a 300-game screen to resolve, and — the reason it was chosen over the
+others — it contains no evaluation term at all. It is a pure ordering signal, so the weak static
+evaluation that discounts most published gains for us does not apply to it.
+
+**Rejected: a plain counter-move table.** A single stored refutation per previous move is the
+rank-1 special case of the same information, has no comparable public measurement, and would have
+to be torn out again the moment this was added.
+
+**Rejected: two plies of context (follow-up history) as well.** A separate technique with a
+separate number; both at once would leave a screen unable to say which one paid.
+
+**Rejected: history gravity** (`entry += bonus - entry * |bonus| / MAX`), which is what the
+reference engines pair this with. It is a different *update rule* for both tables, not a new
+context channel, and bundling it would mean a screen measuring two changes. The new table
+therefore reuses the plain one's saturating addition and its halving between moves exactly.
+
+**Rejected: giving each table half the ordering band.** The sum of two tables that each saturate
+at `_HISTORY_MAX` reaches nearly twice `_ORDER_KILLER_SECOND`, so a quiet move could outrank first
+a killer and then a capture — silently, because nothing else in the search checks the bands.
+Halving `_HISTORY_MAX` would have fixed it by changing when the *plain* table saturates, which is
+a second behavioural change riding along. The sum is clamped instead: the plain table's dynamics
+are untouched and the bands cannot be crossed by construction.
+
+The table introduces no tuned number of its own. The bonus, the cap and the ageing are the plain
+table's; the shape is the board's (piece types × squares, twice, plus side to move). The compiled
+engine sizes the square dimension 128 rather than 64 because it indexes 0x88 squares, exactly as
+the two `history` tables already differ; that is a relabelling of the same five coordinates and
+neither engine ever reads the other's table.
+
+Two things this had to get right that a test would not otherwise reach. The node directly under a
+**null move** has no previous move — passing refutes nothing — and without an explicit reset it
+would inherit the row a sibling left in that slot and credit its cutoffs to a move never played on
+that line. And the **root** has no previous move either: the position arrives as a FEN and the
+opponent's last move is not part of it.
+`tests/test_search.py::test_every_node_knows_the_move_that_led_to_it_and_a_null_move_leads_to_none`
+checks both at every node of a real search, and counts the nodes it saw in each case so it cannot
+pass vacuously on a position that never reaches one of them.
+
+No Elo claim here: the screen decides.

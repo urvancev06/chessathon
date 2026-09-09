@@ -191,7 +191,7 @@ class SearchResult:
 
 class Engine:
     def __init__(self, tt_max_entries: int = 250_000) -> None: ...
-    def new_game(self) -> None: ...          # clear TT, evaluation cache, killers, history heuristic
+    def new_game(self) -> None: ...          # clear TT, evaluation cache, killers, both history tables
     def search(
         self,
         board: chess.Board,
@@ -205,6 +205,10 @@ class Engine:
 
 # v0.2 feature switches, each feature_flag("LETAL_...", True); the arena's --env turns one off.
 NULL_MOVE_PRUNING, LATE_MOVE_REDUCTIONS, ASPIRATION_WINDOWS, FUTILITY_PRUNING, DELTA_PRUNING: bool
+CONTINUATION_HISTORY: bool            # v1.2: one previous move of context for quiet ordering
+
+def _cont_base(mover: chess.Color, piece_type: int, to_square: int) -> int   # a table row
+def _quiet_order(history, cont, base, piece_type, from_square, to_square) -> int
 ```
 
 Behaviour (v0.2; the v0.1 searcher is this without the staged generation, the caches and the five
@@ -278,7 +282,8 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   (3) the two killers of this ply if `board.is_legal` says they are legal quiet moves here;
   (4) quiet moves from two masked calls (non-pawns to non-enemy squares, castling included;
   non-promoting pawns to empty non-en-passant squares) sorted by the history heuristic
-  `history[colour][from << 6 | to]` (bonus `depth * depth` on beta cutoffs). Each stage is
+  `history[colour][from << 6 | to]` plus the continuation history below (bonus `depth * depth`
+  on beta cutoffs, for both). Each stage is
   generated only if the search asks for more moves, and every move is tagged with its stage so
   the cutoff code knows quiet moves without `is_capture`. The root still sorts its full list.
 - Capture generation (`_capture_moves`, v0.3, exact): with no check on the board it walks the
@@ -335,6 +340,18 @@ switched features, all of which were added under measurement, see DECISIONS.md):
   are permanent within the game and are stored normally. Implemented as one instance flag saved
   and restored around the child loop (measured cost 0.15 % of the node rate).
 - Killers: two per ply, updated on quiet beta cutoffs. Never store captures as killers.
+- One-ply continuation history (`CONTINUATION_HISTORY`, v1.2): a second history table indexed by
+  the previous move as well as the current one — `(side to move, previous piece type, previous
+  to-square, this piece type, this to-square)` — carrying the same `depth * depth` bonus on the
+  same quiet beta cutoffs as the plain table, and read beside it when quiet moves are ordered. A
+  quiet move's ordering score is `min(history + continuation, _HISTORY_MAX)`; the clamp is what
+  keeps the sum of two saturating tables below the killer band. `_cont_base[ply]` holds the row
+  for the move that led to that ply, written by whoever made the move; it is `_CONT_NONE` at the
+  root (a FEN carries no previous move) and for the node directly under a null move (passing
+  refutes nothing). The table is per game: `new_game` clears it and `_age_history` halves it
+  between moves, exactly like the plain table. No new tuned constant — the bonus, the cap and the
+  halving are the plain table's, and the shape is the board's. `fastsearch` holds the same table
+  over its own 0x88 squares, which is a relabelling, not a second design.
 - Every pruning or reduction decision is off when a mate bound is in the window or the side is in
   check; the mate tests (mate in one, mate in two at the same depths) run with every feature on.
 - The searcher never calls `evaluate` on a position with no legal moves; mates and stalemates are
@@ -692,6 +709,7 @@ def negamax(pos, st, ev, depth, alpha, beta, ply, null_allowed) -> int
 def quiescence(pos, st, ev, alpha, beta, ply, in_chk, qs_ply) -> int
 def gen_captures(pos, out) -> int          # captures, en passant and queen promotions
 def _score_moves(pos, st, ply, count, tt_move) -> None;  def _pick_best(st, ply, index, count)
+def _cont_base(pos, move) -> int           # the continuation row for replies to `move`
 def _break_draw_tie(pos, st, ev, count, best) -> int
 # ... plus the table, clock, null-move and terminal-score helpers; all listed in JITTED
 
@@ -710,7 +728,7 @@ What is the same as `search.py`: iterative deepening; aspiration windows from de
 widen ×4, at most 2 fails); fail-soft negamax alpha-beta; a transposition table probed and stored
 with mate scores adjusted by distance from the root; quiescence with stand-pat before any move is
 generated and evasions searched for the first four quiescence plies; move ordering by table move,
-MVV-LVA capture, two killers per ply and the history heuristic; principal variation search at
+MVV-LVA capture, two killers per ply and the two history tables; principal variation search at
 interior nodes; null-move pruning (min depth 3,
 R = 2 + depth//6, never in check, never without a piece, only when the static evaluation already
 holds beta); late-move reductions (quiet non-killer non-table moves after the first three, at
