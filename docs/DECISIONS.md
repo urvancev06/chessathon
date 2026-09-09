@@ -1841,3 +1841,75 @@ had been introduced without being declared, which is not something the author no
 
 **Not claimed:** any Elo for this engine. The published numbers come from a different engine, and
 three static-margin pruners overlap heavily, so they do not add. The screen decides.
+
+## 2026-09-09 — The network lost 67 Elo, and four metrics said it would win
+
+`ct-nnue-screen` vs `versions/v1.2`, 120 s + 0.5 s, 300 games: **+111 =21 −168, 40.5 % ± 5.4 %,
+Elo −67 with a 95 % interval of −106 to −29.** The network does not ship. Detail in
+`docs/NNUE-NOTES.md`, which carries the reading of each possible outcome written *before* the screen.
+
+**It was not the node cost, and that is the one thing the pre-registration said a negative could not
+settle.** 14.6 % of the node rate is 0.105 of a ply at 4.5 nodes per depth, worth 5–9 Elo at any
+plausible Elo-per-ply. The loss is 67. So 58–62 Elo of it is the evaluation choosing worse moves,
+and the incremental accumulator — which would buy back the 15 % — was not proposed, because it
+rescues the wrong variable.
+
+### The finding is about the instruments, not the network
+
+Four measurements ranked the network above the hand-crafted evaluation:
+
+1. held-out MSE against Stockfish depth-12 labels (2.6× better);
+2. the round-85 sign test against Stockfish depth 18 (20/26 against 5/26);
+3. held-out MSE restricted to quiet positions (16 503 against 43 039);
+4. **outcome correlation against real game results** — 12 000 held-out positions from 9 200 ladder
+   games, no engine anywhere in the target, built specifically to escape the circularity of the
+   first three. Brier 0.1056 against 0.1133, sign accuracy 79.0 % against 76.3 %.
+
+All four were wrong. **We have no cheap proxy for playing strength**, and the fourth is the one that
+matters, because it was designed to be the answer to the first three and failed anyway. Any second
+attempt costs a 2.4-hour screen to evaluate, which means it cannot be iterated on.
+
+Rejected on those grounds: giving Thursday's slot to mobility on the strength of its 2.9 points of
+early-game sign accuracy. A metric that ranked the network first cannot license a slot for the change
+it ranks second. If mobility is screened it should be because someone wants the term measured.
+
+### The mechanism, as far as it is established
+
+**Both evaluations are three to four times worse at search leaves than at game positions** — median
+error 304 (network) and 342 (hand-crafted) centipawns, against 76 and 104. Every metric above was
+measured on game positions, which are the positions a static evaluator is least often asked about.
+The network's advantage collapses from 27 % to 6.6 % out there, which narrows the −67 without
+closing it.
+
+Two hypotheses tested and killed. Its error does **not** explode off-distribution — it is still the
+better evaluation on leaves, and its sign advantage there grows. And its outputs are **not**
+compressed by the MSE-on-clipped-targets objective: its spread is 5–19 % *wider* than the
+hand-crafted evaluation's, so the absolute pruning margins fire slightly less often in its units,
+not more. Recorded because both were plausible and both are now closed rather than open.
+
+What the same table did show: at search leaves **both** evaluations are compressed about two-fold
+against the truth (Stockfish spread 611, median absolute score 599 cp; ours 279/333 and 116/167).
+The search's margins were tuned inside that mismatch. That is a property of the shipped engine.
+
+### The general lesson
+
+**We trained a thing to predict a search's verdict and then used it as the leaf of a search.** Those
+are different jobs: one is asked what a position is worth, the other is asked which move is better,
+and being excellent at the first buys less of the second than every metric we had could see. If
+there is a net v2 it must be trained on positions sampled from search trees rather than from games —
+not because the network fails off-distribution, but because that is where the evaluation is actually
+used and where both evaluations are four times worse than anyone had measured.
+
+### What survives regardless
+
+The quiet-position filter and the 29.5 % figure; the hash-based held-out split (`sha1(fen)`, so a
+split is a property of the position and not of the dataset); the kernel measurements in
+`tools/bench_accumulator.py`; `tools/outcome_check.py` and `tools/collect_leaves.py`; the parity
+gate and the mirror test. None of it depended on the network being good.
+
+**Three defects of one shape, in one day.** A held-out split defined by the training list; a waiter
+whose condition matched its own command line; a position filter that called `evaluate()` while
+`evaluate()` was the thing under test. Each was a check that could not fail, or a condition that
+could not fire, because it was defined in terms of the thing it was meant to be independent of. The
+question that catches all three: *what is this predicate defined in terms of, and is that the thing
+I am testing?*

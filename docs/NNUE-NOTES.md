@@ -91,3 +91,111 @@ screen is for.
 side — the opponent's. We can see what v1.2 thought of each position and not what we thought, which
 is backwards for diagnosing our own evaluation. Every game is therefore half-diagnostic. Not touched
 mid-run; it belongs on the list for after the screens.
+
+## The result: −67 Elo. Read against what was written above, before it.
+
+    ct-nnue (quiet-filtered, width 128) vs versions/v1.2, 120 s + 0.5 s, 300 games, 12 workers
+    +111 =21 −168, score 40.5% ± 5.4%
+    Elo −67, 95% interval −106 to −29
+    checkmate 279, threefold 9, fifty-move 9, insufficient material 3; draw rate 7.0%
+    lowest agent clock 2 849 ms after its move; no flags, no crashes, no illegal moves
+
+The interval lies entirely below zero. This is the **negative** branch, not the flat one.
+
+**And for once a negative can be decomposed, which the pre-registration said it could not.** The
+section above says a negative "does not distinguish a worse evaluation from the speed cost
+dominating, and we should not pretend otherwise". That was written before the effect size was known,
+and it turns out the arithmetic separates them here: 14.6 % of the node rate is 0.105 of a ply at
+4.5 nodes per depth, worth 5–9 Elo at any plausible Elo-per-ply at our depth. The loss is 67. So
+roughly 58–62 Elo of it is the evaluation itself choosing worse moves. The incremental accumulator
+would have bought back the 15 % and left the great majority of the deficit untouched; proposing it
+now would be rescuing the wrong variable.
+
+**Held-out MSE pointed the wrong way for the third time on this project.** The network was 2.6×
+better on held-out positions — RMSE 128 cp against 207 — and played 67 Elo worse. After the Texel
+fit's −100 Elo and the withdrawn variance figure of this morning, the count of times this metric has
+been checked against real games on this engine is three, and the count of times it was right is
+zero. The paragraph above predicted exactly this and it is the only reason the number is reportable
+rather than embarrassing.
+
+**What the result does *not* say.** It does not say the hand-crafted evaluation is good.
+`handoff/FINDING-round85-evaluation-blindness.md` and the round-87 trace stand: the shipped
+evaluation is wrong by hundreds of centipawns, in *both* directions within one game, which is noise
+rather than a tunable bias. This screen says our network is worse than that, which is a different
+and more uncomfortable claim.
+
+### Why, in the order I would test it
+
+1. **The training target is not the engine's problem.** The net predicts what a depth-12 search
+   scored a position. The engine needs an evaluation that *orders moves correctly at the leaves of
+   its own search*. Nothing in this pipeline optimised the second, and a static evaluator that
+   predicts a searcher's output is being asked to imitate the answer rather than to be a good prior
+   for finding it.
+2. **Data volume.** 186 000 positions for 98 700 parameters, drawn from 3 356 games at about 51
+   quiet positions each, so the independent sample is far smaller than the row count. The
+   train-to-held-out gap was still 2.8× after filtering.
+3. **Capacity.** A single hidden layer with a linear output is what the node budget allows
+   (`tools/bench_accumulator.py`: a conventional deep head costs a quarter to a third of the node
+   rate). It may simply not be enough to beat even a poor hand-crafted evaluation once tactics are
+   searched rather than predicted.
+
+### What is worth keeping regardless
+
+The kernel measurements (accumulator 72 ns, deep head 915 ns, linear head 26 ns at width 128, and
+the measured 1.33 make_move and 0.60 evaluate calls per node); the quiet-position filter and the
+29.5 % figure; the hash-based held-out split; the parity gate and the mirror test. None of that
+depended on the net being good, and all of it would be needed again by any future attempt.
+
+## Two diagnostics after the result
+
+### The distribution hypothesis: partly right, not enough
+
+Do the network's errors explode on the positions a search actually asks about? 1 500 real search
+leaves, captured by wrapping `searchboard.evaluate_running` so they are exactly what the search
+evaluated, against 1 500 held-out game positions, both labelled Stockfish depth 12:
+
+| | mean \|err\| | median | sign acc |
+| --- | --- | --- | --- |
+| leaves, hand-crafted | 408 | 342 | 67.9% |
+| leaves, network | 381 | 304 | 74.1% |
+| game, hand-crafted | 157 | 104 | 75.2% |
+| game, network | 114 | 76 | 78.4% |
+
+**The finding here is not about the network. Both evaluations are three to four times worse at
+search leaves than at game positions** — median error 304 and 342 cp where the search makes its
+decisions, against 76 and 104 where every metric anyone has run was measured. That reframes more
+than this branch.
+
+The network's *advantage* does collapse out there: 27 % better in mean error on game positions,
+6.6 % better on leaves. So its edge is largely an edge on positions the search does not spend time
+in. Against the story: its sign-accuracy advantage *grows* on leaves (+6.2 points against +3.2), so
+it is not uniformly worse off-distribution. Recorded because it does not fit.
+
+This narrows the −67 and does not close it: a 6.6 % better evaluation costing 14.6 % of node rate
+should be roughly neutral. Caveats — the leaves come from a search running the *hand-crafted*
+evaluation, so it is that evaluation's tree and not the network's; 8 openings at one depth is one
+correlated sample; and depth-12 labels on wild positions are noisier than on game positions.
+
+### The output-scale hypothesis: killed
+
+Every search margin is an absolute centipawn threshold tuned against the hand-crafted evaluation
+(`ASPIRATION_WINDOW` 40, reverse-futility 85, `FUTILITY_MARGINS` up to 750). If MSE on a clipped
+target had compressed the network's outputs, those margins would be a larger share of its dynamic
+range and the search would over-prune — better by every ranking measure, worse in play, which is
+exactly the pattern. Standard deviation of the scores:
+
+| | game positions | search leaves |
+| --- | --- | --- |
+| hand-crafted | 390 | 279 |
+| network | 411 | 333 |
+| Stockfish depth 12 | 431 | 611 |
+
+**The network is not compressed; it is 5 % wider than the hand-crafted evaluation on game positions
+and 19 % wider on leaves.** If anything the fixed margins fire slightly *less* often in its units.
+The hypothesis is dead and the −67 is still unexplained by output scale.
+
+What the same table shows instead: **on search leaves both evaluations are compressed about
+two-fold against the truth** — Stockfish's spread is 611 and its median absolute score 599 cp, where
+ours say 116 and 167. Leaf positions are far more decisive than either evaluation reports, and the
+pruning margins were tuned inside that mismatch. That is a property of the shipped engine, not of
+the network, and it is the more useful half of the result.
