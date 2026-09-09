@@ -1768,8 +1768,13 @@ class FastEngine:
         ints[I_PATH_DRAW] = 0
         for i in range(count):
             move = int(st.moves[0, i])
-            # The array element, not `move`: the compiled tree calls `_cont_base` with an int32
-            # and a Python int here would compile a second specialisation on the game clock.
+            # The array element rather than `move` is belt-and-braces, not a requirement. The
+            # compiled tree calls `_cont_base` with an int32 and this is Python, so the worry was
+            # a second specialisation compiled on the game clock -- but numba widens an int32
+            # argument into an int64 parameter without building one, and
+            # `test_nothing_compiles_during_a_game` confirms it. Kept because an exact-type call
+            # costs nothing; recorded because the rule is "one specialisation per type numba
+            # cannot safely convert from", not "per distinct argument type".
             st.cont_base[1] = int(_cont_base(pos, st.moves[0, i]))
             make_move(pos, move)  # produced by gen_legal, so it cannot be illegal
             score = -int(negamax(pos, st, ev, depth - 1, -beta, -alpha, 1, 1))
