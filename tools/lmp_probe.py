@@ -90,6 +90,7 @@ from mikhail_letal.fastboard import (
     move_from_chess,
     position_key,
     running_key,
+    set_from_board,
 )
 from mikhail_letal.fastsearch import FastEngine, _pick_best, _score_moves, _tt_probe, _victim
 from mikhail_letal.search import LATE_MOVE_PRUNING_COUNTS, LATE_MOVE_PRUNING_MAX_DEPTH
@@ -171,6 +172,12 @@ def probe_one(
     # (3) The table move and the continuation row as the node would really hold them, then the
     # ordering that follows.
     st, pos = engine.state, engine.position
+    # `set_from_board` unconditionally, not only when the warm search was skipped. At depth 1
+    # there is no warm search, so nothing else would ever load this position into `pos` -- the
+    # ordering below would be built from whatever the previous sample left behind, `best` would
+    # not be found in it, and every depth-1 sample would be dropped as unusable. Silently: the
+    # per-depth table would simply show a zero row.
+    set_from_board(pos, board)
     if base is not None:
         st.cont_base[0] = base
     slot = int(_tt_probe(st, running_key(pos)))
