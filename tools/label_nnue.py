@@ -34,15 +34,18 @@ import random
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import chess
 import chess.engine
 import chess.pgn
 
 ROOT = Path(__file__).resolve().parent.parent
+# Worker processes re-import this module, so the repository root has to be importable from it or
+# `mikhail_letal` is missing in every child. Only the filter needs it; the labeller does not.
+sys.path.insert(0, str(ROOT))
 POSITIONS_PATH = ROOT / "data" / "tuning" / "nnue_positions.epd"
 LABELS_PATH = ROOT / "data" / "tuning" / "nnue_labels.csv"
 STOCKFISH_PATH = Path.home() / ".local" / "opt" / "stockfish" / "stockfish"
@@ -125,6 +128,61 @@ def label(fens: list[str], workers: int, depth: int, threads: int) -> tuple[list
     return labels, name
 
 
+if TYPE_CHECKING:
+    from mikhail_letal.search import Engine
+
+_ENGINE: Engine | None = None
+
+
+def _init_worker() -> None:
+    """One interpreted engine per process, and the hand-crafted evaluation forced on.
+
+    Quietness has to be judged against a *fixed* reference. Judging it with the network would be
+    circular -- the network is the thing being trained, and a position it happens to misjudge
+    would then be quietly excluded from its own training set.
+    """
+    global _ENGINE
+    from mikhail_letal import evaluation
+    from mikhail_letal.search import Engine
+
+    evaluation.USE_NETWORK = False
+    _ENGINE = Engine()
+
+
+def _is_quiet(fen: str) -> bool:
+    from tools.tune_texel import is_quiet
+
+    assert _ENGINE is not None
+    return bool(is_quiet(_ENGINE, chess.Board(fen)))
+
+
+def filter_quiet(rows: list[tuple[str, str]], workers: int) -> list[tuple[str, str]]:
+    """Keep only positions whose static evaluation the search would trust as it stands.
+
+    Why this matters more than it looks. The labels are Stockfish at depth 12, so for a position
+    with a capture pending the label encodes a tactic twelve plies deep. A static evaluator cannot
+    represent that at any width, so those rows do not merely waste capacity -- they teach the
+    network to predict tactics from quiet-looking features, which is exactly the mistake it will
+    then make on positions where nothing is pending. Measured on a 1 500-position sample of the
+    ladder set, 29.5 % of positions fail this test.
+
+    `tune_texel.is_quiet` is the definition, reused rather than restated so the two datasets are
+    filtered by one rule.
+    """
+    started = time.perf_counter()
+    kept: list[tuple[str, str]] = []
+    with ProcessPoolExecutor(max_workers=workers, initializer=_init_worker) as pool:
+        verdicts = pool.map(_is_quiet, [fen for fen, _ in rows], chunksize=256)
+        for index, (row, quiet) in enumerate(zip(rows, verdicts, strict=True), start=1):
+            if quiet:
+                kept.append(row)
+            if index % 40_000 == 0:
+                rate = index / (time.perf_counter() - started)
+                print(f"  {index:>8,}/{len(rows):,}  {rate:>6.0f}/s  kept {len(kept):,}")
+    print(f"kept {len(kept):,} of {len(rows):,} ({len(kept) / len(rows):.1%})")
+    return kept
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -138,7 +196,25 @@ def main() -> int:
     lb.add_argument("--threads", type=int, default=1)
     lb.add_argument("--limit", type=int, default=0, help="label only the first N (a probe)")
     lb.add_argument("--out", type=Path, default=LABELS_PATH)
+    fq = sub.add_parser("filter", help="drop positions a capture sequence would change")
+    fq.add_argument("--labels", type=Path, default=LABELS_PATH)
+    fq.add_argument("--out", type=Path, required=True)
+    fq.add_argument("--workers", type=int, default=8)
     args = parser.parse_args()
+
+    if args.command == "filter":
+        with args.labels.open(encoding="utf-8", newline="") as handle:
+            header = handle.readline().rstrip("\n")
+            rows = [(row["fen"], row["cp"]) for row in csv.DictReader(handle)]
+        print(f"filtering {len(rows):,} positions on {args.workers} workers")
+        kept = filter_quiet(rows, args.workers)
+        with args.out.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(f"{header}, quiet positions only (tune_texel.is_quiet)\n")
+            writer = csv.writer(handle)
+            writer.writerow(["fen", "cp"])
+            writer.writerows(kept)
+        print(f"wrote {args.out}")
+        return 0
 
     if args.command == "extract":
         fens = extract(args.pgn_dir, args.limit, args.seed)

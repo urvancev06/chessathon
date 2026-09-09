@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -51,6 +52,24 @@ torch.set_num_threads(1)  # one core, as on the platform
 # multiplied by FEATURE_SCALE and an output weight by QB, and both land in an int16 array.
 FEATURE_LIMIT = 32767.0 / FEATURE_SCALE  # about 4.0
 OUTPUT_LIMIT = 32767.0 / QB  # about 512
+
+
+def is_holdout(fen: str, percent: int) -> bool:
+    """Whether a position belongs to the held-out set, decided by the position itself.
+
+    A shuffled index split is only valid for comparing two nets when both were trained on the
+    *same* list. Filter the dataset and the shuffle draws a different test set, so a net trained on
+    the larger dataset is scored partly on positions it was trained on -- which is exactly what
+    happened here: the unfiltered net scored 13,824 against the filtered net's 21,998 on a split
+    drawn from the filtered data, and the gap was leakage, not quality.
+
+    Hashing the position instead makes the split a property of the position rather than of the
+    dataset, so every net trained from any subset of this pool is scored on the same held-out
+    positions and none of them has ever seen one. sha1 rather than `hash()`, which is salted per
+    process and would silently change the split between runs.
+    """
+    digest = hashlib.sha1(fen.encode("utf-8"), usedforsecurity=False).digest()
+    return digest[0] * 100 // 256 < percent
 
 
 def read_all(paths: list[Path] | None) -> tuple[list[str], list[int], str]:
@@ -160,7 +179,13 @@ def main() -> int:
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--test", type=int, default=4000)
+    parser.add_argument(
+        "--holdout-percent",
+        type=int,
+        default=5,
+        help="percent of positions held out, chosen by hashing the position so the split is the "
+        "same for every dataset drawn from this pool",
+    )
     parser.add_argument("--seed", type=int, default=20260909)
     parser.add_argument("--out", type=Path, default=ROOT / "weights" / "net.npz")
     parser.add_argument(
@@ -186,9 +211,10 @@ def main() -> int:
     other = np.where(turns[:, None], black, white)
     y = np.where(turns, y, -y)
 
-    rng = np.random.default_rng(args.seed)
-    order = rng.permutation(len(fens))
-    test_idx, train_idx = order[: args.test], order[args.test :]
+    holdout = np.array([is_holdout(f, args.holdout_percent) for f in fens])
+    test_idx = np.flatnonzero(holdout)
+    train_idx = np.flatnonzero(~holdout)
+    print(f"train {len(train_idx):,}, held out {len(test_idx):,} (by position hash, not by index)")
     pad = FEATURES
 
     def tensors(idx: npt.NDArray[np.int64]) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
