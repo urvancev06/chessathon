@@ -98,6 +98,14 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# Countermove heuristic: the quiet move that refuted the opponent's last move, kept per previous
+# move and tried early. It overlaps the one-ply continuation history we already have -- both are
+# keyed by the previous move -- but they answer different questions: continuation history is a
+# score accumulated over many nodes, the countermove is the single move that most recently
+# refuted this exact reply, and it is available at full strength the first time a position is
+# reached rather than after the table has warmed. Reported around +10 Elo in several engines.
+COUNTERMOVE = True  # switch for bisection; the shipped value is True
+
 # Capture history: MVV-LVA ranks a capture by what it takes and what takes it, and nothing else,
 # so it cannot tell a queen-takes-pawn that wins the exchange from one that drops a queen -- only
 # SEE does that, and only where it is consulted. Capture history records which captures actually
@@ -352,7 +360,11 @@ _ORDER_TT = 3_000_000
 _ORDER_CAPTURE = 2_000_000
 _ORDER_KILLER_FIRST = 1_000_001
 _ORDER_KILLER_SECOND = 1_000_000
-_HISTORY_MAX = _ORDER_KILLER_SECOND - 1
+# Just below both killers and above every history score. A killer refuted *this ply* in the
+# current search; the countermove refuted *this reply* somewhere in the tree, which is a weaker
+# claim about the position in hand, so it sits under them and over the history band.
+_ORDER_COUNTERMOVE = 999_999
+_HISTORY_MAX = _ORDER_COUNTERMOVE - 1
 # Captures that static exchange evaluation says lose material sit below every quiet move, scored
 # by how much they lose so the least bad is tried first. Without this a capture that hangs a queen
 # is searched before a killer, because `_ORDER_CAPTURE` bands every capture above every quiet.

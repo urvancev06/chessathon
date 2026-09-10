@@ -352,12 +352,60 @@
     "note": "static evaluations keyed by Zobrist; the cap holds a 20 s search under 100 MB"
   },
   {
+    "parameter": "search.quiescence_tt",
+    "value_or_shape": "probe and store at depth 0, on=True",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "+40.16 +- 11.74 (tcheran); +25 over 4000 games (Arasan)",
+    "run_id": "2026-09-10",
+    "note": "quiescence is where most of the tree is and it previously probed and stored nothing, so a position reached by a different capture order was re-searched from scratch. Depth 0 is unoccupied: negamax returns into quiescence before its move loop and before any store, and it sits above the repetition-hint depth"
+  },
+  {
+    "parameter": "search.capture_history",
+    "value_or_shape": "+-depth * depth with gravity, ordering weight +-4",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "+13.97 +- 6.76 (tcheran)",
+    "run_id": "2026-09-10",
+    "note": "MVV-LVA ranks a capture by what it takes and what takes it and cannot tell a winning queen-takes-pawn from a losing one. The weight is a quarter of an MVV-LVA step, so it orders within a material step and never across one"
+  },
+  {
+    "parameter": "search.countermove",
+    "value_or_shape": "one quiet move per (previous piece, previous destination), on=True",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "~+10 Elo, several engines",
+    "run_id": "2026-09-10",
+    "note": "the move that most recently refuted this reply. Ordered below both killers, which refuted this ply in this search, and above the history band"
+  },
+  {
+    "parameter": "search.razoring",
+    "value_or_shape": "depth <= 3, margin 240 per ply",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "+7.73 +- 4.76 (tcheran); +22 (Stardance)",
+    "run_id": "2026-09-10",
+    "note": "a node far below alpha drops straight into quiescence; if even that cannot reach alpha the subtree is skipped. The quiescence call decides, so the margin only decides when to ask"
+  },
+  {
+    "parameter": "search.main_see_pruning",
+    "value_or_shape": "depth <= 6, margin 30 per ply",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "+25.45 +- 9.40 (tcheran)",
+    "run_id": "2026-09-10",
+    "note": "quiescence has skipped losing captures since the ordering bundle; the main search still searched them to the end of their own recapture chains"
+  },
+  {
+    "parameter": "search.internal_iterative_reduction",
+    "value_or_shape": "depth >= 4 and no table move, on=True",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "+9.66 +- 5.53 (tcheran)",
+    "run_id": "2026-09-10",
+    "note": "a node with no table move has nothing to lead the ordering with, so a full-depth search there is worth less per node. Guarded on not-in-check, which is a deliberate deviation: the check extension has already added a ply and reducing it back would cancel the extension rather than reduce a badly ordered node"
+  },
+  {
     "parameter": "search.history_bonus",
-    "value_or_shape": "depth * depth, clamped at 999999",
+    "value_or_shape": "+-depth * depth with gravity, self-limiting at 999998",
     "produced_by": "code (mikhail_letal/search.py)",
     "data": "none: hand-chosen at textbook magnitude, untuned",
     "run_id": "2026-09-10",
-    "note": "cutoffs near the root are rarer and worth more. The clamp applies to the *sum* of the plain and continuation tables (see search.continuation_history), which is what keeps quiet moves below the killer band so the ordering bands cannot invert"
+    "note": "cutoffs near the root are rarer and worth more. The update is now `value += bonus - value * |bonus| / MAX` rather than a plain add with a clamp: a clamped table saturates and stops telling a move that works everywhere from one that worked once and hit the ceiling. The same amount is SUBTRACTED from every quiet tried before the one that cut, so the table records failures as well as successes -- measured together at +15.92 +- 7.40 (tcheran). The bound still keeps the summed quiet score below the killer band so the ordering bands cannot invert"
   },
   {
     "parameter": "search.continuation_history",

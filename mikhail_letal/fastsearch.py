@@ -129,6 +129,7 @@ from mikhail_letal.search import (
     _HISTORY_MAX,
     _INFINITY,
     _ORDER_CAPTURE,
+    _ORDER_COUNTERMOVE,
     _ORDER_KILLER_FIRST,
     _ORDER_KILLER_SECOND,
     _ORDER_LOSING_CAPTURE,
@@ -142,6 +143,7 @@ from mikhail_letal.search import (
     CAPTURE_HISTORY,
     CAPTURE_HISTORY_WEIGHT,
     CONTINUATION_HISTORY,
+    COUNTERMOVE,
     DELTA_MARGIN,
     DELTA_PRUNING,
     DRAW_TIEBREAK_MARGIN,
@@ -269,6 +271,8 @@ class SearchState(NamedTuple):
     history: npt.NDArray[np.int32]  # (2, 128 * 128): cutoff credit by colour and from-to
     cont: npt.NDArray[np.int32]  # (_CONT_ENTRIES,): the same credit, per previous move
     capture_history: npt.NDArray[np.int32]  # (7, 128, 7): mover kind, destination, victim kind
+    countermove: npt.NDArray[np.int32]  # (7, 128): the quiet that refuted a previous move
+    cm_key: npt.NDArray[np.int32]  # (MAX_PLY + 2,): previous move as kind * 128 + to, -1 at root
     cont_base: npt.NDArray[np.int64]  # (MAX_PLY + 1,): each ply's row in `cont`, or _CONT_NONE
     moves: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): one move buffer per ply
     order: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): the ordering score of each
@@ -303,6 +307,10 @@ def new_state(tt_bits: int = TT_BITS, eval_bits: int = EVAL_BITS) -> SearchState
         # Mover piece type (0..6) x destination square (0x88, 0..127) x victim type (0..6). A
         # promotion capture keys on the pawn that moved, not on the piece it becomes.
         capture_history=np.zeros((7, 128, 7), dtype=np.int32),
+        # Keyed by the PREVIOUS move's piece type and destination, holding the quiet reply that
+        # most recently refuted it. NO_MOVE where nothing has.
+        countermove=np.full((7, 128), NO_MOVE, dtype=np.int32),
+        cm_key=np.full(MAX_PLY + 2, -1, dtype=np.int32),
         # int64 so the index arithmetic in `negamax` never has to think about int32 width; the
         # array is MAX_PLY + 1 entries, so it costs nothing.
         cont_base=np.full(MAX_PLY + 1, _CONT_NONE, dtype=np.int64),
@@ -813,6 +821,11 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
     side = pos.meta[M_SIDE]
     killer_first = st.killers[ply, 0]
     killer_second = st.killers[ply, 1]
+    # The countermove is a property of the node, not of each move, so it is read once here.
+    cm_key = st.cm_key[ply]
+    cm_move = NO_MOVE
+    if COUNTERMOVE and cm_key >= 0:
+        cm_move = st.countermove[cm_key // 128, cm_key % 128]
     history = st.history[side]
     # The previous move is the same for every move of this node, so its row is fixed once here.
     cont = st.cont
@@ -854,6 +867,8 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
             order[i] = _ORDER_KILLER_FIRST
         elif move == killer_second:
             order[i] = _ORDER_KILLER_SECOND
+        elif COUNTERMOVE and cm_move != NO_MOVE and move == cm_move:
+            order[i] = _ORDER_COUNTERMOVE
         else:
             # Plain history plus continuation history, clamped: each table saturates at
             # _HISTORY_MAX on its own, so the unclamped sum would reach nearly twice
@@ -924,6 +939,11 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
     frm = move & SQ_MASK
     to = (move >> SQ_BITS) & SQ_MASK
     index = frm * 128 + to
+    # This quiet refuted the previous move: file it as that move's countermove.
+    if COUNTERMOVE:
+        cm_key = st.cm_key[ply]
+        if cm_key >= 0:
+            st.countermove[cm_key // 128, cm_key % 128] = move
     # depth * depth: cutoffs near the root are rarer and worth more than cutoffs near leaves.
     bonus = depth * depth
     _apply_history(st.history, side, index, bonus)
@@ -1212,6 +1232,12 @@ def quiescence(
                 continue
         # After the SEE skip, so a capture that is never searched costs nothing to record.
         st.cont_base[ply + 1] = _cont_base(pos, move)
+        # Set here as well as in negamax: `_score_moves` reads `cm_key[ply]` for check evasions,
+        # which are quiet moves, and a key left over from an earlier search would name a
+        # countermove for a previous move that is not the one actually played into this node.
+        st.cm_key[ply + 1] = (pos.board[move & SQ_MASK] & PIECE_TYPE_MASK) * 128 + (
+            (move >> SQ_BITS) & SQ_MASK
+        )
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1571,6 +1597,9 @@ def negamax(
             pruned_any = 1
             continue
         st.cont_base[child_ply] = _cont_base(pos, move)
+        st.cm_key[child_ply] = (pos.board[move & SQ_MASK] & PIECE_TYPE_MASK) * 128 + (
+            (move >> SQ_BITS) & SQ_MASK
+        )
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1774,6 +1803,8 @@ class FastEngine:
         st.history[:] = 0
         st.cont[:] = 0
         st.capture_history[:] = 0
+        st.countermove[:] = NO_MOVE
+        st.cm_key[:] = -1
         st.ints[I_GENERATION] = 0
 
     # ------------------------------------------------------------------ public entry point

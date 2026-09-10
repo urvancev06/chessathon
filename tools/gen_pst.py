@@ -361,13 +361,72 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
             "static evaluations keyed by Zobrist; the cap holds a 20 s search under 100 MB",
         ),
         (
+            "search.quiescence_tt",
+            f"probe and store at depth {search._QS_DEPTH}, on={search.QUIESCENCE_TT}",
+            code,
+            "+40.16 +- 11.74 (tcheran); +25 over 4000 games (Arasan)",
+            "quiescence is where most of the tree is and it previously probed and stored nothing, "
+            "so a position reached by a different capture order was re-searched from scratch. "
+            "Depth 0 is unoccupied: negamax returns into quiescence before its move loop and "
+            "before any store, and it sits above the repetition-hint depth",
+        ),
+        (
+            "search.capture_history",
+            f"+-depth * depth with gravity, ordering weight +-{search.CAPTURE_HISTORY_WEIGHT}",
+            code,
+            "+13.97 +- 6.76 (tcheran)",
+            "MVV-LVA ranks a capture by what it takes and what takes it and cannot tell a winning "
+            "queen-takes-pawn from a losing one. The weight is a quarter of an MVV-LVA step, so it "
+            "orders within a material step and never across one",
+        ),
+        (
+            "search.countermove",
+            f"one quiet move per (previous piece, previous destination), on={search.COUNTERMOVE}",
+            code,
+            "~+10 Elo, several engines",
+            "the move that most recently refuted this reply. Ordered below both killers, which "
+            "refuted this ply in this search, and above the history band",
+        ),
+        (
+            "search.razoring",
+            f"depth <= {search.RAZOR_MAX_DEPTH}, margin {search.RAZOR_MARGIN} per ply",
+            code,
+            "+7.73 +- 4.76 (tcheran); +22 (Stardance)",
+            "a node far below alpha drops straight into quiescence; if even that cannot reach "
+            "alpha the subtree is skipped. The quiescence call decides, so the margin only decides "
+            "when to ask",
+        ),
+        (
+            "search.main_see_pruning",
+            f"depth <= {search.MAIN_SEE_MAX_DEPTH}, margin {search.MAIN_SEE_MARGIN} per ply",
+            code,
+            "+25.45 +- 9.40 (tcheran)",
+            "quiescence has skipped losing captures since the ordering bundle; the main search "
+            "still searched them to the end of their own recapture chains",
+        ),
+        (
+            "search.internal_iterative_reduction",
+            f"depth >= {search.IIR_MIN_DEPTH} and no table move, on="
+            f"{search.INTERNAL_ITERATIVE_REDUCTION}",
+            code,
+            "+9.66 +- 5.53 (tcheran)",
+            "a node with no table move has nothing to lead the ordering with, so a full-depth "
+            "search there is worth less per node. Guarded on not-in-check, which is a deliberate "
+            "deviation: the check extension has already added a ply and reducing it back would "
+            "cancel the extension rather than reduce a badly ordered node",
+        ),
+        (
             "search.history_bonus",
-            f"depth * depth, clamped at {search._HISTORY_MAX}",
+            f"+-depth * depth with gravity, self-limiting at {search._HISTORY_MAX}",
             code,
             TEXTBOOK,
-            "cutoffs near the root are rarer and worth more. The clamp applies to the *sum* of the "
-            "plain and continuation tables (see search.continuation_history), which is what keeps "
-            "quiet moves below the killer band so the ordering bands cannot invert",
+            "cutoffs near the root are rarer and worth more. The update is now "
+            "`value += bonus - value * |bonus| / MAX` rather than a plain add with a clamp: a "
+            "clamped table saturates and stops telling a move that works everywhere from one that "
+            "worked once and hit the ceiling. The same amount is SUBTRACTED from every quiet tried "
+            "before the one that cut, so the table records failures as well as successes -- "
+            "measured together at +15.92 +- 7.40 (tcheran). The bound still keeps the summed "
+            "quiet score below the killer band so the ordering bands cannot invert",
         ),
         (
             "search.continuation_history",
