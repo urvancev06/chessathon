@@ -159,6 +159,9 @@ from mikhail_letal.search import (
     LMR_TABLE_DEPTHS,
     LMR_TABLE_MOVES,
     LOWER,
+    MAIN_SEE_MARGIN,
+    MAIN_SEE_MAX_DEPTH,
+    MAIN_SEE_PRUNING,
     MAX_PLY,
     NULL_MOVE_BASE_REDUCTION,
     NULL_MOVE_DEPTH_DIVISOR,
@@ -1475,6 +1478,24 @@ def negamax(
             and move != killer_first
             and move != killer_second
             and quiets_searched >= lmp_count
+        ):
+            pruned_any = 1
+            continue
+        # A capture the swap-off says loses more than the margin allows, at a shallow node and off
+        # the principal variation. Quiescence has skipped these since the ordering bundle; the
+        # main search still searched them to the end of their own recapture chains, which is where
+        # they cost most. `legal_seen != 0` for the same reason futility and late move pruning
+        # carry it: "no legal move below" must keep meaning mate or stalemate.
+        if (
+            MAIN_SEE_PRUNING
+            and not quiet
+            and legal_seen != 0
+            and move != tt_move
+            and depth <= MAIN_SEE_MAX_DEPTH
+            and not mate_bounds
+            and beta - alpha == 1
+            and ((move >> PROMO_SHIFT) & PROMO_MASK) == 0
+            and see(pos, move) < -MAIN_SEE_MARGIN * depth
         ):
             pruned_any = 1
             continue

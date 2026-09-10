@@ -2171,3 +2171,44 @@ directions.
 **Not carried forward.** The code was written and discarded rather than left on a branch: a
 Python-only evaluation term breaks integer-for-integer parity with `fasteval`, and half-ported
 unvalidated work the night before a freeze is worth less than the record of why it was dropped.
+
+## The specification engine no longer specifies the shipped search, and that is a debt
+
+Found 10 September while trying to mirror a change into it. **`mikhail_letal/search.py` has no
+static exchange evaluation at all.** `_ORDER_LOSING_CAPTURE` is defined at line 338 and never
+used; the comment at line 250 still reads "SEE is on a branch, and main orders by MVV-LVA", which
+was true when written and is not true of the engine that plays.
+
+The divergence entered with the `ct-ordering` merge, which screened at +36 and shipped as v1.3.
+Nobody noticed, including the session that merged it and ran 693 tests over it.
+
+**The instrument that should have caught it structurally cannot.** `tests/test_constant_parity.py`
+compares the two engines' shared *constants*. A missing *feature* is invisible to it — a fact
+written into that test's own docstring by the person who then walked past it. Same shape as every
+other defect this week: *what is this check defined in terms of, and is that the thing I am
+testing?*
+
+**Why it matters beyond tidiness.** `CLAUDE.md` makes `search.py` the specification, and the
+project's second rule is that everything shipping is explainable. A judge reading the specification
+is currently reading a different engine from the one that scored +36 — not a simplified version of
+it, a different one.
+
+**Decision: record it, do not close it.** Porting SEE into the interpreted engine is a fresh
+implementation rather than a translation — that engine uses python-chess boards, not a 0x88
+mailbox — and writing an untested reference implementation seventeen hours before the freeze buys
+no strength and risks the suite. So SEE pruning in the main search (measured +25.45 ± 9.40 in
+tcheran) is written in `fastsearch` only, with its constants in `search.py` where the shared
+constants live.
+
+**What ships is therefore honest about itself rather than parity-clean**, and the report says so
+in these terms. The debt is: SEE ordering, SEE pruning in quiescence, and SEE pruning in the main
+search exist only in the compiled engine.
+
+**The rejected alternative** was to drop the SEE-in-main change to preserve parity. Rejected
+because parity is already broken by the shipped v1.3, so declining the change would forgo measured
+Elo without restoring the property it was meant to protect. The time to refuse was before the
+ordering merge, and nobody did.
+
+**The instrument worth building afterwards**, and it is worth more than any single Elo item: a
+check that compares the two engines' *behaviour* — node counts or best moves at fixed depth over a
+position corpus — rather than their constants. That would have caught this on the day it entered.

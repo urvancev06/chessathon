@@ -98,6 +98,20 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# SEE pruning in the main search. Quiescence already skips captures the swap-off says lose
+# material; the main search does not, so a queen taking a defended pawn at depth 3 is searched to
+# the end of its own recapture chain in the tree where that costs most. Measured +25.45 +- 9.40
+# (tcheran) as a pruning gate distinct from the ordering use we already have.
+MAIN_SEE_PRUNING = True  # switch for bisection; the shipped value is True
+# Below this remaining depth only. Deeper than this the move might be a sacrifice whose
+# compensation appears beyond the swap-off's horizon, and the swap-off does not model compensation
+# at all -- it counts material on one square.
+MAIN_SEE_MAX_DEPTH = 6
+# Centipawns of loss tolerated per ply of remaining depth. A capture losing less than this is
+# searched: the deeper the node, the more a small material loss can be worth for position. Scaled
+# rather than flat for the same reason the futility margins are.
+MAIN_SEE_MARGIN = 30
+
 # Transposition table in the quiescence search. Quiescence is where most of the tree is, and
 # until now it probed nothing and stored nothing: an identical position reached by a different
 # capture order was re-searched from scratch every time. Measured +40.16 +- 11.74 in tcheran
