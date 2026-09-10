@@ -139,6 +139,8 @@ from mikhail_letal.search import (
     ASPIRATION_WIDEN,
     ASPIRATION_WINDOW,
     ASPIRATION_WINDOWS,
+    CAPTURE_HISTORY,
+    CAPTURE_HISTORY_WEIGHT,
     CONTINUATION_HISTORY,
     DELTA_MARGIN,
     DELTA_PRUNING,
@@ -266,6 +268,7 @@ class SearchState(NamedTuple):
     killers: npt.NDArray[np.int32]  # (MAX_PLY + 2, 2): two quiet cutoff moves per ply
     history: npt.NDArray[np.int32]  # (2, 128 * 128): cutoff credit by colour and from-to
     cont: npt.NDArray[np.int32]  # (_CONT_ENTRIES,): the same credit, per previous move
+    capture_history: npt.NDArray[np.int32]  # (7, 128, 7): mover kind, destination, victim kind
     cont_base: npt.NDArray[np.int64]  # (MAX_PLY + 1,): each ply's row in `cont`, or _CONT_NONE
     moves: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): one move buffer per ply
     order: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): the ordering score of each
@@ -297,6 +300,9 @@ def new_state(tt_bits: int = TT_BITS, eval_bits: int = EVAL_BITS) -> SearchState
         killers=np.full((MAX_PLY + 2, 2), NO_MOVE, dtype=np.int32),
         history=np.zeros((2, 128 * 128), dtype=np.int32),
         cont=np.zeros(_CONT_ENTRIES, dtype=np.int32),
+        # Mover piece type (0..6) x destination square (0x88, 0..127) x victim type (0..6). A
+        # promotion capture keys on the pawn that moved, not on the piece it becomes.
+        capture_history=np.zeros((7, 128, 7), dtype=np.int32),
         # int64 so the index arithmetic in `negamax` never has to think about int32 width; the
         # array is MAX_PLY + 1 entries, so it costs nothing.
         cont_base=np.full(MAX_PLY + 1, _CONT_NONE, dtype=np.int64),
@@ -825,6 +831,16 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
             # The MVV-LVA rank of a piece is its piece type; only the order matters.
             attacker = board[frm] & PIECE_TYPE_MASK
             order[i] = _ORDER_CAPTURE + 10 * (victim + promotion) - attacker
+            if CAPTURE_HISTORY:
+                # Breaks ties inside the MVV-LVA step without crossing one: the score is clamped
+                # to +-CAPTURE_HISTORY_WEIGHT and the steps are 10 apart.
+                bonus = st.capture_history[board[frm] & PIECE_TYPE_MASK, to, victim]
+                scaled = bonus * CAPTURE_HISTORY_WEIGHT // _HISTORY_MAX
+                if scaled > CAPTURE_HISTORY_WEIGHT:
+                    scaled = CAPTURE_HISTORY_WEIGHT
+                elif scaled < -CAPTURE_HISTORY_WEIGHT:
+                    scaled = -CAPTURE_HISTORY_WEIGHT
+                order[i] += scaled
             # SEE is consulted only where MVV-LVA cannot already answer. Taking something worth at
             # least as much as the attacker is winning or equal by inspection and no swap-off can
             # change that, so the scan runs on the minority of captures that might be losing --
@@ -918,6 +934,30 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
     if base != _CONT_NONE:
         cont_index = base + (pos.board[frm] & PIECE_TYPE_MASK) * _CONT_SQUARES + to
         _apply_cont(st.cont, cont_index, bonus)
+
+
+@njit(cache=False)
+def _reward_capture_cutoff(pos: Position, st: SearchState, move: int, depth: int) -> None:
+    """A capture caused the cutoff: raise its capture-history score."""
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    kind = pos.board[frm] & PIECE_TYPE_MASK
+    victim = _victim(pos, move)
+    value = st.capture_history[kind, to, victim]
+    bonus = depth * depth
+    st.capture_history[kind, to, victim] = value + bonus - value * bonus // _HISTORY_MAX
+
+
+@njit(cache=False)
+def _punish_capture(pos: Position, st: SearchState, move: int, depth: int) -> None:
+    """A capture was searched and did not cut: lower its capture-history score."""
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    kind = pos.board[frm] & PIECE_TYPE_MASK
+    victim = _victim(pos, move)
+    value = st.capture_history[kind, to, victim]
+    malus = depth * depth
+    st.capture_history[kind, to, victim] = value - malus - value * malus // _HISTORY_MAX
 
 
 @njit(cache=False)
@@ -1596,6 +1636,12 @@ def negamax(
             if score >= beta:
                 # Beta cutoff. Remember quiet moves that do this: they tend to refute other
                 # moves in sibling positions.
+                if CAPTURE_HISTORY and not quiet:
+                    _reward_capture_cutoff(pos, st, move, depth)
+                    for j in range(i):
+                        earlier = st.moves[ply, j]
+                        if _victim(pos, earlier) != 0 and earlier != move:
+                            _punish_capture(pos, st, earlier, depth)
                 if quiet:
                     _reward_quiet_cutoff(pos, st, move, depth, ply)
                     # ... and take the same amount off every quiet that was tried first and did
@@ -1727,6 +1773,7 @@ class FastEngine:
         st.killers[:] = NO_MOVE
         st.history[:] = 0
         st.cont[:] = 0
+        st.capture_history[:] = 0
         st.ints[I_GENERATION] = 0
 
     # ------------------------------------------------------------------ public entry point
@@ -2068,6 +2115,8 @@ JITTED: Final = (
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
+    "_reward_capture_cutoff",
+    "_punish_capture",
     "_punish_quiet",
     "_apply_history",
     "_apply_cont",

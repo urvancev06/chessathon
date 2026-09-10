@@ -98,6 +98,18 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# Capture history: MVV-LVA ranks a capture by what it takes and what takes it, and nothing else,
+# so it cannot tell a queen-takes-pawn that wins the exchange from one that drops a queen -- only
+# SEE does that, and only where it is consulted. Capture history records which captures actually
+# caused cutoffs, keyed by the moving piece, the destination and the victim, and breaks MVV-LVA
+# ties with that. Measured +13.97 +- 6.76 (tcheran). It costs one table read per capture in the
+# ordering loop and shares the gravity update the quiet history already uses.
+CAPTURE_HISTORY = True  # switch for bisection; the shipped value is True
+# The ordering weight of a capture-history score. Small: it must break ties inside the MVV-LVA
+# band without ever lifting a capture out of it or letting one capture leapfrog a materially
+# better one. MVV-LVA steps are 10 apart, so a range of +-4 orders within a step and never across.
+CAPTURE_HISTORY_WEIGHT = 4
+
 # Razoring: at a shallow node whose static evaluation is far below alpha, drop straight into
 # quiescence rather than searching the move list. If the quiescence score still cannot reach
 # alpha, the node is very unlikely to and the whole subtree is skipped. Measured +7.73 +- 4.76

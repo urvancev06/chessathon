@@ -455,7 +455,19 @@ def _king_danger_one(board: chess.Board, colour: chess.Color, own_pawns: int) ->
     # The shelter gate. A king still behind its own pawns is not the king this term is about, and
     # skipping it here is what keeps the term affordable (see KING_DANGER_SHELTERED_PAWNS).
     shield = _SHIELD[colour][king_square]
-    if (own_pawns & shield).bit_count() >= KING_DANGER_SHELTERED_PAWNS:
+    king_file = chess.square_file(king_square)
+    # An open or half-open file at the king is a shelter failure the pawn count cannot see. Rounds
+    # 92 and 96 were both lost through this gate: in 92 we opened the b-file in front of a
+    # castled king and still counted two shield pawns; in 96 we recaptured with the f-pawn, which
+    # opened the f-file at our own king, and still counted two. The term that exists to notice
+    # exactly that returned zero both times, because the gate asks how many pawns are near the
+    # king rather than whether anything can reach it.
+    files_open = 0
+    for offset in (-1, 0, 1):
+        neighbour = king_file + offset
+        if 0 <= neighbour <= 7 and not (own_pawns & chess.BB_FILES[neighbour]):
+            files_open += 1
+    if files_open == 0 and (own_pawns & shield).bit_count() >= KING_DANGER_SHELTERED_PAWNS:
         return 0
 
     zone = _KING_ZONE[king_square]
