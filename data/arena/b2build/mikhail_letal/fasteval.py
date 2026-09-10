@@ -504,18 +504,7 @@ def _king_danger(pos: Position) -> int:
             for neighbour in range(first, last + 1):
                 if board[rank_index * 16 + neighbour] == own_pawn:
                     sheltered += 1
-        # An open or half-open file at the king is a shelter failure the pawn count cannot see.
-        # See evaluation._king_danger_one for the two rated games this gate lost.
-        files_open = 0
-        for neighbour in range(first, last + 1):
-            has_pawn = 0
-            for rank_index in range(8):
-                if board[rank_index * 16 + neighbour] == own_pawn:
-                    has_pawn = 1
-                    break
-            if has_pawn == 0:
-                files_open += 1
-        if files_open == 0 and sheltered >= KING_DANGER_SHELTERED_PAWNS:
+        if sheltered >= KING_DANGER_SHELTERED_PAWNS:
             continue
 
         enemy = 1 - colour

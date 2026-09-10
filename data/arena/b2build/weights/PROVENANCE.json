@@ -1,0 +1,378 @@
+[
+  {
+    "parameter": "piece_values_mg",
+    "value_or_shape": "{\"P\": 100, \"N\": 320, \"B\": 330, \"R\": 500, \"Q\": 900, \"K\": 0}",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "universal textbook values, recorded as such, untuned"
+  },
+  {
+    "parameter": "piece_values_eg",
+    "value_or_shape": "{\"P\": 100, \"N\": 320, \"B\": 330, \"R\": 500, \"Q\": 900, \"K\": 0}",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "identical to the middlegame values until tuned"
+  },
+  {
+    "parameter": "pst_mg.P",
+    "value_or_shape": "64 ints, min 0, max 24",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_mg.N",
+    "value_or_shape": "64 ints, min -20, max 30",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_mg.B",
+    "value_or_shape": "64 ints, min -3, max 21",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_mg.R",
+    "value_or_shape": "64 ints, min 0, max 28",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_mg.Q",
+    "value_or_shape": "64 ints, min -14, max 2",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_mg.K",
+    "value_or_shape": "64 ints, min -80, max 25",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.P",
+    "value_or_shape": "64 ints, min 0, max 50",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.N",
+    "value_or_shape": "64 ints, min -20, max 30",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.B",
+    "value_or_shape": "64 ints, min -3, max 21",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.R",
+    "value_or_shape": "64 ints, min 0, max 0",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.Q",
+    "value_or_shape": "64 ints, min -2, max 10",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "pst_eg.K",
+    "value_or_shape": "64 ints, min -5, max 25",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "geometric formula of the square; parameters in pst.json _provenance"
+  },
+  {
+    "parameter": "phase_weights",
+    "value_or_shape": "{\"N\": 1, \"B\": 1, \"R\": 2, \"Q\": 4}",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "sum over the full board is 24 = PHASE_TOTAL"
+  },
+  {
+    "parameter": "mopup",
+    "value_or_shape": "{\"edge\": 10, \"close\": 12}",
+    "produced_by": "tools/gen_pst.py @ 4109710724256fe1a2d596ecfbefc9e789b1f14b",
+    "data": "none: parametric prior",
+    "run_id": "2026-09-10",
+    "note": "drive the bare king to the edge, bring ours close; close beats one king ring"
+  },
+  {
+    "parameter": "timing.increment_ms",
+    "value_or_shape": "500",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "agent contract (aichessathon.com/docs/agent-contract.md)",
+    "run_id": "2026-09-10",
+    "note": "the increment the platform adds after each of our moves; not a choice"
+  },
+  {
+    "parameter": "timing.overhead_ms",
+    "value_or_shape": "50",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)",
+    "run_id": "2026-09-10",
+    "note": "referee-charged minus self-measured move time was 0-2 ms, mean 1.1; docs/CALIBRATION.md's rule is max + 50, so 52, taken as 50"
+  },
+  {
+    "parameter": "timing.moves_to_go",
+    "value_or_shape": "max 50, min 20, decay 0.7",
+    "produced_by": "tools/sim_time.py",
+    "data": "1697 finished ladder games (data/pgn/ladder-top, data/pgn/ladder-top50), collected from the public game pages; our own five rated games in data/pgn/ours as the check",
+    "run_id": "2026-09-10",
+    "note": "the ladder games measure how many of our moves are left at each point (median 67 at the start, falling about one a move to 25); the divisor is that curve scaled by the 0.70 of its budget a move spends. The minimum is 20 rather than 17 because at 16 the settling clock equals panic_ms and the deep tail is skewed (median 27, mean 40)"
+  },
+  {
+    "parameter": "timing.increment_fraction",
+    "value_or_shape": "0.8",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-10",
+    "note": "spend most of the increment each move and keep a little; untuned"
+  },
+  {
+    "parameter": "timing.hard_multiplier",
+    "value_or_shape": "3.0",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-10",
+    "note": "an iteration may overrun the soft target by this factor before it is aborted"
+  },
+  {
+    "parameter": "timing.hard_fraction",
+    "value_or_shape": "0.25",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-10",
+    "note": "no single move may spend more than this share of the clock"
+  },
+  {
+    "parameter": "timing.floor_ms / floor_fraction",
+    "value_or_shape": "1500 ms, 0.05",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-10",
+    "note": "the reserve the budget never plans to dip into; with hard_fraction it is what keeps the clock off the flag, and what stops a long game settling below about 2 s"
+  },
+  {
+    "parameter": "timing.panic_ms",
+    "value_or_shape": "1650",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves)",
+    "run_id": "2026-09-10",
+    "note": "below this the engine is skipped and the fallback plays; kept at the value the platform measured under v1.0 even though overhead_ms + floor_ms is now 1550"
+  },
+  {
+    "parameter": "timing.next_iteration_fraction",
+    "value_or_shape": "0.45",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: brief section 6.2",
+    "run_id": "2026-09-10",
+    "note": "no longer the normal rule: only the fallback for an iteration too short to predict from, applied to the soft budget itself"
+  },
+  {
+    "parameter": "timing.iteration_ratio",
+    "value_or_shape": "default 4.5, clamped to [2.0, 8.0], measurable above 0.001 s",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "platform validation and rated logs, 2026-09-08 (25 moves, 452 half-moves); dev-box searches 2026-09-07 (median 4.3-5.2, maximum about 10)",
+    "run_id": "2026-09-10",
+    "note": "the cost of depth d+1 over depth d, measured live from the last two iterations; the clamp keeps one mis-timed iteration from stopping the search early or starting one it cannot finish"
+  },
+  {
+    "parameter": "timing.iteration_target_factor",
+    "value_or_shape": "1.35",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and 10 of them at six clocks (60 moves a variant) for the before-and-after comparison",
+    "run_id": "2026-09-10",
+    "note": "how far past the soft budget the next iteration may be predicted to end: 1.0 spent 0.70 of the budget for mean depth 10.83, 1.35 spent 0.80 for 11.17, 1.75 reached the hard ceiling. 1.35 x unstable_factor is still below hard_multiplier"
+  },
+  {
+    "parameter": "timing.unstable_factor",
+    "value_or_shape": "1.5",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: hand-chosen at a textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "a root move that changed at the last completed depth is worth half a budget more, bounded by the hard ceiling like every other target"
+  },
+  {
+    "parameter": "timing.easy_move",
+    "value_or_shape": "factor 0.7, after 6 iterations, score drop <= 30 cp",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "6 middlegame positions from data/pgn searched at 120 s and 20 s (12 moves a variant), and 10 of them at six clocks (60 moves a variant) for the before-and-after comparison",
+    "run_id": "2026-09-10",
+    "note": "6 iterations at 0.7 costs 0.17 of a ply and banks 16 % of the time; the first attempt (4 at 0.5) fired on nearly every move and spent less than the fixed rule"
+  },
+  {
+    "parameter": "timing.cold_finish_fraction",
+    "value_or_shape": "0.25",
+    "produced_by": "code (mikhail_letal/timing.py)",
+    "data": "none: same value as hard_fraction, and for the same reason",
+    "run_id": "2026-09-10",
+    "note": "the share of the clock the first move may spend finishing a warm-up the import ran out of budget for; at most one move of one game"
+  },
+  {
+    "parameter": "search.null_move",
+    "value_or_shape": "min depth 3, R = 2 + depth // 6",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: min depth chosen by measurement (see note)",
+    "run_id": "2026-09-10",
+    "note": "textbook reduction; min depth 3 rather than 2 because at 2 a capture-rich middlegame tripled the nodes to depth 5, null searches landing in quiescence at the widest layer"
+  },
+  {
+    "parameter": "search.late_move_reductions",
+    "value_or_shape": "min depth 3, first 3 moves full, then a 64x64 table of trunc(0.75 + log(depth) * log(move) / 2.25), values 0-8",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "quiet, non-killer, non-TT moves only, never in check, re-searched at full depth on a fail-high. Generated from the formula at import rather than stored, so what ships is the derivation and not a list of numbers; floored at 1 ply and capped at depth - 2 so a reduced search is never shallower than depth 1"
+  },
+  {
+    "parameter": "search.aspiration",
+    "value_or_shape": "from depth 4, window 20 cp, widen x4, 2 fails then full",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "narrowed from 40 after tcheran measured +10.03 +- 5.56 for 25 -> 20; a wider window fails less often but wastes the saving when it does not"
+  },
+  {
+    "parameter": "search.futility_margins",
+    "value_or_shape": "[0, 150, 300, 500, 750]",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "indexed by remaining depth, growing about a minor piece a ply; depth 0 is dead because the search goes to quiescence there. Extended from two plies to five on 9 September: the two-ply table pruned almost nothing above depth 2, and deeper margins are among the best measured Elo-per-line changes published (+37.4 +- 13.4 over 1780 games in an engine of comparable strength)"
+  },
+  {
+    "parameter": "search.reverse_futility",
+    "value_or_shape": "depth <= 6, margin 85 per ply",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "static null move: return without generating a move when the static evaluation exceeds beta by the margin, so the opponent would avoid the node. Off in check and off when a mate bound is in the window, mirroring futility. Chosen because the margin is material-sized -- it asks 'am I a clear piece up', which this evaluation answers reliably, rather than a positional judgement, which it does not. Published +57.1 +- 16.9 over 1209 games, the largest measured gain available to this engine"
+  },
+  {
+    "parameter": "search.late_move_pruning",
+    "value_or_shape": "depth <= 4, counts [0, 5, 9, 15, 23]",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "past a depth-scaled count the remaining quiet moves are not searched at all rather than merely reduced. Consults no evaluation, so it is worth exactly what the move ordering is worth; the table move, the captures ordered by static exchange and both killers are all tried before it can fire, and the first legal move is never skipped so that 'no legal move' still means mate or stalemate. Published +21.9 +- 11.4 over 2000 games"
+  },
+  {
+    "parameter": "search.delta_margin",
+    "value_or_shape": "200",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "quiescence skips a capture that cannot reach alpha even with the victim's value"
+  },
+  {
+    "parameter": "search.qs_evasion_plies",
+    "value_or_shape": "4",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: chosen by measurement (see note)",
+    "run_id": "2026-09-10",
+    "note": "quiescence searches every evasion this deep; 4 keeps an eight-queens-a-side position under 100k nodes at depth 1, where an uncapped search never finished an iteration"
+  },
+  {
+    "parameter": "search.draw_tiebreak_margin",
+    "value_or_shape": "300",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "'clearly ahead' for the root tie-break when every move scores a rule draw: a minor"
+  },
+  {
+    "parameter": "search.node_check_interval",
+    "value_or_shape": "512",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
+    "data": "none: chosen by measurement (see note)",
+    "run_id": "2026-09-10",
+    "note": "how often the compiled search reads the clock, in nodes. An objmode clock read costs ~300 ns, so 512 nodes is well under 1 % of node cost. At the 505 286 nodes/s median measured over the round-74 rated game it bounds the overshoot past the hard deadline to 1.013 ms, and that game overshot twice, by 1 ms each time (handoff/LOG-round-74-zagreus.md). The interpreted reference engine in search.py uses 128 for the same granularity at its own much lower node rate"
+  },
+  {
+    "parameter": "search.max_ply",
+    "value_or_shape": "128",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: structural",
+    "run_id": "2026-09-10",
+    "note": "recursion bound for search, quiescence and extensions together"
+  },
+  {
+    "parameter": "search.game_ply_cap",
+    "value_or_shape": "600",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "agent contract: a game reaching this many plies is a draw",
+    "run_id": "2026-09-10",
+    "note": "not a choice; the opening position counts toward it"
+  },
+  {
+    "parameter": "search.transposition_table",
+    "value_or_shape": "2^23 entries, cleared at move start above 60% full",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
+    "data": "none: sized by measurement (see note)",
+    "run_id": "2026-09-10",
+    "note": "fixed numpy arrays, depth-preferred within a move and aged across moves; int-only entries keep gen-2 GC pauses to ~14 ms where chess.Move values cost 143 ms"
+  },
+  {
+    "parameter": "search.eval_cache",
+    "value_or_shape": "2^18 entries (compiled); 100000 (reference engine)",
+    "produced_by": "code (mikhail_letal/fastsearch.py)",
+    "data": "none: sized by measurement",
+    "run_id": "2026-09-10",
+    "note": "static evaluations keyed by Zobrist; the cap holds a 20 s search under 100 MB"
+  },
+  {
+    "parameter": "search.history_bonus",
+    "value_or_shape": "depth * depth, clamped at 999999",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: hand-chosen at textbook magnitude, untuned",
+    "run_id": "2026-09-10",
+    "note": "cutoffs near the root are rarer and worth more. The clamp applies to the *sum* of the plain and continuation tables (see search.continuation_history), which is what keeps quiet moves below the killer band so the ordering bands cannot invert"
+  },
+  {
+    "parameter": "search.continuation_history",
+    "value_or_shape": "on: True; one previous move of context; 2 x 7 x 64 x 7 x 64 entries in the reference engine, 2 x 7 x 128 x 7 x 128 (1605632 int32, 6.4 MB) compiled",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: structural, and no new tuned number",
+    "run_id": "2026-09-10",
+    "note": "the history heuristic indexed by the previous move as well as the current one, so a quiet move is credited for refuting a specific reply rather than in general. It introduces no constant of its own: the bonus, the cap and the halving between moves are the plain table's, and the shape is the board's (piece types x squares, twice). The two engines size the square dimension differently because they index squares differently -- 0..63 in the reference engine, 0x88 in the compiled one -- exactly as their two `history` tables already do"
+  },
+  {
+    "parameter": "search.mate_scores",
+    "value_or_shape": "mate 100000, threshold 99000",
+    "produced_by": "code (mikhail_letal/evaluation.py)",
+    "data": "none: arbitrary large constants",
+    "run_id": "2026-09-10",
+    "note": "a mate at ply p scores MATE_SCORE - p, so shorter mates outrank longer ones"
+  }
+]
