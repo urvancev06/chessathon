@@ -133,6 +133,7 @@ from mikhail_letal.search import (
     _ORDER_KILLER_SECOND,
     _ORDER_LOSING_CAPTURE,
     _ORDER_TT,
+    _QS_DEPTH,
     ASPIRATION_MAX_FAILS,
     ASPIRATION_MIN_DEPTH,
     ASPIRATION_WIDEN,
@@ -164,6 +165,7 @@ from mikhail_letal.search import (
     NULL_MOVE_MIN_DEPTH,
     NULL_MOVE_PRUNING,
     QS_EVASION_PLIES,
+    QUIESCENCE_TT,
     REVERSE_FUTILITY_MARGIN,
     REVERSE_FUTILITY_MAX_DEPTH,
     REVERSE_FUTILITY_PRUNING,
@@ -1023,6 +1025,33 @@ def quiescence(
         return _static_score(pos, st, ev, ply, in_chk)
 
     key = int(pos.undo[pos.meta[M_PLY], U_KEY])  # carried forward by make_move; see fastboard
+
+    # Transposition probe. Quiescence entries live at depth _QS_DEPTH, which is unoccupied:
+    # `negamax` returns into quiescence at step (7) before its move loop and before any store, so
+    # nothing else writes there, and it sits above _HINT_DEPTH so a repetition hint is still
+    # excluded by the same guard. A real node at depth >= 1 refuses these entries; a negamax node
+    # arriving at depth 0 accepts them, which is correct because it is about to run this search.
+    #
+    # The key is already in hand and `_cached_eval` already hashes on it, so the probe is a second
+    # array lookup on a key we hold -- and what it saves is a whole quiescence subtree rather than
+    # one evaluation. Measured at +40.16 +- 11.74 in tcheran; quiescence is where most nodes are.
+    if QUIESCENCE_TT:
+        tt_index = _tt_probe(st, key)
+        if tt_index >= 0 and st.tt_data[tt_index, 0] >= _QS_DEPTH:
+            tt_score: int = st.tt_data[tt_index, 1]
+            tt_flag = st.tt_data[tt_index, 2]
+            if tt_score >= MATE_THRESHOLD:
+                tt_score -= ply
+            elif tt_score <= -MATE_THRESHOLD:
+                tt_score += ply
+            if tt_flag == EXACT:
+                return tt_score
+            if tt_flag == LOWER and tt_score >= beta:
+                return tt_score
+            if tt_flag == UPPER and tt_score <= alpha:
+                return tt_score
+
+    alpha_original = alpha
     evasions = in_chk != 0 and qs_ply < QS_EVASION_PLIES
     if evasions:
         count = gen_pseudo(pos, st.moves[ply])
@@ -1101,6 +1130,8 @@ def quiescence(
         if score > best_score:
             best_score = score
             if score >= beta:
+                if QUIESCENCE_TT:
+                    _store(st, key, _QS_DEPTH, score, LOWER, move, ply, 0)
                 return score
             if score > alpha:
                 alpha = score
@@ -1113,6 +1144,22 @@ def quiescence(
         # Nothing was searched, and there is no legal move at all: the position is over and its
         # value is the mate or the stalemate, never the stand-pat evaluation.
         return -(MATE_SCORE - ply) if in_chk != 0 else DRAW_SCORE
+
+    # Store only when a move was actually searched. Three reasons, and the first two are hazards
+    # chessathon-4c named before this was written:
+    #   - an in-check node searches every evasion while a stand-pat node searches captures only,
+    #     and both would land at the same depth; `_tt_store` is depth-preferred within a
+    #     generation, so at equal depth the later store wins and a weaker stand-pat entry could
+    #     displace a stronger evasion one. Requiring a searched move removes the pure stand-pat
+    #     nodes, which is where that collision comes from.
+    #   - a pure stand-pat cutoff's "score" is a static evaluation that `_cached_eval` already
+    #     caches under this very key, so storing it buys nothing and costs a slot.
+    #   - delta pruning and the SEE skip make this a fail-soft bound rather than an exact value,
+    #     so the flag is derived from the window exactly as `negamax` derives it. Defaulting to
+    #     EXACT here would be the `_HINT_DEPTH` defect again in a new place.
+    if QUIESCENCE_TT and legal_seen != 0:
+        flag = UPPER if best_score <= alpha_original else EXACT
+        _store(st, key, _QS_DEPTH, best_score, flag, NO_MOVE, ply, 0)
     return best_score
 
 

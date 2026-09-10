@@ -98,6 +98,18 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# Transposition table in the quiescence search. Quiescence is where most of the tree is, and
+# until now it probed nothing and stored nothing: an identical position reached by a different
+# capture order was re-searched from scratch every time. Measured +40.16 +- 11.74 in tcheran
+# ("start using the transposition table in quiescence"), corroborated at +25 Elo over 4000 games
+# in Arasan -- the largest cheap gain available to an engine that lacks it.
+QUIESCENCE_TT = True  # switch for bisection; the shipped value is True
+# The depth quiescence entries are stored at. It must be unoccupied, below every real-search
+# depth, and above _HINT_DEPTH. `negamax` returns into quiescence at step (7) before its move loop
+# and before any store, so nothing else writes at 0; the check extension has already fired by
+# then, so a node in check becomes depth 1 and a real node rather than landing here.
+_QS_DEPTH = 0
+
 # Internal iterative reduction: at a node with no table move the ordering has nothing to lead
 # with, so a full-depth search there is worth less per node than usual. Rather than pay full depth
 # for a badly ordered node, take a ply off and let the shallower search leave the table entry that
@@ -1413,6 +1425,28 @@ class Engine:
         if ply >= MAX_PLY:
             return self._static_score(board, ply, in_check)
 
+        # Transposition probe (see QUIESCENCE_TT). Mirrors fastsearch: entries live at _QS_DEPTH,
+        # which no other writer occupies, and the flag decides whether the stored bound settles
+        # this window.
+        key = board._transposition_key()
+        if QUIESCENCE_TT:
+            entry = self._tt.get(key)
+            if entry is not None and entry[0] >= _QS_DEPTH:
+                stored = entry[1]
+                if stored >= MATE_THRESHOLD:
+                    stored -= ply
+                elif stored <= -MATE_THRESHOLD:
+                    stored += ply
+                flag = entry[2]
+                if flag == EXACT:
+                    return stored
+                if flag == LOWER and stored >= beta:
+                    return stored
+                if flag == UPPER and stored <= alpha:
+                    return stored
+        alpha_original = alpha
+        legal_seen = 0
+
         if in_check and qs_ply < QS_EVASION_PLIES:
             moves = list(board.generate_legal_moves())
             if not moves:
@@ -1480,12 +1514,19 @@ class Engine:
                 search_board, -beta, -alpha, child_ply, child_in_check, child_qs_ply
             )
             search_board.pop()
+            legal_seen += 1
             if score > best_score:
                 best_score = score
                 if score >= beta:
+                    if QUIESCENCE_TT:
+                        self._store(key, _QS_DEPTH, score, LOWER, _move_code(move), ply, False)
                     return score
                 if score > alpha:
                     alpha = score
+        # Only when a move was actually searched; see the fastsearch comment for the three reasons.
+        if QUIESCENCE_TT and legal_seen:
+            flag = UPPER if best_score <= alpha_original else EXACT
+            self._store(key, _QS_DEPTH, best_score, flag, _NO_MOVE_CODE, ply, False)
         return best_score
 
     @staticmethod
