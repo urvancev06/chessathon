@@ -13,4 +13,4 @@ ENGINE_NAME = "Mikhail LeTal"
 # Bumped for every frozen version. `agent.py`'s init line is the ONLY in-band evidence of which
 # build the platform is running, and v1.0 and v1.1 both shipped reading "1.0.0" -- so a rated game
 # could not be attributed to a build from its log, only from upload timing. Found 9 September.
-__version__ = "1.3.0"
+__version__ = "1.4.0"
