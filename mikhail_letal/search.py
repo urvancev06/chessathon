@@ -24,7 +24,9 @@ of the remaining moves can be pruned. Moves are tried in this order: the move th
 table remembers as best for this position, then captures by *MVV-LVA* (take the Most Valuable
 Victim with the Least Valuable Attacker), then two *killer* moves (quiet moves that recently
 caused cutoffs at the same distance from the root), then the remaining quiet moves ranked by the
-*history heuristic* (how often each from-to move caused a cutoff anywhere in the tree).
+*history heuristic* (how often each from-to move caused a cutoff anywhere in the tree) plus the
+*continuation history* (how often each move caused a cutoff after the move the opponent has just
+played -- the same credit, counted in the context of one previous move).
 
 Repetition and the fifty-move rule are handled inside the tree so the engine neither drifts into
 a draw when it is winning nor avoids one when it is losing. The referee's 600-ply cap is applied
@@ -101,7 +103,7 @@ NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remainin
 # for a badly ordered node, take a ply off and let the shallower search leave the table entry that
 # the next visit orders by. Ed Schroeder, Rebel 2020. Measured +9.66 +- 5.53 (tcheran) and, as the
 # older iterative-deepening form, +10.9 +- 11.7 (Blunder).
-INTERNAL_ITERATIVE_REDUCTION = True  # switch for bisection; the shipped value is True
+INTERNAL_ITERATIVE_REDUCTION = False  # OFF: written and suite-green, but never screened
 # Below this remaining depth the lost ply is a larger fraction of the search than the bad ordering
 # costs, and at depth 1-3 the node is nearly a leaf where ordering barely matters.
 IIR_MIN_DEPTH = 4
@@ -159,6 +161,25 @@ def lmr_reduction(depth: int, searched: int) -> int:
     row = LMR_TABLE[depth if depth < LMR_TABLE_DEPTHS else LMR_TABLE_DEPTHS - 1]
     return row[searched if searched < LMR_TABLE_MOVES else LMR_TABLE_MOVES - 1]
 
+
+# One-ply continuation history (also called counter-move history). The plain history heuristic
+# above credits a quiet move by its from-square and to-square alone, so everything it knows about
+# `Ng1-f3` is summed over every position in which that move was ever a cutoff. That is a lot of
+# evidence about a move but none at all about *when* the move is good, and the answer is usually
+# "as a reply to something specific": a knight retreat refutes one attacking move and is a
+# blunder against another.
+#
+# This table adds exactly one bit of that context, the move the opponent has just played. It is
+# indexed by (side to move, the piece the previous move moved, where it moved to, the piece this
+# move moves, where it moves to) and carries the same credit, on the same cutoffs, as the plain
+# table. The two are read together: a quiet move's ordering score is the sum. Nothing here is an
+# evaluation term -- the table is filled only by which moves actually caused cutoffs -- so this is
+# the one ordering signal that does not inherit whatever the static evaluation gets wrong.
+#
+# Deliberately *one* ply of context and not two. The two-ply table (the "follow-up" history) is a
+# separate technique with a separate measurement, and adding both at once would leave a screen
+# unable to say which one paid.
+CONTINUATION_HISTORY = True  # switch for bisection in development; the shipped value is True
 
 # Aspiration windows: from this root depth on, the iteration is searched with a narrow window
 # around the previous iteration's score rather than the full one, which prunes far more. A score
@@ -278,6 +299,32 @@ _ORDER_CAPTURE = 2_000_000
 _ORDER_KILLER_FIRST = 1_000_001
 _ORDER_KILLER_SECOND = 1_000_000
 _HISTORY_MAX = _ORDER_KILLER_SECOND - 1
+# Captures that static exchange evaluation says lose material sit below every quiet move, scored
+# by how much they lose so the least bad is tried first. Without this a capture that hangs a queen
+# is searched before a killer, because `_ORDER_CAPTURE` bands every capture above every quiet.
+# Below the quiets rather than merely below the killers: a losing capture is worse than an
+# untried quiet move, and the alternative would need a band that does not exist between
+# `_HISTORY_MAX` and `_ORDER_KILLER_SECOND`.
+_ORDER_LOSING_CAPTURE = -1_000_000
+
+# Continuation-history geometry (see CONTINUATION_HISTORY above). One entry is addressed by
+#
+#     ((side * 7 + previous piece type) * 64 + previous to-square) * _CONT_ROW
+#         + this piece type * 64 + this to-square
+#
+# and it is built in two halves on purpose: the first line is the same for every move of a node,
+# so `_cont_base` computes it once when the move that led to the node is made, and `_quiet_order`
+# adds only the second line per move. Piece types are python-chess's (PAWN = 1 .. KING = 6), so
+# the dimension is seven and index 0 is never used; one wasted row costs less than subtracting
+# one on the hot path.
+#
+# `fastsearch` holds the same table over its own 0x88 squares. The two encodings relabel the same
+# five coordinates, so the tables are the same function of the position and neither engine ever
+# reads the other's; only `CONTINUATION_HISTORY` and `_HISTORY_MAX` are shared.
+_CONT_PIECE_KINDS = 7
+_CONT_SQUARES = 64
+_CONT_ROW = _CONT_PIECE_KINDS * _CONT_SQUARES  # entries addressed by one previous move: 448
+_CONT_NONE = -1  # "no previous move": the root position, and the node directly under a null move
 
 # Rank of each piece type for MVV-LVA, indexed by python-chess piece type (PAWN=1 .. KING=6).
 # Only the order matters, not the magnitudes, so the plain ranks 1..6 are used. Index 0 is for
@@ -355,6 +402,41 @@ def _code_to_move(code: int) -> chess.Move:
     return chess.Move(code & 63, code >> 6 & 63, code >> 12 or None)
 
 
+def _cont_base(mover: chess.Color, piece_type: int, to_square: int) -> int:
+    """Where the continuation history of every reply to this move begins.
+
+    ``mover`` is the side that *played* the move, so the replies filed under this base belong to
+    the other side, and that is the side the index carries. Called once when a move is made,
+    never once per reply: the previous move is the same for every move of the node it leads to.
+    """
+    replier = int(not mover)
+    return ((replier * _CONT_PIECE_KINDS + piece_type) * _CONT_SQUARES + to_square) * _CONT_ROW
+
+
+def _quiet_order(
+    history: list[int],
+    cont: Mapping[int, int],
+    base: int,
+    piece_type: int,
+    from_square: int,
+    to_square: int,
+) -> int:
+    """The ordering score of one quiet move: plain history plus continuation history.
+
+    The sum is clamped to ``_HISTORY_MAX``. Each table saturates there on its own, so without the
+    clamp two saturated tables would add to nearly twice ``_ORDER_KILLER_SECOND`` and a quiet move
+    would outrank first a killer and then a capture. The clamp changes nothing about *when* either
+    table saturates; it only keeps the bands from being crossed, which is a property of the
+    ordering the search relies on everywhere (see the band comment above ``_ORDER_TT``).
+    """
+    score = history[from_square << 6 | to_square]
+    if base != _CONT_NONE:
+        score += cont.get(base + piece_type * _CONT_SQUARES + to_square, 0)
+        if score > _HISTORY_MAX:
+            score = _HISTORY_MAX
+    return score
+
+
 class Engine:
     """Iterative-deepening negamax alpha-beta search with a transposition table.
 
@@ -372,6 +454,14 @@ class Engine:
         ]
         # history[colour][from * 64 + to]: cutoff credit for quiet moves, flat for fast indexing.
         self._history_heuristic: list[list[int]] = [[0] * 4096, [0] * 4096]
+        # The same credit in the context of one previous move (see CONTINUATION_HISTORY). A dict
+        # rather than a flat list because the space is 2 * 7 * 64 * 7 * 64 = 401 408 entries and a
+        # search fills a small corner of it, while `_age_history` would have to walk all of them
+        # every move; the compiled engine, which cannot afford a dict, uses the flat array.
+        self._cont_history: dict[int, int] = {}
+        # Where each ply's replies are filed, written by the move that led to that ply. Index
+        # MAX_PLY is reachable: a node at MAX_PLY - 1 records a base for the child it searches.
+        self._cont_base: list[int] = [_CONT_NONE] * (MAX_PLY + 1)
         # Static evaluations by piece placement and side to move (see _evaluate).
         self._eval_cache: dict[tuple[int, int, int, int, int, int, int, bool], int] = {}
 
@@ -403,6 +493,7 @@ class Engine:
             pair[1] = _NO_MOVE_CODE
         for table in self._history_heuristic:
             table[:] = [0] * 4096
+        self._cont_history.clear()
 
     # ------------------------------------------------------------------ public entry point
 
@@ -449,6 +540,9 @@ class Engine:
 
         self._game_history = history
         self._path = {board._transposition_key(): 1}
+        # The root has no previous move: the position arrives as a FEN and the opponent's last
+        # move is not part of it, so root moves are ordered on the plain history alone.
+        self._cont_base[0] = _CONT_NONE
         self._path_draw = False
         self._hard_deadline = hard_deadline
         self._node_limit = node_limit
@@ -598,6 +692,7 @@ class Engine:
         scores: list[int] = []  # one per move of ``ordered``, for the draw tie-break below
         self._path_draw = False
         for move in ordered:
+            self._push_cont_base(board, move, 1)
             search_board.push(move)
             score = -negamax(search_board, depth - 1, -beta, -alpha, 1)
             search_board.pop()
@@ -812,6 +907,10 @@ class Engine:
         ):
             reduction = NULL_MOVE_BASE_REDUCTION + depth // NULL_MOVE_DEPTH_DIVISOR
             self._null_moves += 1
+            # Passing is not a move and refutes nothing, so the node below it has no previous
+            # move to be a reply to. Without this it would inherit whatever base the last real
+            # move of this node left behind, and credit its cutoffs to a move two plies away.
+            self._cont_base[child_ply] = _CONT_NONE
             search_board.push_null()
             null_score = -negamax(
                 search_board, depth - 1 - reduction, -beta, -beta + 1, child_ply, False
@@ -883,6 +982,8 @@ class Engine:
                 # still means mate or stalemate.
                 pruned_any = True
                 continue
+            # After both prunes, so a move that is never searched costs nothing to record.
+            self._push_cont_base(board, move, child_ply)
             search_board.push(move)
             if stage > STAGE_KILLER:
                 quiets_searched += 1
@@ -1028,8 +1129,21 @@ class Engine:
                 push_targets &= ~chess.BB_SQUARES[ep_square]
             quiets.extend(board.generate_legal_moves(pushers, push_targets))
         history = self._history_heuristic[turn]
+        cont = self._cont_history
+        cont_base = self._cont_base[ply]
         if len(quiets) > 1:
-            quiets.sort(key=lambda m: history[m.from_square << 6 | m.to_square], reverse=True)
+            piece_type_at = board.piece_type_at
+            quiets.sort(
+                key=lambda m: _quiet_order(
+                    history,
+                    cont,
+                    cont_base,
+                    piece_type_at(m.from_square) or 0,
+                    m.from_square,
+                    m.to_square,
+                ),
+                reverse=True,
+            )
         for move in quiets:
             code = move.from_square | move.to_square << 6
             if code != tt_code and code != killer_first and code != killer_second:
@@ -1355,6 +1469,7 @@ class Engine:
                     gain += promotion_gain
                 if gain < delta_floor:
                     continue
+            self._push_cont_base(board, move, child_ply)
             search_board.push(move)
             nodes = self._nodes + 1
             self._nodes = nodes
@@ -1435,6 +1550,8 @@ class Engine:
         ep_square = board.ep_square
         killer_first, killer_second = self._killers[ply]
         history = self._history_heuristic[board.turn]
+        cont = self._cont_history
+        cont_base = self._cont_base[ply]
         rank = _MVV_LVA_RANK
         pawn = chess.PAWN
 
@@ -1456,10 +1573,31 @@ class Engine:
                 return _ORDER_KILLER_FIRST
             if code == killer_second:
                 return _ORDER_KILLER_SECOND
-            return history[from_square << 6 | to_square]
+            return _quiet_order(
+                history,
+                cont,
+                cont_base,
+                piece_type_at(from_square) or 0,
+                from_square,
+                to_square,
+            )
 
         moves.sort(key=order_key, reverse=True)
         return moves
+
+    def _push_cont_base(self, board: chess.Board, move: chess.Move, child_ply: int) -> None:
+        """Record where the replies to ``move`` are filed, for the node it is about to lead to.
+
+        Called with ``board`` still in the position ``move`` is played from, so ``board.turn`` is
+        the side playing it and the from-square still holds the piece that moves. A promotion is
+        filed under the pawn that left, not the piece that arrives, which is the same convention
+        the plain history's from-square carries.
+        """
+        self._cont_base[child_ply] = (
+            _cont_base(board.turn, board.piece_type_at(move.from_square) or 0, move.to_square)
+            if CONTINUATION_HISTORY
+            else _CONT_NONE
+        )
 
     def _reward_quiet_cutoff(
         self, board: chess.Board, move: chess.Move, depth: int, ply: int
@@ -1474,11 +1612,25 @@ class Engine:
         index = move.from_square << 6 | move.to_square
         # depth * depth: cutoffs near the root are rarer and worth more than cutoffs near leaves.
         history[index] = min(history[index] + depth * depth, _HISTORY_MAX)
+        # The same credit again, in the context of the move this one replied to. The caller has
+        # already unmade the move, so the from-square holds the piece that played it.
+        base = self._cont_base[ply]
+        if base != _CONT_NONE:
+            cont = self._cont_history
+            piece_type = board.piece_type_at(move.from_square) or 0
+            cont_index = base + piece_type * _CONT_SQUARES + move.to_square
+            cont[cont_index] = min(cont.get(cont_index, 0) + depth * depth, _HISTORY_MAX)
 
     def _age_history(self) -> None:
         """Halve every history score so what was learned last move fades rather than saturates."""
         for table in self._history_heuristic:
             table[:] = [value >> 1 for value in table]
+        # Same halving for the continuation table. An entry that would reach zero is dropped
+        # instead of kept, which is the same table (a missing entry reads as zero) and stops a
+        # long game from accumulating rows it no longer believes anything about.
+        self._cont_history = {
+            index: value >> 1 for index, value in self._cont_history.items() if value > 1
+        }
 
     # ------------------------------------------------------------------ helpers
 

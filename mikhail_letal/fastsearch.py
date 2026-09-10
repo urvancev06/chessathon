@@ -70,9 +70,11 @@ from mikhail_letal.fastboard import (
     _KNIGHT_DIRS,
     _SLIDER_DIRS,
     _SLIDER_N,
+    BISHOP,
     BLACK,
     COLOUR_SHIFT,
     EMPTY,
+    FLAG_CASTLE,
     FLAG_EN_PASSANT,
     FLAG_SHIFT,
     KING,
@@ -95,6 +97,7 @@ from mikhail_letal.fastboard import (
     PROMO_MASK,
     PROMO_SHIFT,
     QUEEN,
+    ROOK,
     SQ_BITS,
     SQ_MASK,
     U_KEY,
@@ -128,12 +131,14 @@ from mikhail_letal.search import (
     _ORDER_CAPTURE,
     _ORDER_KILLER_FIRST,
     _ORDER_KILLER_SECOND,
+    _ORDER_LOSING_CAPTURE,
     _ORDER_TT,
     ASPIRATION_MAX_FAILS,
     ASPIRATION_MIN_DEPTH,
     ASPIRATION_WIDEN,
     ASPIRATION_WINDOW,
     ASPIRATION_WINDOWS,
+    CONTINUATION_HISTORY,
     DELTA_MARGIN,
     DELTA_PRUNING,
     DRAW_TIEBREAK_MARGIN,
@@ -191,6 +196,19 @@ NODE_CHECK_INTERVAL: Final = 512
 TT_BITS: Final = 21
 EVAL_BITS: Final = 18
 
+# Continuation-history geometry (see `search.CONTINUATION_HISTORY` for what the table is and
+# `search._CONT_ROW` for the index it shares). This engine addresses its own 0x88 squares, so the
+# square dimension is 128 rather than 64 and the whole table is
+# 2 * 7 * 128 * 7 * 128 = 1 605 632 int32 entries, 6.4 MB. That is a twelfth of the transposition
+# table beside it and nothing against the platform's 2 GB, and the layout is what makes it cheap
+# to read: every move of a node shares one previous move, so all of them index the same
+# contiguous 896-entry row, which is 3.5 KB and sits in L1 for the whole node.
+_CONT_PIECE_KINDS: Final = 7  # piece types are 1..6; index 0 is never used
+_CONT_SQUARES: Final = 128  # 0x88, the same square encoding as `history`
+_CONT_ROW: Final = _CONT_PIECE_KINDS * _CONT_SQUARES  # entries under one previous move
+_CONT_ENTRIES: Final = 2 * _CONT_PIECE_KINDS * _CONT_SQUARES * _CONT_ROW
+_CONT_NONE: Final = -1  # "no previous move": the root, and the node directly under a null move
+
 # The node rate a fresh engine assumes before any search has been timed. The warm-up replaces it
 # with a measurement, and every real search refines it, but it has to start somewhere and it must
 # never be zero or unset: `FastEngine.search` derives the node cap that backs up the clock from
@@ -229,6 +247,8 @@ class SearchState(NamedTuple):
     tt_data: npt.NDArray[np.int32]  # (slots, 5): depth, score, flag, move, generation
     killers: npt.NDArray[np.int32]  # (MAX_PLY + 2, 2): two quiet cutoff moves per ply
     history: npt.NDArray[np.int32]  # (2, 128 * 128): cutoff credit by colour and from-to
+    cont: npt.NDArray[np.int32]  # (_CONT_ENTRIES,): the same credit, per previous move
+    cont_base: npt.NDArray[np.int64]  # (MAX_PLY + 1,): each ply's row in `cont`, or _CONT_NONE
     moves: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): one move buffer per ply
     order: npt.NDArray[np.int32]  # (MAX_PLY + 2, MAX_MOVES): the ordering score of each
     root_scores: npt.NDArray[np.int32]  # the search score of each root move, for the draw tie-break
@@ -258,6 +278,10 @@ def new_state(tt_bits: int = TT_BITS, eval_bits: int = EVAL_BITS) -> SearchState
         tt_data=np.zeros((tt_size, 5), dtype=np.int32),
         killers=np.full((MAX_PLY + 2, 2), NO_MOVE, dtype=np.int32),
         history=np.zeros((2, 128 * 128), dtype=np.int32),
+        cont=np.zeros(_CONT_ENTRIES, dtype=np.int32),
+        # int64 so the index arithmetic in `negamax` never has to think about int32 width; the
+        # array is MAX_PLY + 1 entries, so it costs nothing.
+        cont_base=np.full(MAX_PLY + 1, _CONT_NONE, dtype=np.int64),
         moves=np.zeros((MAX_PLY + 2, MAX_MOVES), dtype=np.int32),
         order=np.zeros((MAX_PLY + 2, MAX_MOVES), dtype=np.int32),
         root_scores=np.zeros(MAX_MOVES, dtype=np.int32),
@@ -555,6 +579,199 @@ def _victim(pos: Position, move: int) -> int:
     return kind
 
 
+# Material values for the exchange evaluator, indexed by piece type. Deliberately **not** the
+# tuned evaluation values: SEE answers "who comes out ahead in material on this square", where the
+# textbook ratios are the whole content and a positional table would make the answer depend on
+# where the pieces stand. The king is effectively infinite so that no swap-off sequence ever
+# chooses to give it up. Recorded in docs/PROVENANCE.md.
+_SEE_VALUE = np.array([0, 100, 320, 330, 500, 900, 30_000], dtype=np.int32)
+
+_SEE_MAX_SWAPS: Final = 32  # a square cannot be attacked more times than there are pieces
+
+
+@njit(cache=False)
+def _least_valuable_attacker(board: npt.NDArray[np.int32], square: int, colour: int) -> int:
+    """0x88 square of the cheapest `colour` piece attacking `square`, or -1 if there is none.
+
+    Reads the board **as it currently stands**, which is what makes the swap-off loop below able to
+    see x-rays: removing the bishop in front of a queen and calling again finds the queen, with no
+    separate occupancy word to maintain. That is why `see` mutates the mailbox and restores it,
+    rather than threading an occupancy mask the way a bitboard engine would.
+    """
+    them = colour << COLOUR_SHIFT
+
+    # Pawns first: nothing is cheaper, so the first one found is the answer. A pawn attacks
+    # diagonally forward, so it stands one rank *behind* the square from its own point of view.
+    pawn = PAWN | them
+    if colour == WHITE:
+        left, right = square - 17, square - 15
+    else:
+        left, right = square + 15, square + 17
+    if (left & OFF_BOARD_MASK) == 0 and board[left] == pawn:
+        return int(left)
+    if (right & OFF_BOARD_MASK) == 0 and board[right] == pawn:
+        return int(right)
+
+    # Knights: next cheapest, and pawns are already excluded, so again the first hit wins.
+    knight = KNIGHT | them
+    for i in range(8):
+        frm = square + _KNIGHT_DIRS[i]
+        if (frm & OFF_BOARD_MASK) == 0 and board[frm] == knight:
+            return int(frm)
+
+    # Sliders and the king. The first occupied square along a direction is the only one that can
+    # attack from it; anything behind is an x-ray, visible only once that piece is removed.
+    best_square = -1
+    best_value = 0x7FFFFFFF
+    for i in range(8):
+        direction = _KING_DIRS[i]
+        diagonal = direction != 16 and direction != -16 and direction != 1 and direction != -1
+        frm = square + direction
+        adjacent = True
+        while (frm & OFF_BOARD_MASK) == 0:
+            piece = board[frm]
+            if piece != EMPTY:
+                if (piece >> COLOUR_SHIFT) == colour:
+                    kind = piece & PIECE_TYPE_MASK
+                    hits = kind == QUEEN or kind == (BISHOP if diagonal else ROOK)
+                    if adjacent and kind == KING:
+                        hits = True
+                    if hits and _SEE_VALUE[kind] < best_value:
+                        best_value = _SEE_VALUE[kind]
+                        best_square = int(frm)
+                break
+            adjacent = False
+            frm += direction
+    return int(best_square)
+
+
+@njit(cache=False)
+def see(pos: Position, move: int) -> int:
+    """Centipawn result of the exchange on the destination square, from the mover's point of view.
+
+    For a capture the victim is taken first. For a **quiet** move there is no victim and the
+    exchange begins with the mover's own piece standing on the square, so a move onto a square the
+    opponent wins comes back negative -- which is what makes the sign usable for filtering quiet
+    moves. Returning 0 for every quiet move, as the first version did, makes any `see(...) < 0`
+    filter over them a silent no-op.
+
+    The standard swap-off: play the capture, then let each side recapture with its cheapest
+    attacker in turn, then fold the sequence back assuming either side stops as soon as continuing
+    would cost it. Folding is what makes the answer "what the exchange is worth if both play well"
+    rather than "what happens if everyone captures until nobody can".
+
+    Implemented on the mailbox rather than with an occupancy mask, because under numba a 64-bit
+    shift sign-extends or overflows silently -- the same reason `fasteval` uses per-file pawn
+    summaries. The board is mutated and restored exactly; nothing else may run in between.
+    """
+    board = pos.board
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    flag = (move >> FLAG_SHIFT) & 7
+    promotion = (move >> PROMO_SHIFT) & PROMO_MASK
+
+    moved = board[frm]
+    mover = moved >> COLOUR_SHIFT
+
+    # En passant takes a pawn that is not standing on the destination square.
+    taken_square = to
+    if flag == FLAG_EN_PASSANT:
+        victim = PAWN
+        taken_square = to - 16 if mover == WHITE else to + 16
+    else:
+        victim = board[to] & PIECE_TYPE_MASK
+
+    # Castling is left at 0: the rook's half of the move is not modelled here, and a king may not
+    # castle into an attacked square in the first place, so there is no exchange to evaluate.
+    if flag == FLAG_CASTLE:
+        return 0
+
+    # No early return for a quiet move. `victim` is EMPTY, `_SEE_VALUE[EMPTY]` is 0, and the loop
+    # below then evaluates exactly the right question: the mover's piece stands on the square and
+    # the opponent may take it.
+
+    gain = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undo_square = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undo_piece = np.empty(_SEE_MAX_SWAPS, dtype=np.int32)
+    undone = 0
+
+    gain[0] = _SEE_VALUE[victim]
+    exposed = moved & PIECE_TYPE_MASK  # the piece now standing on `to`, and so next at risk
+    if promotion != 0:
+        # The pawn is gone and a new piece stands there: the side gains the difference, and it is
+        # the promoted piece that can be captured next.
+        gain[0] += _SEE_VALUE[promotion] - _SEE_VALUE[PAWN]
+        exposed = promotion
+
+    undo_square[undone] = frm
+    undo_piece[undone] = moved
+    undone += 1
+    board[frm] = EMPTY
+    if taken_square != to:
+        undo_square[undone] = taken_square
+        undo_piece[undone] = board[taken_square]
+        undone += 1
+        board[taken_square] = EMPTY
+    saved_to = board[to]
+    board[to] = (exposed | (mover << COLOUR_SHIFT)) if exposed != EMPTY else EMPTY
+
+    side = 1 - mover
+    depth = 0
+    while depth + 1 < _SEE_MAX_SWAPS:
+        attacker = _least_valuable_attacker(board, to, side)
+        if attacker < 0:
+            break
+        kind = board[attacker] & PIECE_TYPE_MASK
+        # A king may not capture into a square the other side still attacks, so a sequence that
+        # would require it simply stops here.
+        if kind == KING and _least_valuable_attacker(board, to, 1 - side) >= 0:
+            break
+        depth += 1
+        gain[depth] = _SEE_VALUE[exposed] - gain[depth - 1]
+        exposed = kind
+        undo_square[undone] = attacker
+        undo_piece[undone] = board[attacker]
+        undone += 1
+        board[attacker] = EMPTY
+        board[to] = kind | (side << COLOUR_SHIFT)
+        side = 1 - side
+
+    board[to] = saved_to
+    for i in range(undone - 1, -1, -1):
+        board[undo_square[i]] = undo_piece[i]
+
+    # Fold back: at each step the side to move takes the exchange only if it beats standing pat.
+    while depth > 0:
+        if -gain[depth - 1] > gain[depth]:
+            gain[depth - 1] = gain[depth - 1]
+        else:
+            gain[depth - 1] = -gain[depth]
+        depth -= 1
+    return int(gain[0])
+
+
+@njit(cache=False)
+def _cont_base(pos: Position, move: int) -> int:
+    """Where the continuation history of every reply to `move` begins, or `_CONT_NONE`.
+
+    Called with `pos` still in the position `move` is played from, so `M_SIDE` is the side
+    playing it and the from-square still holds the piece that moves. The replies filed under this
+    base belong to the *other* side, and that is the side the index carries. Once per move made,
+    never once per reply: `search._cont_base` is the same arithmetic on 0..63 squares.
+
+    A promotion is filed under the pawn that left rather than the piece that arrives, which is
+    the convention the plain history's from-square already carries.
+    """
+    if not CONTINUATION_HISTORY:
+        return _CONT_NONE
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    kind = pos.board[frm] & PIECE_TYPE_MASK
+    replier = 1 - pos.meta[M_SIDE]
+    base: int = ((replier * _CONT_PIECE_KINDS + kind) * _CONT_SQUARES + to) * _CONT_ROW
+    return base
+
+
 @njit(cache=False)
 def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: int) -> None:
     """Fill `st.order[ply][:count]` with the ordering score of each move in `st.moves[ply]`.
@@ -573,6 +790,9 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
     killer_first = st.killers[ply, 0]
     killer_second = st.killers[ply, 1]
     history = st.history[side]
+    # The previous move is the same for every move of this node, so its row is fixed once here.
+    cont = st.cont
+    cont_base = st.cont_base[ply]
 
     for i in range(count):
         move = moves[i]
@@ -587,12 +807,31 @@ def _score_moves(pos: Position, st: SearchState, ply: int, count: int, tt_move: 
             # The MVV-LVA rank of a piece is its piece type; only the order matters.
             attacker = board[frm] & PIECE_TYPE_MASK
             order[i] = _ORDER_CAPTURE + 10 * (victim + promotion) - attacker
+            # SEE is consulted only where MVV-LVA cannot already answer. Taking something worth at
+            # least as much as the attacker is winning or equal by inspection and no swap-off can
+            # change that, so the scan runs on the minority of captures that might be losing --
+            # which is what keeps it off the hot path. Promotions are left alone: the new piece,
+            # not the pawn, is what stands on the square afterwards.
+            if promotion == 0 and _SEE_VALUE[victim] < _SEE_VALUE[attacker]:
+                exchange = see(pos, move)
+                if exchange < 0:
+                    order[i] = _ORDER_LOSING_CAPTURE + exchange
         elif move == killer_first:
             order[i] = _ORDER_KILLER_FIRST
         elif move == killer_second:
             order[i] = _ORDER_KILLER_SECOND
         else:
-            order[i] = history[frm * 128 + to]
+            # Plain history plus continuation history, clamped: each table saturates at
+            # _HISTORY_MAX on its own, so the unclamped sum would reach nearly twice
+            # _ORDER_KILLER_SECOND and a quiet move would outrank first a killer and then a
+            # capture. `search._quiet_order` is the same three lines.
+            score = history[frm * 128 + to]
+            if cont_base != _CONT_NONE:
+                kind = board[frm] & PIECE_TYPE_MASK
+                score += cont[cont_base + kind * _CONT_SQUARES + to]
+                if score > _HISTORY_MAX:
+                    score = _HISTORY_MAX
+            order[i] = score
 
 
 @njit(cache=False)
@@ -624,10 +863,20 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
         st.killers[ply, 1] = st.killers[ply, 0]
         st.killers[ply, 0] = move
     side = pos.meta[M_SIDE]
-    index = (move & SQ_MASK) * 128 + ((move >> SQ_BITS) & SQ_MASK)
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    index = frm * 128 + to
     # depth * depth: cutoffs near the root are rarer and worth more than cutoffs near leaves.
     value = st.history[side, index] + depth * depth
     st.history[side, index] = value if value < _HISTORY_MAX else _HISTORY_MAX
+    # The same credit again, in the context of the move this one replied to. The caller has
+    # already unmade the move, so the from-square holds the piece that played it and `M_SIDE` is
+    # that piece's colour.
+    base = st.cont_base[ply]
+    if base != _CONT_NONE:
+        cont_index = base + (pos.board[frm] & PIECE_TYPE_MASK) * _CONT_SQUARES + to
+        value = st.cont[cont_index] + depth * depth
+        st.cont[cont_index] = value if value < _HISTORY_MAX else _HISTORY_MAX
 
 
 # ----------------------------------------------------------------------------- terminal scores
@@ -816,6 +1065,26 @@ def quiescence(
                 gain += promotion_gain
             if gain < delta_floor:
                 continue
+        # Skip captures the swap-off says lose material. Until now the delta margin was the only
+        # thing pruning here, so a queen taking a defended pawn was searched to the end of its own
+        # recapture chain -- and there are 700 000 to 1 350 000 captures entering quiescence per
+        # search in closed positions.
+        #
+        # Never while `evasions`: in check every legal move is generated here and one of them may
+        # be the only escape, so a losing capture is still a move that has to be searched. Dropping
+        # it would not cost material, it would miss a mate. And, as in ordering, SEE is consulted
+        # only where MVV-LVA cannot already answer, and promotions are left alone.
+        if not evasions and ((move >> PROMO_SHIFT) & PROMO_MASK) == 0:
+            victim_kind = _victim(pos, move)
+            attacker_kind = pos.board[move & SQ_MASK] & PIECE_TYPE_MASK
+            if (
+                victim_kind != 0
+                and _SEE_VALUE[victim_kind] < _SEE_VALUE[attacker_kind]
+                and see(pos, move) < 0
+            ):
+                continue
+        # After the SEE skip, so a capture that is never searched costs nothing to record.
+        st.cont_base[ply + 1] = _cont_base(pos, move)
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1019,6 +1288,10 @@ def negamax(
     ):
         reduction = NULL_MOVE_BASE_REDUCTION + depth // NULL_MOVE_DEPTH_DIVISOR
         ints[I_NULL_MOVES] += 1
+        # Passing is not a move and refutes nothing, so the node below it has no previous move to
+        # be a reply to. Without this it would inherit the base a sibling left in this slot and
+        # credit its cutoffs to a move that was never played on this line.
+        st.cont_base[child_ply] = _CONT_NONE
         saved_ep, saved_half, saved_key = _make_null(pos)
         null_score = -negamax(pos, st, ev, depth - 1 - reduction, -beta, -beta + 1, child_ply, 0)
         _unmake_null(pos, saved_ep, saved_half, saved_key)
@@ -1115,6 +1388,7 @@ def negamax(
             # has nearly always been searched already.
             pruned_any = 1
             continue
+        st.cont_base[child_ply] = _cont_base(pos, move)
         if make_move(pos, move) == 0:
             unmake_move(pos)
             continue
@@ -1299,6 +1573,7 @@ class FastEngine:
         st.eval_value[:] = 0
         st.killers[:] = NO_MOVE
         st.history[:] = 0
+        st.cont[:] = 0
         st.ints[I_GENERATION] = 0
 
     # ------------------------------------------------------------------ public entry point
@@ -1352,9 +1627,14 @@ class FastEngine:
             return SearchResult(None, score, 0, 0, 0, time.perf_counter() - start, False)
 
         st.path[0] = pos.undo[pos.meta[M_PLY], U_KEY]
+        # The root has no previous move: the position arrives as a FEN and the opponent's last
+        # move is not part of it, so root moves are ordered on the plain history alone.
+        st.cont_base[0] = _CONT_NONE
         # Halve every history score so what was learned last move fades rather than saturates.
         # In place on the array itself: `st` is a NamedTuple, so its fields cannot be rebound.
+        # Both tables are non-negative, so the shift cannot sign-extend.
         np.right_shift(st.history, 1, out=st.history)
+        np.right_shift(st.cont, 1, out=st.cont)
 
         best_move = NO_MOVE
         best_score = DRAW_SCORE
@@ -1502,6 +1782,14 @@ class FastEngine:
         ints[I_PATH_DRAW] = 0
         for i in range(count):
             move = int(st.moves[0, i])
+            # The array element rather than `move` is belt-and-braces, not a requirement. The
+            # compiled tree calls `_cont_base` with an int32 and this is Python, so the worry was
+            # a second specialisation compiled on the game clock -- but numba widens an int32
+            # argument into an int64 parameter without building one, and
+            # `test_nothing_compiles_during_a_game` confirms it. Kept because an exact-type call
+            # costs nothing; recorded because the rule is "one specialisation per type numba
+            # cannot safely convert from", not "per distinct argument type".
+            st.cont_base[1] = int(_cont_base(pos, st.moves[0, i]))
             make_move(pos, move)  # produced by gen_legal, so it cannot be illegal
             score = -int(negamax(pos, st, ev, depth - 1, -beta, -alpha, 1, 1))
             unmake_move(pos)
@@ -1621,6 +1909,9 @@ JITTED: Final = (
     "_has_non_pawn_material",
     "gen_captures",
     "_victim",
+    "_least_valuable_attacker",
+    "see",
+    "_cont_base",
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
@@ -1675,8 +1966,16 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
         _unmake_null(pos, *_make_null(pos))
         _has_non_pawn_material(pos, WHITE)
         count = int(gen_pseudo(pos, st.moves[1]))
-        gen_captures(pos, st.moves[1])
+        captures = int(gen_captures(pos, st.moves[1]))
         _victim(pos, st.moves[1, 0])
+        # `see` is compiled on a real capture from this position, not on a quiet move: the early
+        # return for a quiet move would leave the swap-off loop and the attacker scan to compile
+        # on the clock the first time the search orders a capture.
+        if captures > 0:
+            capture = int(st.moves[1, 0])
+            see(pos, capture)
+            _least_valuable_attacker(pos.board, (capture >> SQ_BITS) & SQ_MASK, WHITE)
+        _cont_base(pos, st.moves[1, 0])
         _score_moves(pos, st, 1, count, NO_MOVE)
         _pick_best(st, 1, 0, count)
         _reward_quiet_cutoff(pos, st, st.moves[1, 0], 1, 1)

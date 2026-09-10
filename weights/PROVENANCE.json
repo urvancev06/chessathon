@@ -357,7 +357,15 @@
     "produced_by": "code (mikhail_letal/search.py)",
     "data": "none: hand-chosen at textbook magnitude, untuned",
     "run_id": "2026-09-09",
-    "note": "cutoffs near the root are rarer and worth more; the clamp keeps quiet moves below the killer band so ordering bands cannot invert"
+    "note": "cutoffs near the root are rarer and worth more. The clamp applies to the *sum* of the plain and continuation tables (see search.continuation_history), which is what keeps quiet moves below the killer band so the ordering bands cannot invert"
+  },
+  {
+    "parameter": "search.continuation_history",
+    "value_or_shape": "on: True; one previous move of context; 2 x 7 x 64 x 7 x 64 entries in the reference engine, 2 x 7 x 128 x 7 x 128 (1605632 int32, 6.4 MB) compiled",
+    "produced_by": "code (mikhail_letal/search.py)",
+    "data": "none: structural, and no new tuned number",
+    "run_id": "2026-09-09",
+    "note": "the history heuristic indexed by the previous move as well as the current one, so a quiet move is credited for refuting a specific reply rather than in general. It introduces no constant of its own: the bonus, the cap and the halving between moves are the plain table's, and the shape is the board's (piece types x squares, twice). The two engines size the square dimension differently because they index squares differently -- 0..63 in the reference engine, 0x88 in the compiled one -- exactly as their two `history` tables already do"
   },
   {
     "parameter": "search.mate_scores",

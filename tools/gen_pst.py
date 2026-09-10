@@ -364,8 +364,28 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
             f"depth * depth, clamped at {search._HISTORY_MAX}",
             code,
             TEXTBOOK,
-            "cutoffs near the root are rarer and worth more; the clamp keeps quiet moves below the "
-            "killer band so ordering bands cannot invert",
+            "cutoffs near the root are rarer and worth more. The clamp applies to the *sum* of the "
+            "plain and continuation tables (see search.continuation_history), which is what keeps "
+            "quiet moves below the killer band so the ordering bands cannot invert",
+        ),
+        (
+            "search.continuation_history",
+            f"on: {search.CONTINUATION_HISTORY}; one previous move of context; "
+            f"2 x {search._CONT_PIECE_KINDS} x {search._CONT_SQUARES} x {search._CONT_PIECE_KINDS}"
+            f" x {search._CONT_SQUARES} entries in the reference engine, "
+            f"2 x {fastsearch._CONT_PIECE_KINDS} x {fastsearch._CONT_SQUARES} x "
+            f"{fastsearch._CONT_PIECE_KINDS} x {fastsearch._CONT_SQUARES} "
+            f"({fastsearch._CONT_ENTRIES} int32, "
+            f"{fastsearch._CONT_ENTRIES * 4 / 1e6:.1f} MB) compiled",
+            code,
+            "none: structural, and no new tuned number",
+            "the history heuristic indexed by the previous move as well as the current one, so a "
+            "quiet move is credited for refuting a specific reply rather than in general. It "
+            "introduces no constant of its own: the bonus, the cap and the halving between moves "
+            "are the plain table's, and the shape is the board's (piece types x squares, twice). "
+            "The two engines size the square dimension differently because they index squares "
+            "differently -- 0..63 in the reference engine, 0x88 in the compiled one -- exactly as "
+            "their two `history` tables already do",
         ),
         (
             "search.mate_scores",

@@ -2013,3 +2013,161 @@ that text, so the count could reach 1 and never 0 — it could not have fired on
 **The rejected alternative** was to keep the workflow and rely on the guard. Rejected because the
 guard had already failed once by the time the choice arose, and because the research it was
 producing was not worth a corrupted screen — the thing it was researching *was* that screen.
+## 2026-09-09 — One-ply continuation history, and deliberately not two
+
+The plain history heuristic credits a quiet move by its from- and to-square alone, so everything
+it knows about `Ng1-f3` is summed over every position in which that move was ever a cutoff. That
+is a lot of evidence about a move and none at all about *when* the move is good, and the answer is
+usually "as a reply to something specific". `CONTINUATION_HISTORY` adds one previous move of
+context: a second table indexed by (side to move, the piece the previous move moved, where it
+moved to, the piece this move moves, where it moves to), carrying the same `depth * depth` credit
+on the same cutoffs, read beside the plain table when quiet moves are ordered.
+
+Why this and not another ordering idea: it is the one candidate with a published SPRT-quality
+number large enough for a 300-game screen to resolve, and — the reason it was chosen over the
+others — it contains no evaluation term at all. It is a pure ordering signal, so the weak static
+evaluation that discounts most published gains for us does not apply to it.
+
+**Rejected: a plain counter-move table.** A single stored refutation per previous move is the
+rank-1 special case of the same information, has no comparable public measurement, and would have
+to be torn out again the moment this was added.
+
+**Rejected: two plies of context (follow-up history) as well.** A separate technique with a
+separate number; both at once would leave a screen unable to say which one paid.
+
+**Rejected: history gravity** (`entry += bonus - entry * |bonus| / MAX`), which is what the
+reference engines pair this with. It is a different *update rule* for both tables, not a new
+context channel, and bundling it would mean a screen measuring two changes. The new table
+therefore reuses the plain one's saturating addition and its halving between moves exactly.
+
+**Rejected: giving each table half the ordering band.** The sum of two tables that each saturate
+at `_HISTORY_MAX` reaches nearly twice `_ORDER_KILLER_SECOND`, so a quiet move could outrank first
+a killer and then a capture — silently, because nothing else in the search checks the bands.
+Halving `_HISTORY_MAX` would have fixed it by changing when the *plain* table saturates, which is
+a second behavioural change riding along. The sum is clamped instead: the plain table's dynamics
+are untouched and the bands cannot be crossed by construction.
+
+The table introduces no tuned number of its own. The bonus, the cap and the ageing are the plain
+table's; the shape is the board's (piece types × squares, twice, plus side to move). The compiled
+engine sizes the square dimension 128 rather than 64 because it indexes 0x88 squares, exactly as
+the two `history` tables already differ; that is a relabelling of the same five coordinates and
+neither engine ever reads the other's table.
+
+Two things this had to get right that a test would not otherwise reach. The node directly under a
+**null move** has no previous move — passing refutes nothing — and without an explicit reset it
+would inherit the row a sibling left in that slot and credit its cutoffs to a move never played on
+that line. And the **root** has no previous move either: the position arrives as a FEN and the
+opponent's last move is not part of it.
+`tests/test_search.py::test_every_node_knows_the_move_that_led_to_it_and_a_null_move_leads_to_none`
+checks both at every node of a real search, and counts the nodes it saw in each case so it cannot
+pass vacuously on a position that never reaches one of them.
+
+No Elo claim here: the screen decides.
+
+## 2026-09-09 — Pre-registered: a history-dependent gain should grow with the time control
+
+Written **before** the ordering bundle is screened, and it is only worth anything for that reason.
+Reached for afterwards to explain a disappointing row it would be an excuse; stated in advance it
+is a prediction that can be wrong.
+
+**The claim.** Continuation history's value is accumulated evidence: a quiet move is credited only
+when it actually causes a cutoff, and the table has to fill before the ordering can exploit it. So
+the gain should **scale with nodes searched per move**, and every screen we run is at 10 s + 0.1 s
+where a move gets on the order of a fifteenth of the nodes it gets at the real 120 s + 0.5 s
+control. If that reasoning holds, the fast screen does not merely add noise to this change, it is
+**biased against it** — which is a different and stronger statement than "300 games cannot resolve
++25", and it cuts the other way when a row comes back flat.
+
+**Why it is not just reasoning.** The table is extremely sparse in practice. Measured while
+building this branch: after a single depth-9 search from a fresh table in a middlegame position,
+**973 of 1 605 632 cells were non-zero**. A game accumulates across moves (halved between them, see
+`_age_history`), so the steady state is higher than that — but a control that gives each move a
+fifteenth of the nodes fills a table that starts this thin, that much less.
+
+**The prediction, so it can fail.** If this bundle is ever run at the real time control against the
+same baseline, it should show a **larger** effect than the fast screen did. If a real-clock run
+shows the same or a smaller effect, this reasoning is wrong and the entry should say so rather than
+be quietly dropped.
+
+**What it does not license.** It is not a reason to promote on a flat fast screen. A flat screen
+plus this argument is still a flat screen; the argument says where to spend a real-clock slot if
+one exists, not what to conclude without one. The same caution applies to the sibling claim that
+static exchange evaluation's ordering benefit needs depth to pay — untested, and recorded here only
+so that it, too, is on the record before the number rather than after it.
+
+Origin: `chessathon-d9` raised the time-control scaling; the sparsity measurement is from this
+branch's own smoke test.
+
+## 2026-09-09 — The question that would have caught all four hollow checks
+
+Four checks failed the same way today, across three sessions, and each one *returned a confident
+answer* rather than an error. They are worth recording together because the pattern is not
+obvious from any one of them:
+
+- a held-out split whose membership was defined by the training list it was meant to be held out
+  from;
+- a guard monitor whose filter matched the signature of the incident that had already happened,
+  so it missed the second one;
+- a quiet-position filter that called `evaluate()` while `evaluate()` was the thing under test;
+- a build comparison in `tools/depth_quality.py` that compared one engine **with itself**, with a
+  printed note admitting the row meant nothing.
+
+The fourth is the instructive one. The defect had been *correctly identified* and then a
+disclosure was allowed to stand in for the fix. **A disclaimer is read after you already have the
+number, and by then the number has done its work.**
+
+**The question that separates all four from a working check** (86's formulation): *what is this
+predicate defined in terms of, and is that the thing I am testing?* A held-out split defined by
+the training list is defined in terms of the thing under test. A filter that calls `evaluate()`
+is defined in terms of the thing under test. A comparison of a build with itself is defined in
+terms of nothing at all.
+
+The companion habit, which is what actually caught three of the four: **say in advance which
+result would flatter you, and go looking for the defect when you get it.** Your own review does
+not filter for the errors that agree with you; a pre-registered trigger does. Three of the four
+defects in `tools/lmp_probe.py` and `depth_quality.py` biased towards closing a question in the
+direction the author already leaned, which is not a coincidence and should not be treated as one.
+
+Recorded by chessathon-4c from the day's incidents; the predicate question is 86's, the
+pre-registration habit was d9's ask and became all three sessions' practice.
+
+## 2026-09-09 — Rejected: a passed-pawn race term, on a position with no passed pawns
+
+Round 88 was lost by trading into a king-and-pawn ending the engine misread by about 435 cp at
+depth 19 over 2.28M nodes. The proposed fix was a passed-pawn race term — king distance to the
+promotion square plus an unstoppable-passer bonus by the square rule — on the grounds that a
+passer is currently worth `passed_pawn_eg` (20) per rank and nothing more, so a pawn that queens
+by force scores the same as one that is merely advanced. That gap is real and the term was
+written.
+
+**It is rejected because the position that motivated it has no passed pawns.** After 41.Kxe2 the
+position is `8/8/2k5/1pp3p1/p5P1/P4P2/1P2K3/8 b - - 0 41`: a4 is held by a3, b5 and c5 by b2, g4
+and g5 block each other, f3 is stopped by g5. **Not one passed pawn on either side**, so neither
+the square rule nor a king-distance term could have fired. The term would have done exactly
+nothing in the game it was designed for.
+
+What actually decided it is visible in the continuation — 42.f4 gxf4 43.g5 b4 ... 48...b2
+49...b1=Q. Black had a three-against-two queenside majority and **created** a passer by force
+while our kingside majority was neutralised. That is majority and breakthrough evaluation —
+*candidate* passers, not existing ones — which is a substantially harder and more expensive
+computation than the square rule, and there is no cheap targeted version of it.
+
+**Two things worth keeping from how this was caught.**
+
+The check that stopped it was **asking for the FEN before writing code against the story**. The
+mechanism was plausible, the missing term was real, the endgame statistic (15 of 18 games reach
+four or fewer non-pawn pieces) was true, and the conclusion was still wrong — because nobody had
+looked at whether the term would fire in the position that motivated it.
+
+And a cost claim was accepted that had not been measured: "cheaper than mobility" was a statement
+about the **node rate**, but mobility's cost was 8.7% rate against **1.556x nodes-to-depth** — the
+rate was the small half. Looping over fewer pieces controls the half that was not the problem.
+Worse, this term was to be deliberately *large* (a queen less a pawn), and large scores are what
+mis-guess a 40 cp aspiration window and flip positions across futility thresholds, which is the
+mechanism that took aspiration's hit rate from 8/10 to 5/10 on the mobility build. A rarely-firing
+large term may cost more tree per firing than an always-firing gentle one. Unmeasured, in both
+directions.
+
+**Not carried forward.** The code was written and discarded rather than left on a branch: a
+Python-only evaluation term breaks integer-for-integer parity with `fasteval`, and half-ported
+unvalidated work the night before a freeze is worth less than the record of why it was dropped.
