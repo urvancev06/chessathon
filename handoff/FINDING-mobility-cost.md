@@ -130,7 +130,12 @@ expectation, is estimable with enough samples, and — the part that matters —
 
 An *ordering* change is different in kind: better first moves cause more cutoffs, so its tree
 effect has a sign, is systematic, and legitimately composes with the node rate. That is why
-`0.472 x 0.775` is sound for the ordering bundle and the same composition is not sound here.
+the composition is sound for the ordering bundle and is not sound here. (The bundle's own figures
+have since been re-measured with per-position pairing: **tree 0.5695**, not the pooled 0.472, so
+its effective speedup is **1.35x** rather than 1.65x. The pooled estimator had been overstating
+the bundle's benefit by 21%, and every position still moved the same way -- 12 of 12 below 1.0,
+min 0.234, max 0.732 -- which is the consistent sign that makes the composition legitimate here
+and illegitimate for an evaluation term whose positions span 0.36 to 4.19 in both directions.)
 
 **The measured instance, and it is stronger than the ratio it explains** (86's point, which I had
 not made): the aspiration window's hit rate falls **8/10 to 5/10** with mobility on — and that is a
