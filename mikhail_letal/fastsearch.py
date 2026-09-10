@@ -216,7 +216,14 @@ NODE_CHECK_INTERVAL: Final = 512
 # this development box's 7 GB. 2^23 is the largest value we can actually MEASURE, and screening a
 # value we cannot measure is how an unmeasured constant ships.
 TT_BITS: Final = 23
-EVAL_BITS: Final = 18
+# 2^22 slots: an int64 key and an int32 value, so 50 MB against the table's 235 MB and the
+# platform's 2 GB. It was 2^18 = 262,144 entries against 1.6-3.2 MILLION nodes per move, so it was
+# six to twelve times oversubscribed -- worse than the transposition table was before v1.4 -- and
+# almost every read missed and recomputed the evaluation. Every stand-pat, every futility and
+# reverse-futility test and every null-move gate goes through it, which is most of the tree.
+# Found by auditing the sizes the way the table was audited; the external research had flagged it
+# in one line ("check EVAL_BITS the same way; it is worse and cheaper") and it was right.
+EVAL_BITS: Final = 22
 
 # Continuation-history geometry (see `search.CONTINUATION_HISTORY` for what the table is and
 # `search._CONT_ROW` for the index it shares). This engine addresses its own 0x88 squares, so the

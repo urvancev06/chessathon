@@ -345,7 +345,7 @@
   },
   {
     "parameter": "search.eval_cache",
-    "value_or_shape": "2^18 entries (compiled); 100000 (reference engine)",
+    "value_or_shape": "2^22 entries (compiled); 100000 (reference engine)",
     "produced_by": "code (mikhail_letal/fastsearch.py)",
     "data": "none: sized by measurement",
     "run_id": "2026-09-10",

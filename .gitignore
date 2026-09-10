@@ -25,3 +25,4 @@ docs/report.synctex.gz
 # measurements themselves belong in docs/RESULTS.md, not in a transcript.
 *.log
 *.done
+data/arena/
