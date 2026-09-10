@@ -104,7 +104,31 @@ The defect is in the evaluation, and `fasteval.py` inherits it verbatim: its own
 "This is a *port*, not a redesign. Every term, every weight and every rounding decision is the one"
 of `evaluation.py`, and its only king term is `W_KING_SHIELD`.
 
-## Four king-danger terms ported to the compiled evaluation: a negative result
+## RETRACTED: the verdict below is not supported by its own evidence
+
+See `handoff/FINDING-replay-invalid.md`. The table below rejects four terms because "every one
+still plays all three losing moves". That comparison assumed the baseline reliably plays those
+moves. It does not: the search is bounded by wall clock, so the node budget moves with machine
+load and the move moves with it. The same version, same position, same clock produced `f7e7`,
+`f7c7` and `f7g7` on three consecutive runs — the blunder and the best move both inside the spread.
+The baseline is a coin flip, so the comparison carries almost no information.
+
+**What still stands** (none of it depends on replaying a search):
+
+- `fasteval.py` has `W_KING_SHIELD` and no king-danger term. Code inspection.
+- The two rated games were lost by the moves named here. That is Stockfish's grading of moves the
+  engine *actually played on the platform*, not a replay.
+- All four variants compile, and their Python-vs-compiled parity holds over 20 000-72 000 positions.
+- The node-rate costs, which were measured by interleaving base and variant.
+- The virtual-mobility diagnosis: for the black king on c8 the count is 6 before the move, after it,
+  and after the correct move alike. That is arithmetic on the position, not a sampled search.
+
+**What falls:** the verdict "none of these fixes the defect". The four terms were sampled a handful
+of times each from a distribution wide enough to contain both the blunder and the best move.
+**They were not measured.** Deciding between them needs a match, or a fixed-node search switch that
+makes a position replayable in the first place.
+
+## Four king-danger terms ported to the compiled evaluation: the runs, now retracted as a verdict
 
 Four candidate terms were written into isolated copies of v1.0 (`variants/v10-{expo,units,files,storm}`),
 each added to **both** `evaluation.py` and `fasteval.py`, then independently audited by a second
