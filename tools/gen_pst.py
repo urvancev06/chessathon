@@ -251,7 +251,8 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
             f" widen x{search.ASPIRATION_WIDEN}, {search.ASPIRATION_MAX_FAILS} fails then full",
             code,
             TEXTBOOK,
-            "40 cp is under half a pawn, so a stable root re-searches rarely",
+            "narrowed from 40 after tcheran measured +10.03 +- 5.56 for 25 -> 20; a wider "
+            "window fails less often but wastes the saving when it does not",
         ),
         (
             "search.futility_margins",

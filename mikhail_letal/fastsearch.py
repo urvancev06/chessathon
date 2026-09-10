@@ -195,7 +195,17 @@ NODE_CHECK_INTERVAL: Final = 512
 # so the index is a mask rather than a modulo. 2**21 entries cost 8 bytes of key plus 16 of data,
 # 50 MB in all, which is nothing against the platform's 2 GB and far more than a three-second
 # search fills.
-TT_BITS: Final = 21
+# 2^23 slots x 28 bytes = 235 MB, against a platform budget of 2 GB. It was 2^21 = 59 MB, which
+# is smaller than a single move's tree: at 800k nodes/s a 2-4 second move pushes 1.6-3.2 million
+# nodes through it, so the table was fully overwritten every move and the ordering information it
+# exists to carry never survived to be used. Stockfish's own measurements (15.1, LTC 60+0.6, vs a
+# 64 MB baseline) put 8 MB at -10.7 Elo, 4 MB at -21.5 and 2 MB at -29.5, with the conclusion that
+# average hashfull should stay below 30%; ours was near 100%.
+#
+# Not 2^24: that is 470 MB, and a 12-worker screen runs 24 agent processes, which does not fit in
+# this development box's 7 GB. 2^23 is the largest value we can actually MEASURE, and screening a
+# value we cannot measure is how an unmeasured constant ships.
+TT_BITS: Final = 23
 EVAL_BITS: Final = 18
 
 # Continuation-history geometry (see `search.CONTINUATION_HISTORY` for what the table is and
@@ -859,6 +869,30 @@ def _pick_best(st: SearchState, ply: int, index: int, count: int) -> None:
 
 
 @njit(cache=False)
+def _apply_history(table: npt.NDArray[np.int32], side: int, index: int, bonus: int) -> None:
+    """Gravity update: `value += bonus - value * |bonus| / MAX`.
+
+    A plain `value += bonus` with a clamp saturates: once a move reaches the ceiling every further
+    cutoff adds nothing and the table stops distinguishing a move that works everywhere from one
+    that worked once and then hit the cap. The gravity form pulls the value toward the bonus in
+    proportion to how far it already is, so it self-limits without a clamp and stays responsive at
+    the top of its range. Standard since Stockfish 2019; measured with the malus at
+    +15.92 +- 7.40 (tcheran).
+    """
+    value = table[side, index]
+    magnitude = bonus if bonus >= 0 else -bonus
+    table[side, index] = value + bonus - value * magnitude // _HISTORY_MAX
+
+
+@njit(cache=False)
+def _apply_cont(table: npt.NDArray[np.int32], index: int, bonus: int) -> None:
+    """`_apply_history` for the flat continuation table."""
+    value = table[index]
+    magnitude = bonus if bonus >= 0 else -bonus
+    table[index] = value + bonus - value * magnitude // _HISTORY_MAX
+
+
+@njit(cache=False)
 def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, ply: int) -> None:
     """A quiet move caused a beta cutoff: make it a killer and raise its history score."""
     if st.killers[ply, 0] != move:
@@ -869,16 +903,34 @@ def _reward_quiet_cutoff(pos: Position, st: SearchState, move: int, depth: int, 
     to = (move >> SQ_BITS) & SQ_MASK
     index = frm * 128 + to
     # depth * depth: cutoffs near the root are rarer and worth more than cutoffs near leaves.
-    value = st.history[side, index] + depth * depth
-    st.history[side, index] = value if value < _HISTORY_MAX else _HISTORY_MAX
+    bonus = depth * depth
+    _apply_history(st.history, side, index, bonus)
     # The same credit again, in the context of the move this one replied to. The caller has
     # already unmade the move, so the from-square holds the piece that played it and `M_SIDE` is
     # that piece's colour.
     base = st.cont_base[ply]
     if base != _CONT_NONE:
         cont_index = base + (pos.board[frm] & PIECE_TYPE_MASK) * _CONT_SQUARES + to
-        value = st.cont[cont_index] + depth * depth
-        st.cont[cont_index] = value if value < _HISTORY_MAX else _HISTORY_MAX
+        _apply_cont(st.cont, cont_index, bonus)
+
+
+@njit(cache=False)
+def _punish_quiet(pos: Position, st: SearchState, move: int, depth: int, ply: int) -> None:
+    """A quiet move was searched and did not cause the cutoff: lower its history score.
+
+    The bonus alone says which moves worked and never which did not, so a move that was tried and
+    failed at a hundred nodes keeps whatever credit it earned somewhere else. The malus is the
+    other half of the same signal and is measured with it: +15.92 +- 7.40 for gravity and maluses
+    together (tcheran).
+    """
+    side = pos.meta[M_SIDE]
+    frm = move & SQ_MASK
+    to = (move >> SQ_BITS) & SQ_MASK
+    _apply_history(st.history, side, frm * 128 + to, -(depth * depth))
+    base = st.cont_base[ply]
+    if base != _CONT_NONE:
+        cont_index = base + (pos.board[frm] & PIECE_TYPE_MASK) * _CONT_SQUARES + to
+        _apply_cont(st.cont, cont_index, -(depth * depth))
 
 
 # ----------------------------------------------------------------------------- terminal scores
@@ -1503,6 +1555,17 @@ def negamax(
                 # moves in sibling positions.
                 if quiet:
                     _reward_quiet_cutoff(pos, st, move, depth, ply)
+                    # ... and take the same amount off every quiet that was tried first and did
+                    # not cut. `i` is this move's index and the position is restored, so
+                    # `_victim` reads the same board the loop read.
+                    for j in range(i):
+                        earlier = st.moves[ply, j]
+                        if (
+                            _victim(pos, earlier) == 0
+                            and ((earlier >> PROMO_SHIFT) & PROMO_MASK) == 0
+                            and earlier != move
+                        ):
+                            _punish_quiet(pos, st, earlier, depth, ply)
                 break
             if score > alpha:
                 alpha = score
@@ -1962,6 +2025,9 @@ JITTED: Final = (
     "_score_moves",
     "_pick_best",
     "_reward_quiet_cutoff",
+    "_punish_quiet",
+    "_apply_history",
+    "_apply_cont",
     "_has_unpinned_move",
     "_has_legal",
     "_game_over_score",

@@ -199,7 +199,11 @@ CONTINUATION_HISTORY = True  # switch for bisection in development; the shipped 
 # iteration repeated, and after two failures the full window is used.
 ASPIRATION_WINDOWS = True  # switch for bisection in development; the shipped value is True
 ASPIRATION_MIN_DEPTH = 4  # earlier iterations are too cheap and their scores too volatile
-ASPIRATION_WINDOW = 40  # centipawns either side of the previous score
+# Centipawns either side of the previous score. Was 40, which is wide by modern practice: tcheran
+# measured +10.03 +- 5.56 for narrowing 25 to 20, and comparable engines start at 10-15. A wider
+# window fails high or low less often but wastes the saving when it does not, and our own root
+# scores move less between iterations than 40 cp at the depths we reach.
+ASPIRATION_WINDOW = 20
 ASPIRATION_WIDEN = 4  # window multiplier after a failure
 ASPIRATION_MAX_FAILS = 2  # failures before the full window is used
 
