@@ -98,6 +98,18 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# Razoring: at a shallow node whose static evaluation is far below alpha, drop straight into
+# quiescence rather than searching the move list. If the quiescence score still cannot reach
+# alpha, the node is very unlikely to and the whole subtree is skipped. Measured +7.73 +- 4.76
+# (tcheran) and +22 (Stardance). Distinct from futility, which prunes individual quiet moves
+# inside a node this one declines to enter at all.
+RAZORING = True  # switch for bisection; the shipped value is True
+RAZOR_MAX_DEPTH = 3  # deeper than this the margin cannot be trusted to bound what a search finds
+# Centipawns below alpha, per ply of remaining depth, before the node is razored. Generous
+# because the cost of being wrong is a whole subtree, and the quiescence check below it is what
+# actually makes the decision -- this margin only decides when to ask.
+RAZOR_MARGIN = 240
+
 # SEE pruning in the main search. Quiescence already skips captures the swap-off says lose
 # material; the main search does not, so a queen taking a defended pawn at depth 3 is searched to
 # the end of its own recapture chain in the tree where that costs most. Measured +25.45 +- 9.40
@@ -129,7 +141,7 @@ _QS_DEPTH = 0
 # for a badly ordered node, take a ply off and let the shallower search leave the table entry that
 # the next visit orders by. Ed Schroeder, Rebel 2020. Measured +9.66 +- 5.53 (tcheran) and, as the
 # older iterative-deepening form, +10.9 +- 11.7 (Blunder).
-INTERNAL_ITERATIVE_REDUCTION = False  # OFF: written and suite-green, but never screened
+INTERNAL_ITERATIVE_REDUCTION = True  # switch for bisection; the shipped value is True
 # Below this remaining depth the lost ply is a larger fraction of the search than the bad ordering
 # costs, and at depth 1-3 the node is nearly a leaf where ordering barely matters.
 IIR_MIN_DEPTH = 4

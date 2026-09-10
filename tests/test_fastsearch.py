@@ -841,7 +841,14 @@ def test_a_real_search_fills_the_table_and_new_game_empties_it() -> None:
     engine = FastEngine()
     result = run_search(BUSY_MIDDLEGAME, max_depth=7, engine=engine)
     assert result.move is not None
-    assert int(engine.state.cont.sum()) > 0, "a depth-7 search recorded no continuation cutoff"
+    # Counted, not summed. This asserted `sum() > 0` while the table held only bonuses; history
+    # maluses made the entries signed, and a depth-7 search now leaves 42 positive against 454
+    # negative for a sum of -302. Summing would then be testing "the bonuses outweigh the
+    # maluses", which is a different claim and not a true one. What the test means is that a real
+    # search writes to the table, so it counts the entries it wrote.
+    assert int(np.count_nonzero(engine.state.cont)) > 0, (
+        "a depth-7 search recorded no continuation cutoff"
+    )
     assert engine.state.cont_base[0] == _CONT_NONE, "the root has no previous move"
     engine.new_game()
-    assert int(engine.state.cont.sum()) == 0
+    assert int(np.count_nonzero(engine.state.cont)) == 0

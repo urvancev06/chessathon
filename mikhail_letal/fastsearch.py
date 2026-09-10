@@ -169,6 +169,9 @@ from mikhail_letal.search import (
     NULL_MOVE_PRUNING,
     QS_EVASION_PLIES,
     QUIESCENCE_TT,
+    RAZOR_MARGIN,
+    RAZOR_MAX_DEPTH,
+    RAZORING,
     REVERSE_FUTILITY_MARGIN,
     REVERSE_FUTILITY_MAX_DEPTH,
     REVERSE_FUTILITY_PRUNING,
@@ -1404,6 +1407,25 @@ def negamax(
             ints[I_PATH_DRAW] = 1 if (outer_path_draw != 0 or tainted != 0) else 0
             _store(st, key, depth, beta, LOWER, tt_move, ply, tainted)
             return beta
+
+    # (8b) Razoring: this node is so far below alpha that a full search is unlikely to reach it.
+    # Ask quiescence instead; if even that cannot reach alpha, return its score and skip the whole
+    # subtree. The quiescence call is what decides -- the margin only decides when to ask -- so a
+    # generous margin costs a quiescence search rather than a wrong answer.
+    if (
+        RAZORING
+        and depth <= RAZOR_MAX_DEPTH
+        and in_chk == 0
+        and not mate_bounds
+        and beta - alpha == 1
+        and _cached_eval(pos, st, ev, key) + RAZOR_MARGIN * depth <= alpha
+    ):
+        razor_score = quiescence(pos, st, ev, alpha, alpha + 1, ply, in_chk, 0)
+        if ints[I_ABORT] != 0:
+            return 0
+        if razor_score <= alpha:
+            ints[I_PATH_DRAW] = outer_path_draw
+            return razor_score
 
     # (9b) Internal iterative reduction (see INTERNAL_ITERATIVE_REDUCTION in search.py).
     # `in_chk == 0` is a deliberate deviation from the published form: the check extension at the
