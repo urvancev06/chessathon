@@ -132,7 +132,9 @@ An *ordering* change is different in kind: better first moves cause more cutoffs
 effect has a sign, is systematic, and legitimately composes with the node rate. That is why
 the composition is sound for the ordering bundle and is not sound here. (The bundle's own figures
 have since been re-measured with per-position pairing: **tree 0.5695**, not the pooled 0.472, so
-its effective speedup is **1.35x** rather than 1.65x. The pooled estimator had been overstating
+its effective speedup is **1.35x** rather than 1.65x. Final quiet-box figures, 36 pairs each:
+rate median **0.7675** (pooled 0.7421), tree median **0.5695** (pooled 0.4719), combined time to
+depth 8 **0.7420**. Both quantities trip the median-versus-pooled warning. The pooled estimator had been overstating
 the bundle's benefit by 21%, and every position still moved the same way -- 12 of 12 below 1.0,
 min 0.234, max 0.732 -- which is the consistent sign that makes the composition legitimate here
 and illegitimate for an evaluation term whose positions span 0.36 to 4.19 in both directions.)

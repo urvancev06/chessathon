@@ -90,6 +90,26 @@ the quantity is meaningful; it does nothing about which sample dominates the ari
 the median even when — especially when — you have just satisfied yourself that the effect is
 clean.
 
+## Pairing per position also makes a timing measurement load-insensitive
+
+A useful side effect, measured rather than assumed. The node-rate ratio of the ordering bundle was
+taken twice: once with a 6-worker fuzz gate on the box, once idle.
+
+```
+                 under load    idle       moved by
+  median          0.7686       0.7675     0.1%
+  pooled          0.7690       0.7421     3.5%
+```
+
+**The median of per-position ratios barely moved; the pooled figure did.** Both arms meet the same
+contention position by position, so shared load largely cancels in the ratio -- while a pooled sum
+is dominated by whichever position happens to be largest, and that position's timing is not
+cancelled by anything.
+
+So a paired-per-position rate measurement does not need an idle machine nearly as badly as it
+looks. Do not queue behind a busy box for one; do check the median against the pooled, because a
+gap between them is the signal that you needed the idle box after all.
+
 ## The term everybody forgets
 
 The arithmetic that looks right is `games x seconds-per-game / workers`. It is wrong by about
