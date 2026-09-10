@@ -47,6 +47,49 @@ print the pooled figure too so a disagreement between them is visible.** If medi
 differ by more than a couple of percent, one position is carrying the answer and neither number
 should be quoted.
 
+## Compose tree x rate only for an ordering change, never for an evaluation term
+
+Asserted from mechanism all through the night of 2026-09-09 and then measured. The same tool, the
+same estimator, the same depth, on the two kinds of change:
+
+```
+ordering change (SEE + continuation history)   12 of 12 positions below 1.0
+                                               median 0.5695, min 0.234, max 0.732
+evaluation term (mobility)                     positions decisively BOTH ways
+                                               median 1.316,  min 0.364, max 4.190
+```
+
+An ordering improvement shrinks the tree by a mechanism with a **sign**: better first moves cause
+more cutoffs, everywhere. So its nodes-to-depth ratio is a real property of the change, and
+multiplying it by the node-rate ratio gives a real time-to-depth figure.
+
+An evaluation term has no such sign. It changes *which* lines look good, so some positions become
+easier to search and some harder — and the spread above is not noise around 1.0, it is decisive
+movement in both directions. **Its nodes-to-depth ratio is not a property of the change; it is a
+property of the sample.** Composing it with the rate produces a number that means nothing, and
+that is how a term measured at "1.7x time-to-depth" was carried into two documents as its cost.
+
+**Rule: for an evaluation change, quote the node rate and stop.** If you want its real cost, only
+a game screen has it.
+
+## A consistent sign does not imply a well-behaved pooled estimate
+
+This is the non-obvious half and it caught someone who had already found the estimator problem
+and fixed the tool.
+
+Having established that the ordering change moved every position the same way, the natural
+prediction was that its pooled ratio would therefore be close to its per-position median. **It was
+not: 0.4719 pooled against 0.5695 median, 21% apart, with all twelve positions on the same side
+of 1.0.**
+
+A pooled sum is a *weighted* average, weighted by tree size. One position with a large tree
+carries it regardless of how consistently the others behave. Consistency of sign controls whether
+the quantity is meaningful; it does nothing about which sample dominates the arithmetic.
+
+**So the estimator rule is not conditional on the effect being messy.** Pair per position and take
+the median even when — especially when — you have just satisfied yourself that the effect is
+clean.
+
 ## The term everybody forgets
 
 The arithmetic that looks right is `games x seconds-per-game / workers`. It is wrong by about
