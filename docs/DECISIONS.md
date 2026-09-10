@@ -2212,3 +2212,35 @@ ordering merge, and nobody did.
 **The instrument worth building afterwards**, and it is worth more than any single Elo item: a
 check that compares the two engines' *behaviour* — node counts or best moves at fixed depth over a
 position corpus — rather than their constants. That would have caught this on the day it entered.
+
+## Staged move generation exists in the specification and not in the shipped engine
+
+Found 10 September, 22:40, while looking for the largest remaining gain. External research put
+staged/lazy move generation at **+39 Elo (MadChess 3.0 Beta 093)** and noted it is worth
+disproportionately more in Python, where generating moves is expensive.
+
+**`mikhail_letal/search.py` already does it.** `STAGE_TT`, `STAGE_CAPTURE`, `STAGE_KILLER`,
+`STAGE_QUIET` and `Engine._staged_moves` yield the table move, then captures, then killers, then
+quiets, so a node that cuts on the table move never generates a quiet at all.
+
+**`mikhail_letal/fastsearch.py` does not.** It calls `gen_pseudo` once (lines 1115 and 1478) and
+generates everything before searching anything.
+
+So this is the second divergence between the two engines, and it points the other way from the
+SEE one: **here the specification is ahead of the build that plays.** An inventory of both
+directions belongs in the report, because "the specification describes a simplified version of the
+shipped engine" is no longer true in either direction.
+
+**Not ported, deliberately, and this is the reasoning rather than an apology.** The compiled engine
+has `gen_captures` but no `gen_quiets`; writing one means mirroring `gen_pseudo`'s structure —
+pawn pushes, double pushes, castling, the 0x88 edge tests — as new code in the most
+correctness-critical function in the project, thirteen hours before the lock, with one machine
+that can currently run a single screen. **A defect in move generation produces an illegal move,
+which loses a game outright rather than slowly.** Perft would catch most of it and I would be
+racing the clock to find out.
+
+The expected value is not the +39: it is +39 multiplied by the probability of writing a new move
+generator correctly on the first attempt with no time to iterate, minus the cost of a bug that
+reaches the freeze.
+
+**It is the first item for after the deadline**, and the specification already contains the design.
