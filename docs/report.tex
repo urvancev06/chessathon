@@ -30,6 +30,20 @@
 \begin{document}
 \maketitle
 
+\begin{center}
+\fbox{\parbox{0.92\textwidth}{\small
+\textbf{This report describes build v1.1 and was not rewritten after it.} Three further builds
+shipped --- v1.2, v1.3 and v1.4 --- and v1.4 was the final submission. Every number below is
+sourced to a v1.0 or v1.1 measurement and is correct for that build; none of it was revised
+upward or downward. What changed after v1.1: principal variation search and incremental Zobrist
+hashing (v1.2), static exchange evaluation in quiescence and a one-ply continuation history
+(v1.3, \textbf{+36} Elo, interval $+19$ to $+53$, 1000 games at the real clock), and a quiescence
+transposition probe with a four-times-larger table, a tighter aspiration window and a history
+malus (v1.4, \textbf{+42} Elo, interval $+10$ to $+74$, 300 games). The current record is
+\code{docs/RESULTS.md}; the plain-language summary is \code{docs/STRATEGY.pdf}; the repository
+\code{README.md} states where the engine actually stands.}}
+\end{center}
+
 \begin{abstract}
 Mikhail LeTal is a chess agent written for AI Chessathon 2026 by a two-person team. The shipped build
 (v1.1, ``Stage 1'') carries its own board representation, move generation, evaluation and search,

@@ -1,5 +1,12 @@
 # Submission guide — Mikhail LeTal
 
+> **Historical, 11 September 2026.** The build named below is **v1.0**; this guide was written for
+> that upload and its procedure was then followed for v1.1, v1.2, v1.3 and v1.4. **v1.4 was the
+> final submission**, and `versions/v1.4/` holds it byte for byte: 14 files, 118,170 bytes zipped,
+> 371,893 unzipped. Uploads are closed, so nothing here is an instruction any more -- the checks
+> it describes (rebuild, compare contents rather than hashes, smoke the extracted zip) are the
+> part worth keeping.
+
 Everything you (the operator) do by hand, in order. Claude never touches your accounts.
 
 ## 0. What you are submitting

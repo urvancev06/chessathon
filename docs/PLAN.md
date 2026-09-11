@@ -1,5 +1,13 @@
 # Plan for the remaining time
 
+> **Superseded, 11 September 2026.** This was written on Tuesday 8 September, while the engine was
+> still interpreted Python, and its whole premise -- "four working sessions left" -- expired with
+> the deadline. It is kept because it is the record of what was planned, and the gap between it
+> and what happened is the interesting part: the numba port at the top of the list was done and
+> was worth what it promised; the neural network further down was built and lost 67 Elo; the
+> Texel fit was tried twice and lost both times. For where the engine actually ended up, read
+> `README.md` and `docs/RESULTS.md`.
+
 Written Tuesday 8 September. Uploads close Friday 11 September, 11:00 London. Four working
 sessions left, so everything here is ordered by strength gained per hour of risk.
 

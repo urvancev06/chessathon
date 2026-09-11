@@ -22,6 +22,18 @@ What each file is for, and which one to open first depending on what you want.
 - **[PROVENANCE.md](PROVENANCE.md)** — where every constant in the shipped engine came from. The
   machine-readable version that ships beside the code is `weights/PROVENANCE.json`.
 
+## If you want to know what did not work
+
+- **[NNUE-NOTES.md](NNUE-NOTES.md)** — the trained evaluation, written before the screen ran so
+  that it is a prediction rather than a reading of a result already in hand. It lost 67 Elo, and
+  the finding is not about the network: four separate checks said it would win, including one
+  built specifically to escape the circularity of the other three. The conclusion is that we have
+  no cheap proxy for playing strength.
+- **[../handoff/](../handoff/)** — per-game post-mortems against Stockfish at depth 18, and the
+  one-off findings that killed ideas: the piece-list rewrite that came out 4.85× slower, the
+  tablebases worth 0.03 points a game, the king-safety term, the cost of every evaluation term
+  considered.
+
 ## If you want the numbers
 
 - **[RESULTS.md](RESULTS.md)** — every measurement, appended in the order it was taken. Arena runs
@@ -33,6 +45,14 @@ What each file is for, and which one to open first depending on what you want.
   log.
 - **[INTEGRATION_NOTES.md](INTEGRATION_NOTES.md)** — what the first integration pass found and
   fixed. Mostly of historical interest now.
+
+## If you want the story rather than the engineering
+
+- **[STRATEGY.tex](STRATEGY.tex)** ([PDF](STRATEGY.pdf)) — written for a reader who is not a chess
+  programmer: where the engine stands, why the network was expected to help and did not, and what
+  would actually be worth doing next.
+- **[PLAN.md](PLAN.md)** — what was planned on 8 September, kept unrevised. The gap between it and
+  what happened is the point.
 
 ## If you are the person submitting
 
