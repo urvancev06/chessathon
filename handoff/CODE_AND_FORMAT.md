@@ -206,7 +206,7 @@ the agent lands and its work is measured.
 
 Two further changes are in **separate worktrees**, so they will not collide with you here but will
 land in `main` soon and may invalidate an audit of `fastsearch.py`:
-`/home/lkmsdx/dev/ct-zobrist` (incremental Zobrist hashing) and `/home/lkmsdx/dev/ct-pvs`
+`(worktree) ct-zobrist` (incremental Zobrist hashing) and `(worktree) ct-pvs`
 (principal variation search, mate-distance pruning, cheaper stand-pat legality, depth-aware LMR).
 
 Everything else — `README.md`, `docs/SUBMISSION_GUIDE.md`, `docs/report.tex`, `docs/PLAN.md`,

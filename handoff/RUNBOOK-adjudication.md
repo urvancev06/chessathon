@@ -26,7 +26,7 @@ either half.
 
 The JSONs are written by each chunk **as it finishes** (`arena_openings` writes at the end of a run,
 not incrementally). `chessathon-5a` knows the path; at the time of writing it is
-`/tmp/claude-1000/-home-lkmsdx-dev-chessathon/86bc896e-*/scratchpad/runs/chunk{0,100,200}.json`.
+a scratch directory as `runs/chunk{0,100,200}.json`.
 
 The tool enforces the rules rather than trusting the operator of it:
 

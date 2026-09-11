@@ -15,14 +15,20 @@ data/webapp_games/
 data/webapp_analysis/
 docs/build/
 claude code brief.md
-docs/report.aux
-docs/report.fls
-docs/report.fdb_latexmk
-docs/report.log
-docs/report.out
-docs/report.synctex.gz
+# LaTeX build leftovers. The .tex and the built .pdf are tracked; nothing in between is.
+docs/*.aux
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.out
+docs/*.synctex.gz
+docs/*.toc
 # Arena and fuzz run logs, and the done-files that mark a background run finished. The
 # measurements themselves belong in docs/RESULTS.md, not in a transcript.
 *.log
 *.done
 data/arena/
+
+# 3-4 man Syzygy tablebases. Measured worth ~0.03 points a game and never packaged by
+# `make zip` -- see handoff/FINDING-tablebases.md. Fetch them yourself if you want to retry
+# the experiment; they are not this repository's to redistribute.
+tb/
