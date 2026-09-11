@@ -290,4 +290,4 @@ Credits: the harness, the baselines and the original starter code are from
 [advitrocks9/aichessathon-starter](https://github.com/advitrocks9/aichessathon-starter), MIT
 licensed, and `harness/` is unmodified because local results are meaningless otherwise. The board
 pieces in the web app are Colin M.L. Burnett's cburnett set, CC BY-SA 3.0. Everything else is MIT
-licensed; see [LICENSE](LICENSE).
+licensed; [LICENSE](LICENSE) is the licence and [NOTICE.md](NOTICE.md) says who holds what.
