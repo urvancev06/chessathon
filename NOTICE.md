@@ -12,8 +12,10 @@ competition's starter and then grew an engine on top of it.
   [advitrocks9/aichessathon-starter](https://github.com/advitrocks9/aichessathon-starter), MIT.
   `harness/` is unmodified, deliberately: it mirrors the competition platform's protocol and
   clock, and editing it would make every local measurement in `docs/RESULTS.md` meaningless.
-- **Copyright (c) 2026 Alexander Urvancev** — everything else: `agent.py`, `mikhail_letal/`,
-  `weights/`, `tools/`, `tests/`, `docs/`, `handoff/`, `app/` and `versions/`.
+- **Copyright (c) 2026 Alexander Urvancev and Yan Beletskiy** — everything else: `agent.py`,
+  `mikhail_letal/`, `weights/`, `tools/`, `tests/`, `docs/`, `handoff/`, `app/` and `versions/`.
+  The two of them are the team that entered AI Chessathon 2026 and the authors of
+  [`docs/report.tex`](docs/report.tex).
 
 ## The exception: the chess pieces
 

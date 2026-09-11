@@ -3,6 +3,13 @@ name: ci
 on:
   push:
   pull_request:
+  # The three-operating-system game matrix is expensive -- GitHub bills macOS minutes at 10x and
+  # Windows at 2x -- and the competition only ever runs Linux. It is worth having, but not on
+  # every push: run it by hand from the Actions tab, or let the weekly schedule catch a portability
+  # regression that nobody was looking for.
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   check:
@@ -34,12 +41,8 @@ jobs:
       - run: uv run python -m pytest -q
 
   games:
-    name: games on ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: games
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v7
@@ -49,5 +52,25 @@ jobs:
       - run: uv sync
       # Two games that have to finish without a crash, an illegal move or a flag,
       # then build the submission zip and play two more out of it.
+      - run: uv run python -m harness.arena --opponent baselines/random --games 2 --base-ms 5000
+      - run: uv run python -m harness.package
+
+  portability:
+    name: games on ${{ matrix.os }}
+    # Only on demand and once a week. This is the job that drained the Actions quota when it ran
+    # on every push: the platform is Linux, so macOS and Windows prove portability, not correctness.
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync
       - run: uv run python -m harness.arena --opponent baselines/random --games 2 --base-ms 5000
       - run: uv run python -m harness.package
