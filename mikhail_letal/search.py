@@ -98,13 +98,25 @@ NULL_MOVE_MIN_DEPTH = 3
 NULL_MOVE_BASE_REDUCTION = 2  # plies taken off the depth of the null-move search ...
 NULL_MOVE_DEPTH_DIVISOR = 6  # ... plus one more per this many plies of remaining depth
 
+# ---------------------------------------------------------------------------------------------
+# The five gates below are OFF, and they are off for a reason worth reading before you turn one
+# on. Each was written after v1.4 froze, each is standard in stronger engines, each is green in
+# the test suite, and every one of them carries a published Elo gain in the comment above it.
+# Screened together against v1.4 over 400 games they measured -20 Elo (-52 to +12). The interval
+# straddles zero, so the honest verdict is "not shown to help", not "shown to hurt" -- but this
+# repository promotes nothing whose interval does not clear zero, so they do not get to be the
+# default. The code stays because the next person to try them should not have to write it again,
+# and because a bundle of six changes measured as one number is the mistake, not the changes:
+# turn them on one at a time and screen each one on its own at the real time control.
+# ---------------------------------------------------------------------------------------------
+
 # Countermove heuristic: the quiet move that refuted the opponent's last move, kept per previous
 # move and tried early. It overlaps the one-ply continuation history we already have -- both are
 # keyed by the previous move -- but they answer different questions: continuation history is a
 # score accumulated over many nodes, the countermove is the single move that most recently
 # refuted this exact reply, and it is available at full strength the first time a position is
 # reached rather than after the table has warmed. Reported around +10 Elo in several engines.
-COUNTERMOVE = True  # switch for bisection; the shipped value is True
+COUNTERMOVE = False  # OFF: see the note above
 
 # Capture history: MVV-LVA ranks a capture by what it takes and what takes it, and nothing else,
 # so it cannot tell a queen-takes-pawn that wins the exchange from one that drops a queen -- only
@@ -112,7 +124,7 @@ COUNTERMOVE = True  # switch for bisection; the shipped value is True
 # caused cutoffs, keyed by the moving piece, the destination and the victim, and breaks MVV-LVA
 # ties with that. Measured +13.97 +- 6.76 (tcheran). It costs one table read per capture in the
 # ordering loop and shares the gravity update the quiet history already uses.
-CAPTURE_HISTORY = True  # switch for bisection; the shipped value is True
+CAPTURE_HISTORY = False  # OFF: see the note above
 # The ordering weight of a capture-history score. Small: it must break ties inside the MVV-LVA
 # band without ever lifting a capture out of it or letting one capture leapfrog a materially
 # better one. MVV-LVA steps are 10 apart, so a range of +-4 orders within a step and never across.
@@ -123,7 +135,7 @@ CAPTURE_HISTORY_WEIGHT = 4
 # alpha, the node is very unlikely to and the whole subtree is skipped. Measured +7.73 +- 4.76
 # (tcheran) and +22 (Stardance). Distinct from futility, which prunes individual quiet moves
 # inside a node this one declines to enter at all.
-RAZORING = True  # switch for bisection; the shipped value is True
+RAZORING = False  # OFF: see the note above
 RAZOR_MAX_DEPTH = 3  # deeper than this the margin cannot be trusted to bound what a search finds
 # Centipawns below alpha, per ply of remaining depth, before the node is razored. Generous
 # because the cost of being wrong is a whole subtree, and the quiescence check below it is what
@@ -134,7 +146,7 @@ RAZOR_MARGIN = 240
 # material; the main search does not, so a queen taking a defended pawn at depth 3 is searched to
 # the end of its own recapture chain in the tree where that costs most. Measured +25.45 +- 9.40
 # (tcheran) as a pruning gate distinct from the ordering use we already have.
-MAIN_SEE_PRUNING = True  # switch for bisection; the shipped value is True
+MAIN_SEE_PRUNING = False  # OFF: see the note above
 # Below this remaining depth only. Deeper than this the move might be a sacrifice whose
 # compensation appears beyond the swap-off's horizon, and the swap-off does not model compensation
 # at all -- it counts material on one square.
@@ -161,7 +173,7 @@ _QS_DEPTH = 0
 # for a badly ordered node, take a ply off and let the shallower search leave the table entry that
 # the next visit orders by. Ed Schroeder, Rebel 2020. Measured +9.66 +- 5.53 (tcheran) and, as the
 # older iterative-deepening form, +10.9 +- 11.7 (Blunder).
-INTERNAL_ITERATIVE_REDUCTION = True  # switch for bisection; the shipped value is True
+INTERNAL_ITERATIVE_REDUCTION = False  # OFF: see the note above
 # Below this remaining depth the lost ply is a larger fraction of the search than the bad ordering
 # costs, and at depth 1-3 the node is nearly a leaf where ordering barely matters.
 IIR_MIN_DEPTH = 4

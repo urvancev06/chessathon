@@ -2218,6 +2218,11 @@ def warm_up(engine: FastEngine, deadline: float | None = None) -> float:
             capture = int(st.moves[1, 0])
             see(pos, capture)
             _least_valuable_attacker(pos.board, (capture >> SQ_BITS) & SQ_MASK, WHITE)
+            # Warmed even when `CAPTURE_HISTORY` is off. The gate is a bisection switch, and a
+            # switch that silently moves a compile onto the clock is not one you can flip safely.
+            _reward_capture_cutoff(pos, st, capture, 1)
+            _punish_capture(pos, st, capture, 1)
+            st.capture_history[:] = 0
         _cont_base(pos, st.moves[1, 0])
         _score_moves(pos, st, 1, count, NO_MOVE)
         _pick_best(st, 1, 0, count)

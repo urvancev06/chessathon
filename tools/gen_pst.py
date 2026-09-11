@@ -372,7 +372,8 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
         ),
         (
             "search.capture_history",
-            f"+-depth * depth with gravity, ordering weight +-{search.CAPTURE_HISTORY_WEIGHT}",
+            f"+-depth * depth with gravity, ordering weight "
+            f"+-{search.CAPTURE_HISTORY_WEIGHT}, on={search.CAPTURE_HISTORY}",
             code,
             "+13.97 +- 6.76 (tcheran)",
             "MVV-LVA ranks a capture by what it takes and what takes it and cannot tell a winning "
@@ -389,7 +390,8 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
         ),
         (
             "search.razoring",
-            f"depth <= {search.RAZOR_MAX_DEPTH}, margin {search.RAZOR_MARGIN} per ply",
+            f"depth <= {search.RAZOR_MAX_DEPTH}, margin {search.RAZOR_MARGIN} per ply, "
+            f"on={search.RAZORING}",
             code,
             "+7.73 +- 4.76 (tcheran); +22 (Stardance)",
             "a node far below alpha drops straight into quiescence; if even that cannot reach "
@@ -398,7 +400,8 @@ def search_rows(run_id: str = SEARCH_RUN_ID) -> list[dict[str, str]]:
         ),
         (
             "search.main_see_pruning",
-            f"depth <= {search.MAIN_SEE_MAX_DEPTH}, margin {search.MAIN_SEE_MARGIN} per ply",
+            f"depth <= {search.MAIN_SEE_MAX_DEPTH}, margin {search.MAIN_SEE_MARGIN} per ply, "
+            f"on={search.MAIN_SEE_PRUNING}",
             code,
             "+25.45 +- 9.40 (tcheran)",
             "quiescence has skipped losing captures since the ordering bundle; the main search "
